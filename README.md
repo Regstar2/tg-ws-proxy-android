@@ -104,7 +104,7 @@ Release-подпись хранится только локально. Keystore 
 ```powershell
 $env:KEYSTORE_PASSWORD="..."
 $env:KEY_PASSWORD="..."
-$env:KEY_ALIAS="amurcanov"
+$env:KEY_ALIAS="tgwsproxy"
 .\scripts\build-apk.ps1 -Configuration Release
 ```
 
