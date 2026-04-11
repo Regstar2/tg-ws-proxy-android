@@ -11,3 +11,8 @@ artifacts/baselines/
 app/src/main/jniLibs/**/*.so
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+secrets/
