@@ -8,7 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
-import android.provider.Settings
+import android.provider.Settings as AndroidSettings
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -153,7 +154,7 @@ class MainActivity : ComponentActivity() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
                 try {
-                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    val intent = Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
                     intent.data = Uri.parse("package:$packageName")
                     startActivity(intent)
                 } catch (e: Exception) {
@@ -339,6 +340,15 @@ private fun ProxyScreen(
                     )
                 },
                 actions = {
+                    if (currentPage == ProxyScreenPage.Main) {
+                        IconButton(onClick = { currentPage = ProxyScreenPage.Settings }) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.action_settings),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                     TextButton(
                         onClick = { showInfoModal = true },
                         colors = ButtonDefaults.textButtonColors(
@@ -507,18 +517,6 @@ private fun ProxyScreen(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(stringResource(R.string.copy_proxy_address), fontWeight = FontWeight.SemiBold)
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedButton(
-                        onClick = { currentPage = ProxyScreenPage.Settings },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(stringResource(R.string.action_settings), fontWeight = FontWeight.SemiBold)
                     }
                 } else {
                     OutlinedButton(
