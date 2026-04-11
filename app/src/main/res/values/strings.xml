@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Telegram WS Proxy</string>
+    <string name="app_name">TgWsProxy</string>
     <string name="screen_main_title">TgWsProxy</string>
     <string name="screen_settings_title">Settings</string>
     <string name="action_info">info</string>
@@ -48,7 +48,7 @@
     <string name="logs_disabled">Log collection is disabled.</string>
     <string name="info_title">Version %1$s</string>
     <string name="info_current_build_title">About the app</string>
-    <string name="info_current_build_body">TG WS Proxy for Android runs a local SOCKS5 proxy for Telegram and routes supported MTProto traffic through WebSocket connections.</string>
+    <string name="info_current_build_body">TgWsProxy for Android runs a local SOCKS5 proxy for Telegram and routes supported MTProto traffic through WebSocket connections.</string>
     <string name="info_mobile_body">If your mobile network blocks direct Telegram routes, use CF only: traffic will go through the configured Cloudflare domain, pclead.co.uk by default.</string>
     <string name="info_attribution_body">This app is based on the Android fork by amurcanov and runtime ideas/code from Flowseal tg-ws-proxy. The original projects and license notes are kept in the repository.</string>
     <string name="info_usage_body">Start the proxy, then tap “Apply in Telegram”. For diagnostics, enable logs temporarily and save them to the selected report folder.</string>

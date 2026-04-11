@@ -120,7 +120,7 @@ object UpstreamDiagnostics {
         var dcTcpSuccesses = 0
         var kwsSuccesses = 0
 
-        report.appendLine("Telegram WS Proxy upstream sweep")
+        report.appendLine("TgWsProxy upstream sweep")
         report.appendLine("started_at=${humanStamp(startedAt)}")
         report.appendLine("proxy_running=$proxyRunning")
         report.appendLine("candidate_count=${candidates.size}")

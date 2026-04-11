@@ -24,7 +24,7 @@ object RuntimeLogExport {
         val exportedAt = Date()
         val fileName = "runtime-log-${fileStamp(exportedAt)}.txt"
         val payload = buildString {
-            appendLine("Telegram WS Proxy runtime log export")
+            appendLine("TgWsProxy runtime log export")
             appendLine("saved_at=${humanStamp(exportedAt)}")
             appendLine("proxy_running=$proxyRunning")
             appendLine("line_count=${logs.size}")

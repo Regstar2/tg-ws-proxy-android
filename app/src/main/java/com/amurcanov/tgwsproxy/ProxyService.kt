@@ -174,7 +174,7 @@ class ProxyService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Telegram WS Proxy")
+            .setContentTitle("TgWsProxy")
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_notification) // Local pure vector for Android 16 compatibility
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить", stopPendingIntent)
