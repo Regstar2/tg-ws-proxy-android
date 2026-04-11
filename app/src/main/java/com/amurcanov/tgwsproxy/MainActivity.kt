@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
@@ -77,7 +78,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.2.1-ui"
+private const val APP_INFO_VERSION = "1.2.2-ui"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -100,7 +101,24 @@ private enum class LanguageMode {
     English,
 }
 
-private fun Context.withLocale(locale: Locale): Context {
+private fun parseLanguageMode(value: String?): LanguageMode {
+    return runCatching { LanguageMode.valueOf(value ?: LanguageMode.System.name) }.getOrDefault(LanguageMode.System)
+}
+
+@Suppress("DEPRECATION")
+private fun Context.applyLanguageMode(mode: LanguageMode) {
+    val locale = when (mode) {
+        LanguageMode.System -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                LocaleList.getDefault().get(0)
+            } else {
+                Locale.getDefault()
+            }
+        }
+        LanguageMode.Russian -> Locale("ru")
+        LanguageMode.English -> Locale.ENGLISH
+    }
+    Locale.setDefault(locale)
     val config = Configuration(resources.configuration)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         config.setLocales(LocaleList(locale))
@@ -108,7 +126,7 @@ private fun Context.withLocale(locale: Locale): Context {
         @Suppress("DEPRECATION")
         config.setLocale(locale)
     }
-    return createConfigurationContext(config)
+    resources.updateConfiguration(config, resources.displayMetrics)
 }
 
 class MainActivity : ComponentActivity() {
@@ -121,6 +139,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val activityPrefs = getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
+        applyLanguageMode(parseLanguageMode(activityPrefs.getString("language_mode", LanguageMode.System.name)))
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -137,19 +158,12 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(prefs.getString("language_mode", LanguageMode.System.name) ?: LanguageMode.System.name)
             }
             val themeMode = runCatching { ThemeMode.valueOf(themeModeName) }.getOrDefault(ThemeMode.System)
-            val languageMode = runCatching { LanguageMode.valueOf(languageModeName) }.getOrDefault(LanguageMode.System)
+            val languageMode = parseLanguageMode(languageModeName)
             val systemDarkTheme = isSystemInDarkTheme()
             val isDarkTheme = when (themeMode) {
                 ThemeMode.System -> systemDarkTheme
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true
-            }
-            val localizedContext = remember(context, languageMode) {
-                when (languageMode) {
-                    LanguageMode.System -> context
-                    LanguageMode.Russian -> context.withLocale(Locale("ru"))
-                    LanguageMode.English -> context.withLocale(Locale.ENGLISH)
-                }
             }
 
             // Dynamic colors logic for Android 12+ (Material You)
@@ -162,24 +176,26 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = colorScheme) {
-                CompositionLocalProvider(LocalContext provides localizedContext) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
-                        ProxyScreen(
-                            themeMode = themeMode,
-                            onThemeModeChange = {
-                                themeModeName = it.name
-                                prefs.edit().putString("theme_mode", it.name).apply()
-                            },
-                            languageMode = languageMode,
-                            onLanguageModeChange = {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    ProxyScreen(
+                        themeMode = themeMode,
+                        onThemeModeChange = {
+                            themeModeName = it.name
+                            prefs.edit().putString("theme_mode", it.name).apply()
+                        },
+                        languageMode = languageMode,
+                        onLanguageModeChange = {
+                            if (it != languageMode) {
                                 languageModeName = it.name
                                 prefs.edit().putString("language_mode", it.name).apply()
+                                applyLanguageMode(it)
+                                recreate()
                             }
-                        )
-                    }
+                        }
+                    )
                 }
             }
         }
@@ -194,7 +210,7 @@ class MainActivity : ComponentActivity() {
                     intent.data = Uri.parse("package:$packageName")
                     startActivity(intent)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "Не удалось запросить работу в фоне", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.background_permission_failed), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -249,9 +265,9 @@ private fun ProxyScreen(
             )
             isSavingLogs = false
             val status = if (report.savedUri != null) {
-                "Логи сохранены: ${report.fileName} (${report.lineCount} строк)"
+                context.getString(R.string.logs_saved_status, report.fileName, report.lineCount)
             } else {
-                "Не удалось сохранить логи: ${report.fileName}"
+                context.getString(R.string.logs_save_failed_status, report.fileName)
             }
             lastLogStatus = status
             prefs.edit().putString("last_log_status", status).apply()
@@ -266,7 +282,7 @@ private fun ProxyScreen(
         pendingFolderAction = null
         if (uri == null) {
             if (pendingAction != null) {
-                Toast.makeText(context, "Папка для логов не выбрана", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.report_folder_not_selected), Toast.LENGTH_SHORT).show()
             }
             return@rememberLauncherForActivityResult
         }
@@ -281,7 +297,7 @@ private fun ProxyScreen(
 
         reportFolderUriText = uri.toString()
         prefs.edit().putString("report_folder_uri", reportFolderUriText).apply()
-        Toast.makeText(context, "Папка для логов сохранена", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.report_folder_saved), Toast.LENGTH_SHORT).show()
 
         when (pendingAction) {
             PendingFolderAction.SaveRuntimeLogs -> runRuntimeLogSave(uri)
@@ -312,7 +328,7 @@ private fun ProxyScreen(
     val startProxyAction by rememberUpdatedState {
         val port = portText.toIntOrNull()
         if (port == null) {
-            Toast.makeText(context, "Неверный порт", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
         val parsedIps = buildList {
@@ -327,7 +343,7 @@ private fun ProxyScreen(
         }.joinToString(",")
 
         if (parsedIps.isEmpty()) {
-            Toast.makeText(context, "Впишите IP хотя бы для одного DC", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.dc_ip_required), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
         
@@ -585,7 +601,7 @@ private fun ProxyScreen(
                         portText = it
                         prefs.edit().putString("port", it).apply()
                     },
-                    label = { Text("Порт прокси") },
+                    label = { Text(stringResource(R.string.proxy_port_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = RoundedCornerShape(24.dp),
                     modifier = Modifier
@@ -607,9 +623,9 @@ private fun ProxyScreen(
                         .clickable { showIpSetupModal = true }
                 ) {
                     OutlinedTextField(
-                        value = "Настроить адреса",
+                        value = stringResource(R.string.configure_addresses),
                         onValueChange = {},
-                        label = { Text("Настройка IP") },
+                        label = { Text(stringResource(R.string.ip_settings_label)) },
                         enabled = false,
                         shape = RoundedCornerShape(24.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -623,7 +639,7 @@ private fun ProxyScreen(
 
                 // Pool size selector
                 Text(
-                    "Размер пула WS",
+                    stringResource(R.string.ws_pool_size_label),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -797,37 +813,63 @@ private fun ProxyScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                 )
-                Column(
+                val languageOptions = listOf(
+                    LanguageMode.System to stringResource(R.string.language_system),
+                    LanguageMode.Russian to stringResource(R.string.language_russian),
+                    LanguageMode.English to stringResource(R.string.language_english)
+                )
+                val selectedLanguageLabel = languageOptions
+                    .firstOrNull { it.first == languageMode }
+                    ?.second
+                    ?: stringResource(R.string.language_system)
+                var languageMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .padding(bottom = 16.dp)
                 ) {
-                    listOf(
-                        LanguageMode.System to stringResource(R.string.language_system),
-                        LanguageMode.Russian to stringResource(R.string.language_russian),
-                        LanguageMode.English to stringResource(R.string.language_english)
-                    ).forEach { (mode, label) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { onLanguageModeChange(mode) }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = languageMode == mode,
-                                onClick = { onLanguageModeChange(mode) }
-                            )
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(start = 8.dp)
+                    OutlinedButton(
+                        onClick = { languageMenuExpanded = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = selectedLanguageLabel,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = languageMenuExpanded,
+                        onDismissRequest = { languageMenuExpanded = false }
+                    ) {
+                        languageOptions.forEach { (mode, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    languageMenuExpanded = false
+                                    onLanguageModeChange(mode)
+                                }
                             )
                         }
                     }
                 }
+
+                Text(
+                    stringResource(R.string.language_restart_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                )
 
                 SectionTitle(stringResource(R.string.section_logs))
 
@@ -865,7 +907,7 @@ private fun ProxyScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        "Папка для логов",
+                        stringResource(R.string.report_folder_button),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -878,9 +920,9 @@ private fun ProxyScreen(
                         text = buildString {
                             append(
                                 if (reportFolderUriText.isBlank()) {
-                                    "Папка для логов не выбрана"
+                                    stringResource(R.string.report_folder_not_selected)
                                 } else {
-                                    "Папка для логов выбрана"
+                                    stringResource(R.string.report_folder_selected)
                                 }
                             )
                             if (lastLogStatus.isNotBlank()) {
@@ -911,7 +953,7 @@ private fun ProxyScreen(
                     )
                 ) {
                     Text(
-                        if (showLogs) "Скрыть логи" else "Показать логи",
+                        if (showLogs) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -936,7 +978,7 @@ private fun ProxyScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        if (isSavingLogs) "Сохранение..." else "Сохранить логи",
+                        if (isSavingLogs) stringResource(R.string.saving_logs) else stringResource(R.string.save_logs),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1030,13 +1072,13 @@ private fun ProxyScreen(
                             onClick = {
                                 val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
                                 cm?.setPrimaryClip(ClipData.newPlainText("Logs", logs.joinToString("\n")))
-                                Toast.makeText(context, "Логи скопированы!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.logs_copied), Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
                         ) {
                             Icon(
                                 Icons.Default.ContentCopy,
-                                "Копировать логи",
+                                stringResource(R.string.copy_logs),
                                 tint = primaryColor.copy(alpha = 0.6f)
                             )
                         }
@@ -1156,7 +1198,7 @@ fun IpSetupDialog(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    text = "Пул датацентров", 
+                    text = stringResource(R.string.dc_pool_title),
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(bottom = 20.dp),
@@ -1172,7 +1214,7 @@ fun IpSetupDialog(
                 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {
-                        Text("Готово", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.done), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -1244,12 +1286,12 @@ fun InfoDialog(onDismiss: () -> Unit) {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                         context.startActivity(intent)
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Не удалось открыть ссылку", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.open_link_failed), Toast.LENGTH_SHORT).show()
                     }
                 }
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Оригинальный runtime tg-ws-proxy:", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.runtime_link_label), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         text = "→ Flowseal",
                         color = MaterialTheme.colorScheme.primary,
@@ -1260,7 +1302,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Исходный Android-форк:", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.android_fork_link_label), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         text = "→ amurcanov/tg-ws-proxy-android",
                         color = MaterialTheme.colorScheme.primary,
@@ -1381,7 +1423,7 @@ fun openTelegram(context: Context, url: String) {
         fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(fallbackIntent)
     } catch (e: Exception) {
-        Toast.makeText(context, "Telegram не найден!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.telegram_not_found), Toast.LENGTH_SHORT).show()
     }
 }
 

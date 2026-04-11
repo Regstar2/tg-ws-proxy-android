@@ -58,7 +58,7 @@ class ProxyService : Service() {
     private fun startProxy(port: Int, ips: String, poolSize: Int = 4) {
         if (_isRunning.value) return
         
-        val notification = createNotification("Запуск прокси...")
+        val notification = createNotification(getString(R.string.notification_starting))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -83,7 +83,7 @@ class ProxyService : Service() {
                     val downRaw = extractStat(rawStats, "down=")
                     
                     val totalBytes = parseHumanBytes(upRaw) + parseHumanBytes(downRaw)
-                    val text = "Трафик: ${formatBytes(totalBytes)}"
+                    val text = getString(R.string.notification_traffic, formatBytes(totalBytes))
                     val manager = getSystemService(NotificationManager::class.java)
                     manager?.notify(NOTIFICATION_ID, createNotification(text))
                 }
@@ -157,7 +157,7 @@ class ProxyService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
-                "Фоновый Прокси",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
@@ -177,7 +177,7 @@ class ProxyService : Service() {
             .setContentTitle("TgWsProxy")
             .setContentText(content)
             .setSmallIcon(R.drawable.ic_notification) // Local pure vector for Android 16 compatibility
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отключить", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.notification_disable), stopPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true) // prevent vibrate/sound on updates
             .build()
