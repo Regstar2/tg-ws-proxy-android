@@ -3,6 +3,23 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
+    val script = rootProject.file("scripts/build-native-android.ps1")
+    val source = rootProject.file("tg-ws-proxy.go")
+    val output = project.file("src/main/jniLibs/arm64-v8a/libtgwsproxy.so")
+    val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
+
+    inputs.file(script)
+    inputs.file(source)
+    outputs.file(output)
+    workingDir = rootProject.projectDir
+    commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildNativeAndroid)
+}
+
 android {
     namespace = "com.amurcanov.tgwsproxy"
     compileSdk = 35
@@ -11,8 +28,8 @@ android {
         applicationId = "com.amurcanov.tgwsproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.4"
+        versionCode = 2
+        versionName = "1.1.0-cf"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

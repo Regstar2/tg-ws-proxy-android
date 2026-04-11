@@ -13,6 +13,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -20,10 +21,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -39,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -55,6 +54,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.math.max
 
 // DataCenters list removed
 
@@ -74,6 +74,12 @@ val telegramApps = listOf(
     "cc.modery.cherrygram",
     "io.github.nextalone.nagram"
 )
+
+private const val APP_INFO_VERSION = "1.1.0-cf"
+
+private enum class PendingFolderAction {
+    SaveRuntimeLogs,
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -140,17 +146,90 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
+    var dc1Text by remember { mutableStateOf(prefs.getString("dc1", "149.154.167.220") ?: "149.154.167.220") }
     var dc2Text by remember { mutableStateOf(prefs.getString("dc2", "149.154.167.220") ?: "149.154.167.220") }
     var dc4Text by remember { mutableStateOf(prefs.getString("dc4", "149.154.167.220") ?: "149.154.167.220") }
     var dc203Text by remember { mutableStateOf(prefs.getString("dc203", "149.154.167.220") ?: "149.154.167.220") }
     var portText by remember { mutableStateOf(prefs.getString("port", "1080") ?: "1080") }
     var selectedPoolSize by remember { mutableStateOf(prefs.getInt("pool", 4)) }
+    var cfProxyEnabled by remember { mutableStateOf(prefs.getBoolean("cfproxy_enabled", true)) }
+    var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
+    var cfProxyOnly by remember { mutableStateOf(prefs.getBoolean("cfproxy_only", false)) }
+    var cfProxyDomainText by remember { mutableStateOf(prefs.getString("cfproxy_domain", "pclead.co.uk") ?: "pclead.co.uk") }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
     var showIpSetupModal by remember { mutableStateOf(false) }
+    var reportFolderUriText by remember { mutableStateOf(prefs.getString("report_folder_uri", "") ?: "") }
+    var lastLogStatus by remember { mutableStateOf(prefs.getString("last_log_status", "") ?: "") }
+    var isSavingLogs by remember { mutableStateOf(false) }
+    var pendingFolderAction by remember { mutableStateOf<PendingFolderAction?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val logs by LogManager.logs.collectAsStateWithLifecycle()
+    val screenScroll = rememberScrollState()
+
+    val runRuntimeLogSave by rememberUpdatedState<(Uri) -> Unit> { treeUri ->
+        if (isSavingLogs) return@rememberUpdatedState
+        isSavingLogs = true
+        val snapshot = logs
+        coroutineScope.launch {
+            val report = RuntimeLogExport.save(
+                context = context,
+                treeUri = treeUri,
+                logs = snapshot,
+                proxyRunning = isRunning
+            )
+            isSavingLogs = false
+            val status = if (report.savedUri != null) {
+                "Логи сохранены: ${report.fileName} (${report.lineCount} строк)"
+            } else {
+                "Не удалось сохранить логи: ${report.fileName}"
+            }
+            lastLogStatus = status
+            prefs.edit().putString("last_log_status", status).apply()
+            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val reportFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        val pendingAction = pendingFolderAction
+        pendingFolderAction = null
+        if (uri == null) {
+            if (pendingAction != null) {
+                Toast.makeText(context, "Папка для логов не выбрана", Toast.LENGTH_SHORT).show()
+            }
+            return@rememberLauncherForActivityResult
+        }
+
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+        }
+
+        reportFolderUriText = uri.toString()
+        prefs.edit().putString("report_folder_uri", reportFolderUriText).apply()
+        Toast.makeText(context, "Папка для логов сохранена", Toast.LENGTH_SHORT).show()
+
+        when (pendingAction) {
+            PendingFolderAction.SaveRuntimeLogs -> runRuntimeLogSave(uri)
+            null -> Unit
+        }
+    }
+
+    DisposableEffect(Unit) {
+        LogManager.startListening()
+        onDispose { LogManager.stopListening() }
+    }
 
     LaunchedEffect(showLogs) {
-        if (showLogs) LogManager.startListening() else LogManager.stopListening()
+        if (showLogs) {
+            delay(120)
+            screenScroll.animateScrollTo(screenScroll.maxValue)
+        }
     }
 
     val startProxyAction by rememberUpdatedState {
@@ -160,9 +239,14 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
             return@rememberUpdatedState
         }
         val parsedIps = buildList {
+            if (dc1Text.isNotBlank()) add("1:${dc1Text.trim()}")
             if (dc2Text.isNotBlank()) add("2:${dc2Text.trim()}")
             if (dc4Text.isNotBlank()) add("4:${dc4Text.trim()}")
             if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
+            add("@cfproxy=${if (cfProxyEnabled) 1 else 0}")
+            add("@cfproxy_priority=${if (cfProxyPriority) 1 else 0}")
+            add("@cfproxy_only=${if (cfProxyOnly) 1 else 0}")
+            if (cfProxyDomainText.isNotBlank()) add("@cfproxy_domain=${cfProxyDomainText.trim()}")
         }.joinToString(",")
 
         if (parsedIps.isEmpty()) {
@@ -243,9 +327,10 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
             // Constrain content width for tablets to look good anywhere
             Column(
                 modifier = Modifier
-                    .fillMaxHeight()
+                    .fillMaxSize()
                     .widthIn(max = 600.dp)
-                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                    .padding(horizontal = 24.dp, vertical = 24.dp)
+                    .verticalScroll(screenScroll),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top // Push top fields higher
             ) {
@@ -330,6 +415,100 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                     }
                 }
 
+                Text(
+                    "Cloudflare Proxy",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                )
+
+                OutlinedTextField(
+                    value = cfProxyDomainText,
+                    onValueChange = {
+                        cfProxyDomainText = it
+                        prefs.edit().putString("cfproxy_domain", it).apply()
+                    },
+                    enabled = !isRunning,
+                    label = { Text("CF domain") },
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    singleLine = true
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("CF proxy", style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = cfProxyEnabled,
+                        enabled = !isRunning,
+                        onCheckedChange = {
+                            cfProxyEnabled = it
+                            if (!it) {
+                                cfProxyOnly = false
+                                prefs.edit().putBoolean("cfproxy_only", false).apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("CF first", style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = cfProxyPriority,
+                        enabled = !isRunning && cfProxyEnabled,
+                        onCheckedChange = {
+                            cfProxyPriority = it
+                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("CF only", style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = cfProxyOnly,
+                        enabled = !isRunning,
+                        onCheckedChange = {
+                            cfProxyOnly = it
+                            if (it) {
+                                cfProxyEnabled = true
+                                cfProxyPriority = true
+                                prefs.edit()
+                                    .putBoolean("cfproxy_enabled", true)
+                                    .putBoolean("cfproxy_priority", true)
+                                    .apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_only", it).apply()
+                        }
+                    )
+                }
+
                 // Proxy Start/Stop Button
                 AnimatedContent(
                     targetState = isRunning,
@@ -378,6 +557,45 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                FilledTonalButton(
+                    onClick = { reportFolderLauncher.launch(null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "Папка для логов",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (reportFolderUriText.isNotBlank() || lastLogStatus.isNotBlank()) {
+                    Text(
+                        text = buildString {
+                            append(
+                                if (reportFolderUriText.isBlank()) {
+                                    "Папка для логов не выбрана"
+                                } else {
+                                    "Папка для логов выбрана"
+                                }
+                            )
+                            if (lastLogStatus.isNotBlank()) {
+                                append("\n")
+                                append(lastLogStatus)
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    )
+                }
+
                 // Logs toggle button — same style as main buttons
                 Button(
                     onClick = { showLogs = !showLogs },
@@ -397,10 +615,37 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                     )
                 }
 
+                Spacer(modifier = Modifier.height(8.dp))
+
+                FilledTonalButton(
+                    onClick = {
+                        if (isSavingLogs) return@FilledTonalButton
+                        if (reportFolderUriText.isBlank()) {
+                            pendingFolderAction = PendingFolderAction.SaveRuntimeLogs
+                            reportFolderLauncher.launch(null)
+                        } else {
+                            runRuntimeLogSave(Uri.parse(reportFolderUriText))
+                        }
+                    },
+                    enabled = !isSavingLogs,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        if (isSavingLogs) "Сохранение..." else "Сохранить логи",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 if (showLogs) {
-                    val logs by LogManager.logs.collectAsStateWithLifecycle()
                     val scroll = rememberScrollState()
                     val primaryColor = MaterialTheme.colorScheme.primary
+                    val density = LocalDensity.current
+                    val trackPadding = 12.dp
+                    val scrollbarWidth = 4.dp
 
                     // Auto-scroll to bottom when new logs arrive
                     LaunchedEffect(logs.size) {
@@ -409,14 +654,28 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                    Text(
+                        text = "Runtime logs (${logs.size})",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    )
+
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 220.dp, max = 320.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Text(
-                            text = logs.joinToString("\n") { formatLogLine(it) },
+                            text = if (logs.isEmpty()) {
+                                "Logs will appear here after the proxy starts."
+                            } else {
+                                logs.joinToString("\n") { formatLogLine(it) }
+                            },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(start = 12.dp, end = 40.dp, top = 12.dp, bottom = 12.dp)
@@ -424,6 +683,44 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                             color = primaryColor,
                             style = MaterialTheme.typography.bodySmall,
                             lineHeight = MaterialTheme.typography.bodySmall.fontSize * 1.5
+                        )
+
+                        val trackHeightPx = max(
+                            with(density) { maxHeight.toPx() - trackPadding.toPx() * 2 },
+                            0f
+                        )
+                        val maxScrollPx = scroll.maxValue.toFloat()
+                        val minThumbPx = with(density) { 28.dp.toPx() }
+                        val thumbHeightPx = if (trackHeightPx <= 0f || maxScrollPx <= 0f) {
+                            trackHeightPx
+                        } else {
+                            max(minThumbPx, (trackHeightPx * trackHeightPx) / (trackHeightPx + maxScrollPx))
+                        }
+                        val thumbOffsetPx = if (maxScrollPx <= 0f || trackHeightPx <= thumbHeightPx) {
+                            0f
+                        } else {
+                            (scroll.value / maxScrollPx) * (trackHeightPx - thumbHeightPx)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = trackPadding, bottom = trackPadding, end = 8.dp)
+                                .fillMaxHeight()
+                                .width(scrollbarWidth)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = trackPadding, end = 8.dp)
+                                .offset(y = with(density) { thumbOffsetPx.toDp() })
+                                .width(scrollbarWidth)
+                                .height(with(density) { thumbHeightPx.toDp() })
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
                         )
                         IconButton(
                             onClick = {
@@ -441,7 +738,7 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                         }
                     }
                 } else {
-                    Spacer(modifier = Modifier.weight(1f))
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
         }
@@ -453,6 +750,11 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
 
     if (showIpSetupModal) {
         IpSetupDialog(
+            dc1Text = dc1Text,
+            onDc1Change = {
+                dc1Text = it
+                prefs.edit().putString("dc1", it).apply()
+            },
             dc2Text = dc2Text,
             onDc2Change = { 
                 dc2Text = it
@@ -475,6 +777,7 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
 
 @Composable
 fun IpSetupDialog(
+    dc1Text: String, onDc1Change: (String) -> Unit,
     dc2Text: String, onDc2Change: (String) -> Unit,
     dc4Text: String, onDc4Change: (String) -> Unit,
     dc203Text: String, onDc203Change: (String) -> Unit,
@@ -520,6 +823,7 @@ fun IpSetupDialog(
                     fontWeight = FontWeight.SemiBold
                 )
                 
+                dcInput("DC1", dc1Text, onDc1Change)
                 dcInput("DC2", dc2Text, onDc2Change)
                 dcInput("DC4", dc4Text, onDc4Change)
                 dcInput("DC203", dc203Text, onDc203Change)
@@ -551,7 +855,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Версия 1.0.4",
+                    text = "Версия $APP_INFO_VERSION",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
@@ -559,30 +863,37 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Что нового:",
+                    text = "Что важно в этой сборке:",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
                 Text(
-                    text = "1. Убран выбор пула датацентров",
-                    color = Color(0xFFD32F2F),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-
-                Text(
-                    text = "2. Добавлена возможность ввода IP датацентров вручную",
-                    color = Color(0xFF388E3C),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-
-                Text(
-                    text = "3. При использовании IP адреса, указанного по умолчанию (149.154.167.220), вспомогательные средства (VPN и прочее) не требуются.",
+                    text = "1. Основной рабочий режим сейчас — CF proxy через hostname dial.",
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                Text(
+                    text = "2. Кнопка теста upstream убрана из интерфейса, чтобы не мешать повседневной работе.",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                Text(
+                    text = "3. Папка экспорта теперь нужна в первую очередь для сохранения runtime-логов и быстрых проверок после сбоев.",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Text(
+                    text = "Эта сборка не является исходным проектом: она собрана поверх Android-форка и сохраняет атрибуцию исходной работе.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
@@ -598,7 +909,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 }
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Оригинальный автор tg-ws-proxy:", style = MaterialTheme.typography.bodyMedium)
+                    Text("Оригинальный runtime tg-ws-proxy:", style = MaterialTheme.typography.bodyMedium)
                     Text(
                         text = "→ Flowseal",
                         color = MaterialTheme.colorScheme.primary,
@@ -609,24 +920,31 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text("Человек, благодаря кому вышла v1.0.4:", style = MaterialTheme.typography.bodyMedium)
+                    Text("Исходный Android-форк:", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = "→ IMDelewer",
+                        text = "→ amurcanov/tg-ws-proxy-android",
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/IMDelewer") }
+                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/amurcanov/tg-ws-proxy-android") }
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
+                    text = "Текущая сборка — локальный рабочий fork этого Android-проекта с диагностическими и сетевыми правками под реальный сценарий использования.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Text(
                     text = buildAnnotatedString {
-                        append("Ознакомиться с актуальным списком CIDR датацентров Telegram можно ")
+                        append("Актуальный список CIDR Telegram можно проверить ")
                         withStyle(style = SpanStyle(
                             color = MaterialTheme.colorScheme.primary,
                             textDecoration = TextDecoration.Underline
                         )) {
-                            append("тут")
+                            append("здесь")
                         }
                     },
                     style = MaterialTheme.typography.bodyMedium,
@@ -637,11 +955,8 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Вероятнее всего, изменение IP адресов в графах DC может нарушить работу прокси без работающего VPN. " +
-                           "Не советую ничего менять без необходимости. Однако, если у вас наблюдаются проблемы в Telegram " +
-                           "при использовании адреса 149.154.167.220, вы можете заменить его на другие IP из актуальных списков. " +
-                           "Помните, что в таком случае вам может потребоваться включённый VPN — этот двойственный способ (Proxy + VPN) " +
-                           "зачастую решает проблемы соединения, если Telegram отказывается стабильно работать.",
+                    text = "Если на мобильной сети снова появятся задержки или обрывы, в первую очередь проверяйте режим CF proxy, домен и экспортированные runtime-логи. " +
+                           "Прямой IPv4/IPv6 путь к Telegram в этой сборке сейчас не является основной ставкой.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 16.sp
@@ -717,31 +1032,33 @@ fun openTelegram(context: Context, url: String) {
 }
 
 object LogManager {
+    private const val LOG_TAG = "TgWsProxy"
+    private const val MAX_LOG_LINES = 400
     val logs = MutableStateFlow<List<String>>(emptyList())
     private var job: Job? = null
     private var logcatProcess: Process? = null
 
     fun startListening() {
         if (job?.isActive == true) return
+        logs.value = emptyList()
         job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Clear old logs just to avoid stale
-                Runtime.getRuntime().exec("logcat -c").waitFor()
-                val process = Runtime.getRuntime().exec(arrayOf("logcat", "-v", "time", "*:D"))
+                val process = Runtime.getRuntime().exec(arrayOf("logcat", "-v", "time", "-s", "$LOG_TAG:I"))
                 logcatProcess = process
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
-                
-                val myPid = android.os.Process.myPid().toString()
+
                 while (isActive) {
                     val line = reader.readLine() ?: break
-                    if (line.contains(myPid) && (line.contains("INFO") || line.contains("WARN") || line.contains("ERROR") || line.contains("DEBUG"))) {
-                        logs.update { current ->
-                            val n = current + line
-                            if (n.size > 30) n.takeLast(30) else n
-                        }
+                    logs.update { current ->
+                        val next = current + line
+                        if (next.size > MAX_LOG_LINES) next.takeLast(MAX_LOG_LINES) else next
                     }
                 }
             } catch (e: Exception) {
+                logs.update { current ->
+                    val next = current + "ERROR logcat reader failed: ${e.javaClass.simpleName}"
+                    if (next.size > MAX_LOG_LINES) next.takeLast(MAX_LOG_LINES) else next
+                }
             } finally {
                 logcatProcess?.destroy()
                 logcatProcess = null

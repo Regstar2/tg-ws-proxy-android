@@ -25,6 +25,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -47,13 +48,14 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	defaultPort    = 1080
-	tcpNodelay     = true
-	defaultRecvBuf = 256 * 1024
-	defaultSendBuf = 256 * 1024
-	defaultPoolSz  = 4
-	wsPoolMaxAge   = 60.0
-	wsBridgeIdle   = 120.0
+	defaultPort          = 1080
+	tcpNodelay           = true
+	defaultRecvBuf       = 256 * 1024
+	defaultSendBuf       = 256 * 1024
+	defaultPoolSz        = 4
+	defaultCfProxyDomain = "pclead.co.uk"
+	wsPoolMaxAge         = 60.0
+	wsBridgeIdle         = 120.0
 
 	dcFailCooldown       = 30.0
 	wsFailTimeout        = 2.0
@@ -165,9 +167,9 @@ var ipToDC = map[string]dcInfo{
 	"149.154.175.53": {1, false}, "149.154.175.54": {1, false},
 	"149.154.175.52": {1, true},
 	// DC2
-	"149.154.167.41":  {2, false}, "149.154.167.50": {2, false},
-	"149.154.167.51":  {2, false}, "149.154.167.220": {2, false},
-	"149.154.167.35":  {2, false}, "149.154.167.36": {2, false},
+	"149.154.167.41": {2, false}, "149.154.167.50": {2, false},
+	"149.154.167.51": {2, false}, "149.154.167.220": {2, false},
+	"149.154.167.35": {2, false}, "149.154.167.36": {2, false},
 	"95.161.76.100":   {2, false},
 	"149.154.167.151": {2, true}, "149.154.167.222": {2, true},
 	"149.154.167.223": {2, true}, "149.154.162.123": {2, true},
@@ -175,13 +177,19 @@ var ipToDC = map[string]dcInfo{
 	"149.154.175.100": {3, false}, "149.154.175.101": {3, false},
 	"149.154.175.102": {3, true},
 	// DC4
-	"149.154.167.91":  {4, false}, "149.154.167.92": {4, false},
+	"149.154.167.91": {4, false}, "149.154.167.92": {4, false},
 	"149.154.164.250": {4, true}, "149.154.166.120": {4, true},
 	"149.154.166.121": {4, true}, "149.154.167.118": {4, true},
 	"149.154.165.111": {4, true},
+	// Telegram Android may open MTProto sessions to IPv6 literals. Keep this
+	// list exact; broad IPv6 ranges risk routing unknown traffic to the wrong DC.
+	"2001:b28:f23d:f001::a": {1, false},
+	"2001:67c:4e8:f002::a":  {2, false}, "2001:67c:4e8:f002::b": {2, false},
+	"2001:67c:4e8:f004::a": {4, false}, "2001:67c:4e8:f004::b": {4, false},
 	// DC5
 	"91.108.56.100": {5, false}, "91.108.56.101": {5, false},
 	"91.108.56.116": {5, false}, "91.108.56.126": {5, false},
+	"91.108.56.198": {5, false},
 	"149.154.171.5": {5, false},
 	"91.108.56.102": {5, true}, "91.108.56.128": {5, true},
 	"91.108.56.151": {5, true},
@@ -190,7 +198,17 @@ var ipToDC = map[string]dcInfo{
 }
 
 var dcOverrides = map[int]int{
+	1:   2,
 	203: 2,
+}
+
+var dcDefaultIP = map[int]string{
+	1:   "149.154.175.50",
+	2:   "149.154.167.51",
+	3:   "149.154.175.100",
+	4:   "149.154.167.91",
+	5:   "149.154.171.5",
+	203: "91.105.192.100",
 }
 
 var validProtos = map[uint32]bool{
@@ -206,6 +224,9 @@ var validProtos = map[uint32]bool{
 var (
 	dcOpt   map[int]string
 	dcOptMu sync.RWMutex
+
+	cfCfg   = cfProxyConfig{Domain: defaultCfProxyDomain}
+	cfCfgMu sync.RWMutex
 
 	wsBlackMu   sync.RWMutex
 	wsBlacklist = make(map[[2]int]bool)
@@ -223,6 +244,7 @@ var (
 type Stats struct {
 	connectionsTotal       atomic.Int64
 	connectionsWs          atomic.Int64
+	connectionsCfProxy     atomic.Int64
 	connectionsTcpFallback atomic.Int64
 	connectionsHttpReject  atomic.Int64
 	connectionsPassthrough atomic.Int64
@@ -237,9 +259,10 @@ func (s *Stats) Summary() string {
 	ph := s.poolHits.Load()
 	pm := s.poolMisses.Load()
 	return fmt.Sprintf(
-		"total=%d ws=%d tcp_fb=%d http_skip=%d pass=%d err=%d pool=%d/%d up=%s down=%s",
+		"total=%d ws=%d cf=%d tcp_fb=%d http_skip=%d pass=%d err=%d pool=%d/%d up=%s down=%s",
 		s.connectionsTotal.Load(),
 		s.connectionsWs.Load(),
+		s.connectionsCfProxy.Load(),
 		s.connectionsTcpFallback.Load(),
 		s.connectionsHttpReject.Load(),
 		s.connectionsPassthrough.Load(),
@@ -253,6 +276,7 @@ func (s *Stats) Summary() string {
 func (s *Stats) Reset() {
 	s.connectionsTotal.Store(0)
 	s.connectionsWs.Store(0)
+	s.connectionsCfProxy.Store(0)
 	s.connectionsTcpFallback.Store(0)
 	s.connectionsHttpReject.Store(0)
 	s.connectionsPassthrough.Store(0)
@@ -301,6 +325,388 @@ func setSockOpts(conn net.Conn) {
 		_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, recvBuf)
 		_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_SNDBUF, sendBuf)
 	})
+}
+
+func classifyConnError(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns_resolution_failure"
+	}
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return "tcp_dial_timeout"
+	}
+	return "network_error"
+}
+
+func joinAddr(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+type wsStageError struct {
+	Stage string
+	Err   error
+}
+
+func (e *wsStageError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+func (e *wsStageError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+type resolvedIPs struct {
+	IPv4 []string
+	IPv6 []string
+}
+
+type cfProxyConfig struct {
+	Enabled  bool
+	Priority bool
+	Only     bool
+	Domain   string
+}
+
+func (r resolvedIPs) Preferred() []string {
+	if len(r.IPv4) > 0 {
+		return r.IPv4
+	}
+	return r.IPv6
+}
+
+func (r resolvedIPs) All() []string {
+	out := make([]string, 0, len(r.IPv4)+len(r.IPv6))
+	out = append(out, r.IPv4...)
+	out = append(out, r.IPv6...)
+	return out
+}
+
+func (r resolvedIPs) String() string {
+	parts := make([]string, 0, 2)
+	if len(r.IPv4) > 0 {
+		parts = append(parts, "ipv4="+strings.Join(r.IPv4, ","))
+	}
+	if len(r.IPv6) > 0 {
+		parts = append(parts, "ipv6="+strings.Join(r.IPv6, ","))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " ")
+}
+
+func normalizeCfProxyConfig(cfg cfProxyConfig) cfProxyConfig {
+	cfg.Domain = strings.TrimSpace(cfg.Domain)
+	if cfg.Domain == "" {
+		cfg.Domain = defaultCfProxyDomain
+	}
+	if cfg.Only {
+		cfg.Enabled = true
+		cfg.Priority = true
+	}
+	return cfg
+}
+
+func setCfProxyConfig(cfg cfProxyConfig) {
+	cfg = normalizeCfProxyConfig(cfg)
+	cfCfgMu.Lock()
+	cfCfg = cfg
+	cfCfgMu.Unlock()
+}
+
+func getCfProxyConfig() cfProxyConfig {
+	cfCfgMu.RLock()
+	defer cfCfgMu.RUnlock()
+	return cfCfg
+}
+
+func parseBoolValue(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldTryDomainDial(err error) bool {
+	var stageErr *wsStageError
+	if !errors.As(err, &stageErr) || stageErr.Stage != "tcp_dial" {
+		return false
+	}
+	switch classifyConnError(stageErr.Err) {
+	case "tcp_dial_timeout", "network_error", "dns_resolution_failure":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolvePreferredIPs(domain string, timeout float64) (resolvedIPs, error) {
+	resolveTimeout := timeout
+	if resolveTimeout <= 0 {
+		resolveTimeout = 5
+	}
+	if resolveTimeout > 5 {
+		resolveTimeout = 5
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(resolveTimeout*float64(time.Second)))
+	defer cancel()
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+	if err != nil {
+		return resolvedIPs{}, err
+	}
+
+	out := resolvedIPs{}
+	seen4 := make(map[string]bool)
+	seen6 := make(map[string]bool)
+	for _, addr := range addrs {
+		if ip4 := addr.IP.To4(); ip4 != nil {
+			s := ip4.String()
+			if !seen4[s] {
+				out.IPv4 = append(out.IPv4, s)
+				seen4[s] = true
+			}
+			continue
+		}
+		if ip16 := addr.IP.To16(); ip16 != nil {
+			s := ip16.String()
+			if !seen6[s] {
+				out.IPv6 = append(out.IPv6, s)
+				seen6[s] = true
+			}
+		}
+	}
+	return out, nil
+}
+
+func logDomainConnectFailure(prefix, domain, target string, connErr error) {
+	if connErr == nil {
+		return
+	}
+
+	if wsErr, ok := connErr.(*WsHandshakeError); ok {
+		if wsErr.IsRedirect() {
+			logWarn.Printf("%s got %d from %s -> %s",
+				prefix, wsErr.StatusCode, domain, wsErr.Location)
+			return
+		}
+		logWarn.Printf("%s websocket upgrade failure for %s via %s: %s",
+			prefix, domain, target, wsErr.StatusLine)
+		return
+	}
+
+	var stageErr *wsStageError
+	if errors.As(connErr, &stageErr) {
+		switch stageErr.Stage {
+		case "tcp_dial":
+			logWarn.Printf("%s TCP dial failure for %s via %s (%s): %v",
+				prefix, domain, target, classifyConnError(stageErr.Err), stageErr.Err)
+		case "tls_handshake":
+			logWarn.Printf("%s TLS handshake failure for %s via %s: %v",
+				prefix, domain, target, stageErr.Err)
+		case "ws_upgrade_write":
+			logWarn.Printf("%s websocket upgrade write failure for %s via %s: %v",
+				prefix, domain, target, stageErr.Err)
+		case "ws_upgrade_read":
+			logWarn.Printf("%s websocket upgrade read failure for %s via %s: %v",
+				prefix, domain, target, stageErr.Err)
+		default:
+			logWarn.Printf("%s WS connect failed for %s via %s: %v",
+				prefix, domain, target, connErr)
+		}
+		return
+	}
+
+	if errStr := connErr.Error(); strings.Contains(errStr, "certificate") ||
+		strings.Contains(errStr, "hostname") {
+		logWarn.Printf("%s SSL error for %s via %s: %v",
+			prefix, domain, target, connErr)
+		return
+	}
+
+	logWarn.Printf("%s WS connect failed for %s via %s: %v",
+		prefix, domain, target, connErr)
+}
+
+func cfProxyHost(dc int, domain string) string {
+	return fmt.Sprintf("kws%d.%s", dc, domain)
+}
+
+func fallbackTarget(dc int, dst string) string {
+	if ip, ok := dcDefaultIP[dc]; ok && ip != "" {
+		return ip
+	}
+	return dst
+}
+
+func cfProxyFallback(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
+	cfg := getCfProxyConfig()
+	if !cfg.Enabled || cfg.Domain == "" {
+		return false, "cfproxy_disabled"
+	}
+
+	mTag := ""
+	if isMedia {
+		mTag = " media"
+	}
+
+	host := cfProxyHost(dc, cfg.Domain)
+	url := fmt.Sprintf("wss://%s/apiws", host)
+	logInfo.Printf("[%s] DC%d%s -> CF proxy %s",
+		label, dc, mTag, url)
+	logDebug.Printf("[%s] DC%d%s cfproxy dns resolve start host=%s",
+		label, dc, mTag, host)
+
+	resolved, err := resolvePreferredIPs(host, 10)
+	if err != nil {
+		logWarn.Printf("[%s] DC%d%s cfproxy dns resolve failure for %s (%s): %v",
+			label, dc, mTag, host, classifyConnError(err), err)
+		return false, fmt.Sprintf("dns_resolve_failed: %v", err)
+	}
+
+	logDebug.Printf("[%s] DC%d%s cfproxy dns resolve success host=%s %s",
+		label, dc, mTag, host, resolved.String())
+
+	candidates := resolved.Preferred()
+	if len(candidates) == 0 {
+		logWarn.Printf("[%s] DC%d%s cfproxy dns resolve produced no usable IPs for %s",
+			label, dc, mTag, host)
+		return false, "dns_resolve_empty"
+	}
+
+	prefix := fmt.Sprintf("[%s] DC%d%s cfproxy", label, dc, mTag)
+	var ws *RawWebSocket
+	var usedIP string
+	var lastErr error
+
+	for _, ip := range candidates {
+		logDebug.Printf("[%s] DC%d%s cfproxy tcp dial start host=%s ip=%s",
+			label, dc, mTag, host, ip)
+		ws, lastErr = wsConnect(ip, host, "/apiws", 10)
+		if lastErr == nil {
+			usedIP = ip
+			break
+		}
+		logDomainConnectFailure(prefix, host, ip, lastErr)
+		var wsErr *WsHandshakeError
+		if errors.As(lastErr, &wsErr) {
+			if wsErr.IsRateLimited() {
+				return false, fmt.Sprintf("cfproxy_rate_limited: %s", wsErr.StatusLine)
+			}
+			if wsErr.IsRedirect() {
+				break
+			}
+		}
+	}
+
+	if ws == nil {
+		if lastErr != nil {
+			return false, fmt.Sprintf("ws_connect_failed: %v", lastErr)
+		}
+		return false, "ws_connect_failed"
+	}
+
+	logInfo.Printf("[%s] DC%d%s cfproxy connected host=%s via=%s",
+		label, dc, mTag, host, usedIP)
+
+	stats.connectionsCfProxy.Add(1)
+
+	if err := ws.Send(init); err != nil {
+		logWarn.Printf("[%s] DC%d%s cfproxy first client->ws write failed for %s: %v",
+			label, dc, mTag, host, err)
+		ws.Close()
+		return false, fmt.Sprintf("first_client_to_ws_write_failed: %v", err)
+	}
+
+	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter)
+	return true, summary.String()
+}
+
+func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter) bool {
+	cfg := getCfProxyConfig()
+
+	mTag := ""
+	if isMedia {
+		mTag = " media"
+	}
+
+	methods := make([]string, 0, 2)
+	if cfg.Enabled {
+		if cfg.Priority || cfg.Only {
+			methods = append(methods, "cf")
+		}
+		if !cfg.Only {
+			methods = append(methods, "tcp")
+		}
+		if !cfg.Priority && !cfg.Only {
+			methods = append(methods, "cf")
+		}
+	} else {
+		methods = append(methods, "tcp")
+	}
+
+	target := fallbackTarget(dc, dst)
+	for _, method := range methods {
+		switch method {
+		case "cf":
+			if ok, reason := cfProxyFallback(ctx, client, init, label, dc, isMedia, splitter); ok {
+				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
+				return true
+			}
+		case "tcp":
+			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s",
+				label, dc, mTag, joinAddr(target, port))
+			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
+				logInfo.Printf("[%s] DC%d%s TCP fallback closed", label, dc, mTag)
+				return true
+			}
+		}
+	}
+
+	logWarn.Printf("[%s] DC%d%s no fallback available", label, dc, mTag)
+	return false
+}
+
+func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSocket, string, resolvedIPs, error) {
+	resolved, err := resolvePreferredIPs(domain, timeout)
+	if err != nil {
+		return nil, "", resolved, &wsStageError{Stage: "tcp_dial", Err: err}
+	}
+
+	candidates := resolved.Preferred()
+	if len(candidates) == 0 {
+		return nil, "", resolved, &wsStageError{Stage: "tcp_dial", Err: fmt.Errorf("no resolved IPs for %s", domain)}
+	}
+
+	var lastErr error
+	for _, ip := range candidates {
+		ws, connErr := wsConnect(ip, domain, path, timeout)
+		if connErr == nil {
+			return ws, ip, resolved, nil
+		}
+		lastErr = connErr
+		var wsErr *WsHandshakeError
+		if errors.As(connErr, &wsErr) && wsErr.IsRedirect() {
+			return nil, ip, resolved, connErr
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("domain dial failed for %s", domain)
+	}
+	return nil, candidates[0], resolved, lastErr
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +785,10 @@ func (e *WsHandshakeError) IsRedirect() bool {
 	return false
 }
 
+func (e *WsHandshakeError) IsRateLimited() bool {
+	return e != nil && e.StatusCode == 429
+}
+
 // ---------------------------------------------------------------------------
 // RawWebSocket
 // ---------------------------------------------------------------------------
@@ -421,12 +831,20 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 		ServerName:         domain,
 	}
 
-	rawConn, err := tls.DialWithDialer(dialer, "tcp", ip+":443", tlsCfg)
+	rawConn, err := dialer.Dial("tcp", joinAddr(ip, 443))
 	if err != nil {
-		return nil, err
+		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
 
-	setSockOpts(rawConn)
+	tlsConn := tls.Client(rawConn, tlsCfg)
+	_ = tlsConn.SetDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+	if err := tlsConn.Handshake(); err != nil {
+		_ = tlsConn.Close()
+		return nil, &wsStageError{Stage: "tls_handshake", Err: err}
+	}
+	_ = tlsConn.SetDeadline(time.Time{})
+
+	setSockOpts(tlsConn)
 
 	wsKeyBytes := make([]byte, 16)
 	_, _ = rand.Read(wsKeyBytes)
@@ -440,7 +858,6 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 			"Sec-WebSocket-Key: %s\r\n"+
 			"Sec-WebSocket-Version: 13\r\n"+
 			"Sec-WebSocket-Protocol: binary\r\n"+
-			"Origin: https://web.telegram.org\r\n"+
 			"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
 			"AppleWebKit/537.36 (KHTML, like Gecko) "+
 			"Chrome/131.0.0.0 Safari/537.36\r\n"+
@@ -448,25 +865,25 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 		path, domain, wsKey,
 	)
 
-	_ = rawConn.SetWriteDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
-	_, err = rawConn.Write([]byte(req))
+	_ = tlsConn.SetWriteDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+	_, err = tlsConn.Write([]byte(req))
 	if err != nil {
-		rawConn.Close()
-		return nil, err
+		_ = tlsConn.Close()
+		return nil, &wsStageError{Stage: "ws_upgrade_write", Err: err}
 	}
-	_ = rawConn.SetWriteDeadline(time.Time{})
+	_ = tlsConn.SetWriteDeadline(time.Time{})
 
 	// Use buffered reader for efficient header parsing
-	bufReader := bufio.NewReaderSize(rawConn, 4096)
+	bufReader := bufio.NewReaderSize(tlsConn, 4096)
 
-	_ = rawConn.SetReadDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+	_ = tlsConn.SetReadDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
 
 	var responseLines []string
 	for {
 		line, err := bufReader.ReadString('\n')
 		if err != nil {
-			rawConn.Close()
-			return nil, err
+			_ = tlsConn.Close()
+			return nil, &wsStageError{Stage: "ws_upgrade_read", Err: err}
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
@@ -474,14 +891,14 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 		}
 		responseLines = append(responseLines, line)
 		if len(responseLines) > 100 {
-			rawConn.Close()
-			return nil, fmt.Errorf("too many HTTP headers")
+			_ = tlsConn.Close()
+			return nil, &wsStageError{Stage: "ws_upgrade_read", Err: fmt.Errorf("too many HTTP headers")}
 		}
 	}
-	_ = rawConn.SetReadDeadline(time.Time{})
+	_ = tlsConn.SetReadDeadline(time.Time{})
 
 	if len(responseLines) == 0 {
-		rawConn.Close()
+		_ = tlsConn.Close()
 		return nil, &WsHandshakeError{StatusCode: 0, StatusLine: "empty response"}
 	}
 
@@ -494,7 +911,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 
 	if statusCode == 101 {
 		ws := &RawWebSocket{
-			conn:      rawConn,
+			conn:      tlsConn,
 			bufReader: bufReader,
 		}
 		return ws, nil
@@ -509,7 +926,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 			headers[k] = v
 		}
 	}
-	rawConn.Close()
+	_ = tlsConn.Close()
 	return nil, &WsHandshakeError{
 		StatusCode: statusCode,
 		StatusLine: firstLine,
@@ -1017,6 +1434,19 @@ func connectOneWS(targetIP string, domains []string) *RawWebSocket {
 	for _, domain := range domains {
 		ws, err := wsConnect(targetIP, domain, "/apiws", 8)
 		if err != nil {
+			if shouldTryDomainDial(err) {
+				logDebug.Printf("WS pool connect retry via DNS for %s after pinned endpoint %s",
+					domain, targetIP)
+				ws, usedIP, resolved, fallbackErr := wsConnectViaResolvedDomain(domain, "/apiws", 8)
+				if fallbackErr == nil {
+					logDebug.Printf("WS pool connect via DNS succeeded for %s -> %s (%s)",
+						domain, usedIP, resolved.String())
+					return ws
+				}
+				logDebug.Printf("WS pool connect via DNS failed for %s after pinned endpoint %s (%s): %v",
+					domain, targetIP, resolved.String(), fallbackErr)
+				err = fallbackErr
+			}
 			if wsErr, ok := err.(*WsHandshakeError); ok && wsErr.IsRedirect() {
 				continue
 			}
@@ -1167,22 +1597,57 @@ func socks5Reply(status byte) []byte {
 // Bridging: TCP <-> WebSocket
 // ---------------------------------------------------------------------------
 
+type bridgeCloseSummary struct {
+	Reason string
+}
+
+func (s bridgeCloseSummary) String() string {
+	if s.Reason == "" {
+		return "unknown"
+	}
+	return s.Reason
+}
+
+func recordBridgeCloseReason(ch chan<- string, reason string) {
+	if reason == "" {
+		return
+	}
+	select {
+	case ch <- reason:
+	default:
+	}
+}
+
+func formatBridgeCloseReason(prefix string, err error) string {
+	if err == nil {
+		return prefix
+	}
+	if errors.Is(err, io.EOF) {
+		return prefix + ": EOF"
+	}
+	return fmt.Sprintf("%s: %v", prefix, err)
+}
+
 func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 	label string, dc int, dst string, port int, isMedia bool,
-	splitter *MsgSplitter) {
+	splitter *MsgSplitter) bridgeCloseSummary {
 
 	dcTag := fmt.Sprintf("DC%d%s", dc, mediaTag(isMedia))
-	dstTag := fmt.Sprintf("%s:%d", dst, port)
+	dstTag := joinAddr(dst, port)
 
 	var upBytes, downBytes, upPkts, downPkts int64
 	startTime := time.Now()
 
 	ctx2, cancel := context.WithCancel(ctx)
+	closeReason := make(chan string, 1)
 
 	// Critical: close connections when context is cancelled
 	// This unblocks the Read() calls in goroutines
 	go func() {
 		<-ctx2.Done()
+		if err := ctx2.Err(); err != nil {
+			recordBridgeCloseReason(closeReason, formatBridgeCloseReason("context_cancel", err))
+		}
 		_ = conn.Close()
 		ws.Close()
 	}()
@@ -1195,6 +1660,7 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 		defer wg.Done()
 		defer cancel()
 		buf := make([]byte, 65536)
+		firstPacket := true
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
@@ -1215,10 +1681,17 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 					sendErr = ws.Send(chunk)
 				}
 				if sendErr != nil {
+					recordBridgeCloseReason(closeReason, formatBridgeCloseReason("client_to_ws_write", sendErr))
+					if firstPacket {
+						logWarn.Printf("[%s] %s first client->ws write failed for %s: %v",
+							label, dcTag, dstTag, sendErr)
+					}
 					return
 				}
+				firstPacket = false
 			}
 			if err != nil {
+				recordBridgeCloseReason(closeReason, formatBridgeCloseReason("client_read", err))
 				return
 			}
 		}
@@ -1228,9 +1701,19 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 	go func() {
 		defer wg.Done()
 		defer cancel()
+		firstPacket := true
 		for {
 			data, err := ws.Recv()
 			if err != nil || data == nil {
+				if err != nil {
+					recordBridgeCloseReason(closeReason, formatBridgeCloseReason("ws_read", err))
+				} else {
+					recordBridgeCloseReason(closeReason, "ws_read: nil_frame")
+				}
+				if err != nil && firstPacket {
+					logWarn.Printf("[%s] %s first ws->client read failed for %s: %v",
+						label, dcTag, dstTag, err)
+				}
 				return
 			}
 			n := len(data)
@@ -1238,19 +1721,32 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 			downBytes += int64(n)
 			downPkts++
 			if _, err := conn.Write(data); err != nil {
+				recordBridgeCloseReason(closeReason, formatBridgeCloseReason("ws_to_client_write", err))
+				if firstPacket {
+					logWarn.Printf("[%s] %s first ws->client write failed for %s: %v",
+						label, dcTag, dstTag, err)
+				}
 				return
 			}
+			firstPacket = false
 		}
 	}()
 
 	wg.Wait()
 
+	reason := "unknown"
+	select {
+	case reason = <-closeReason:
+	default:
+	}
+	summary := bridgeCloseSummary{Reason: reason}
 	elapsed := time.Since(startTime).Seconds()
-	logInfo.Printf("[%s] %s (%s) WS session closed: ^%s (%d pkts) v%s (%d pkts) in %.1fs",
+	logInfo.Printf("[%s] %s (%s) WS session closed: ^%s (%d pkts) v%s (%d pkts) in %.1fs reason=%s",
 		label, dcTag, dstTag,
 		humanBytes(upBytes), upPkts,
 		humanBytes(downBytes), downPkts,
-		elapsed)
+		elapsed, summary.String())
+	return summary
 }
 
 // ---------------------------------------------------------------------------
@@ -1308,15 +1804,20 @@ func tcpFallback(ctx context.Context, client net.Conn, dst string, port int,
 	init []byte, label string, dc int, isMedia bool) bool {
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	remote, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", dst, port))
+	remote, err := dialer.DialContext(ctx, "tcp", joinAddr(dst, port))
 	if err != nil {
-		logWarn.Printf("[%s] TCP fallback connect to %s:%d failed: %v",
-			label, dst, port, err)
+		logWarn.Printf("[%s] TCP fallback connect to %s failed (%s): %v",
+			label, joinAddr(dst, port), classifyConnError(err), err)
 		return false
 	}
 
 	stats.connectionsTcpFallback.Add(1)
-	_, _ = remote.Write(init)
+	if _, err := remote.Write(init); err != nil {
+		logWarn.Printf("[%s] TCP fallback first write failed for %s: %v",
+			label, joinAddr(dst, port), err)
+		_ = remote.Close()
+		return false
+	}
 	bridgeTCP(ctx, client, remote, label, dc, dst, port, isMedia)
 	return true
 }
@@ -1401,12 +1902,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	}
 
 	var dst string
+	var rawDst string
 	switch atyp {
 	case 1: // IPv4
 		raw, err := readExactly(conn, 4, 10*time.Second)
 		if err != nil {
 			return
 		}
+		rawDst = fmt.Sprintf("%x", raw)
 		dst = net.IP(raw).String()
 	case 3: // domain
 		dlenBuf, err := readExactly(conn, 1, 10*time.Second)
@@ -1417,12 +1920,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		if err != nil {
 			return
 		}
+		rawDst = string(domBytes)
 		dst = string(domBytes)
 	case 4: // IPv6
 		raw, err := readExactly(conn, 16, 10*time.Second)
 		if err != nil {
 			return
 		}
+		rawDst = fmt.Sprintf("%x", raw)
 		dst = net.IP(raw).String()
 	default:
 		_, _ = conn.Write(socks5Reply(0x08))
@@ -1435,24 +1940,32 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	}
 	port := int(binary.BigEndian.Uint16(portBuf))
 
-	if strings.Contains(dst, ":") {
-		logError.Printf("[%s] IPv6 address detected: %s:%d — "+
-			"IPv6 addresses are not supported; "+
-			"disable IPv6 to continue using the proxy.",
-			label, dst, port)
-		_, _ = conn.Write(socks5Reply(0x05))
-		return
+	logDebug.Printf("[%s] SOCKS5 CONNECT raw_atyp=0x%02x raw_dst=%s parsed_dst=%s",
+		label, atyp, rawDst, joinAddr(dst, port))
+
+	cfg := getCfProxyConfig()
+	forceTelegramPipeline := cfg.Only && atyp == 4 && port == 443
+
+	if atyp == 4 {
+		logInfo.Printf("[%s] IPv6 destination accepted into pipeline: %s",
+			label, joinAddr(dst, port))
+		if forceTelegramPipeline {
+			logInfo.Printf("[%s] IPv6 destination will use Telegram pipeline in CF only mode: %s",
+				label, joinAddr(dst, port))
+		}
 	}
 
 	// -- Non-Telegram IP -> direct passthrough --
-	if !isTelegramIP(dst) {
+	if !forceTelegramPipeline && !isTelegramIP(dst) {
 		stats.connectionsPassthrough.Add(1)
-		logDebug.Printf("[%s] passthrough -> %s:%d", label, dst, port)
+		logDebug.Printf("[%s] passthrough raw_dst=%s parsed_dst=%s mapped_dc=none",
+			label, rawDst, joinAddr(dst, port))
 
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		remote, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", dst, port))
+		remote, err := dialer.DialContext(ctx, "tcp", joinAddr(dst, port))
 		if err != nil {
-			logWarn.Printf("[%s] passthrough failed to %s: %T: %v", label, dst, err, err)
+			logWarn.Printf("[%s] passthrough connect to %s failed (%s): %T: %v",
+				label, joinAddr(dst, port), classifyConnError(err), err, err)
 			_, _ = conn.Write(socks5Reply(0x05))
 			return
 		}
@@ -1503,7 +2016,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		isMediaPtr = &isMedia
 	}
 
-	// Android with useSecret=0 has random dc_id bytes — patch it
+	// Android with useSecret=0 has random dc_id bytes - patch it.
 	if !dcOk {
 		if info, found := ipToDC[dst]; found {
 			dc = info.dc
@@ -1515,13 +2028,15 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			_, hasDC := dcOpt[dc]
 			dcOptMu.RUnlock()
 
-			if hasDC {
-				// media -> positive dc, non-media -> negative dc
-				signedDC := -dc
+			if hasDC || cfg.Only {
+				// dcFromInit treats negative dc_id as media and positive as non-media.
+				signedDC := dc
 				if isMedia {
-					signedDC = dc
+					signedDC = -dc
 				}
 				init = patchInitDC(init, signedDC)
+				logDebug.Printf("[%s] patched init fallback via ipToDC: dc=%d is_media=%t signed_dc=%d",
+					label, dc, isMedia, signedDC)
 				initPatched = true
 			}
 		}
@@ -1531,8 +2046,21 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	_, dcConfigured := dcOpt[dc]
 	dcOptMu.RUnlock()
 
-	if !dcOk || !dcConfigured {
+	var splitter *MsgSplitter
+	if initPatched {
+		splitter, _ = newMsgSplitter(init)
+	}
+
+	if !dcOk {
+		logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d configured=%t -> TCP passthrough",
+			label, rawDst, joinAddr(dst, port), dc, dcConfigured)
 		logDebug.Printf("[%s] unknown DC%d for %s:%d -> TCP passthrough", label, dc, dst, port)
+		if forceTelegramPipeline {
+			logWarn.Printf("[%s] IPv6 Telegram pipeline could not determine DC for %s in CF only mode -> closing fast",
+				label, joinAddr(dst, port))
+			_ = conn.Close()
+			return
+		}
 		tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
 		return
 	}
@@ -1547,18 +2075,31 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		mTag = " media"
 	}
 
+	if !dcConfigured {
+		logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d configured=false -> fallback",
+			label, rawDst, joinAddr(dst, port), dc)
+		logInfo.Printf("[%s] DC%d%s not in config -> fallback",
+			label, dc, mTag)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		return
+	}
+
 	// -- WS blacklist check --
 	wsBlackMu.RLock()
 	blacklisted := wsBlacklist[dcKey]
 	wsBlackMu.RUnlock()
 
 	if blacklisted {
-		logDebug.Printf("[%s] DC%d%s WS blacklisted -> TCP %s:%d",
-			label, dc, mTag, dst, port)
-		ok := tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
-		if ok {
-			logInfo.Printf("[%s] DC%d%s TCP fallback closed", label, dc, mTag)
-		}
+		logInfo.Printf("[%s] DC%d%s fallback reason=ws_blacklisted -> fallback chain",
+			label, dc, mTag)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		return
+	}
+
+	if cfg.Only {
+		logInfo.Printf("[%s] DC%d%s fallback reason=cfproxy_only -> CF fallback only",
+			label, dc, mTag)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
 		return
 	}
 
@@ -1579,6 +2120,9 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	target := dcOpt[dc]
 	dcOptMu.RUnlock()
 
+	logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d is_media=%t selected_endpoint=%s ws_domains=%s",
+		label, rawDst, joinAddr(dst, port), dc, isMedia, target, strings.Join(domains, ","))
+
 	var ws *RawWebSocket
 	wsFailedRedirect := false
 	allRedirects := true
@@ -1594,7 +2138,21 @@ func handleClient(ctx context.Context, conn net.Conn) {
 				label, dc, mTag, dst, port, url, target)
 
 			var connErr error
+			attemptTarget := target
 			ws, connErr = wsConnect(target, domain, "/apiws", wsTimeout)
+			if connErr != nil && shouldTryDomainDial(connErr) {
+				logInfo.Printf("[%s] DC%d%s retry via DNS for %s after pinned endpoint %s",
+					label, dc, mTag, domain, target)
+				var resolved resolvedIPs
+				ws, attemptTarget, resolved, connErr = wsConnectViaResolvedDomain(domain, "/apiws", wsTimeout)
+				if connErr == nil {
+					logInfo.Printf("[%s] DC%d%s domain-dial success for %s via %s (%s)",
+						label, dc, mTag, domain, attemptTarget, resolved.String())
+				} else {
+					logWarn.Printf("[%s] DC%d%s domain-dial failed for %s after pinned endpoint %s (%s): %v",
+						label, dc, mTag, domain, target, resolved.String(), connErr)
+				}
+			}
 			if connErr == nil {
 				allRedirects = false
 				break
@@ -1611,18 +2169,36 @@ func handleClient(ctx context.Context, conn net.Conn) {
 					continue
 				}
 				allRedirects = false
-				logWarn.Printf("[%s] DC%d%s WS handshake: %s",
-					label, dc, mTag, wsErr.StatusLine)
+				logWarn.Printf("[%s] DC%d%s websocket upgrade failure for %s via %s: %s",
+					label, dc, mTag, domain, target, wsErr.StatusLine)
 			} else {
 				allRedirects = false
-				errStr := connErr.Error()
-				if strings.Contains(errStr, "certificate") ||
+				var stageErr *wsStageError
+				if errors.As(connErr, &stageErr) {
+					switch stageErr.Stage {
+					case "tcp_dial":
+						logWarn.Printf("[%s] DC%d%s TCP dial failure for %s via %s (%s): %v",
+							label, dc, mTag, domain, attemptTarget, classifyConnError(stageErr.Err), stageErr.Err)
+					case "tls_handshake":
+						logWarn.Printf("[%s] DC%d%s TLS handshake failure for %s via %s: %v",
+							label, dc, mTag, domain, attemptTarget, stageErr.Err)
+					case "ws_upgrade_write":
+						logWarn.Printf("[%s] DC%d%s websocket upgrade write failure for %s via %s: %v",
+							label, dc, mTag, domain, attemptTarget, stageErr.Err)
+					case "ws_upgrade_read":
+						logWarn.Printf("[%s] DC%d%s websocket upgrade read failure for %s via %s: %v",
+							label, dc, mTag, domain, attemptTarget, stageErr.Err)
+					default:
+						logWarn.Printf("[%s] DC%d%s WS connect failed for %s via %s: %v",
+							label, dc, mTag, domain, attemptTarget, connErr)
+					}
+				} else if errStr := connErr.Error(); strings.Contains(errStr, "certificate") ||
 					strings.Contains(errStr, "hostname") {
-					logWarn.Printf("[%s] DC%d%s SSL error: %v",
-						label, dc, mTag, connErr)
+					logWarn.Printf("[%s] DC%d%s SSL error for %s via %s: %v",
+						label, dc, mTag, domain, attemptTarget, connErr)
 				} else {
-					logWarn.Printf("[%s] DC%d%s WS connect failed: %v",
-						label, dc, mTag, connErr)
+					logWarn.Printf("[%s] DC%d%s WS connect failed for %s via %s: %v",
+						label, dc, mTag, domain, attemptTarget, connErr)
 				}
 			}
 		}
@@ -1640,20 +2216,19 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			dcFailMu.Lock()
 			dcFailUntil[dcKey] = now + dcFailCooldown
 			dcFailMu.Unlock()
+			logInfo.Printf("[%s] DC%d%s fallback reason=ws_redirect_mixed cooldown_reason=redirect_after_partial_failure for %ds",
+				label, dc, mTag, int(dcFailCooldown))
 		} else {
 			dcFailMu.Lock()
 			dcFailUntil[dcKey] = now + dcFailCooldown
 			dcFailMu.Unlock()
-			logInfo.Printf("[%s] DC%d%s WS cooldown for %ds",
+			logInfo.Printf("[%s] DC%d%s WS cooldown for %ds (reason=ws_connect_failure)",
 				label, dc, mTag, int(dcFailCooldown))
 		}
 
-		logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s:%d",
-			label, dc, mTag, dst, port)
-		ok := tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
-		if ok {
-			logInfo.Printf("[%s] DC%d%s TCP fallback closed", label, dc, mTag)
-		}
+		logInfo.Printf("[%s] DC%d%s fallback reason=ws_unavailable -> fallback chain",
+			label, dc, mTag)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
 		return
 	}
 
@@ -1664,13 +2239,10 @@ func handleClient(ctx context.Context, conn net.Conn) {
 
 	stats.connectionsWs.Add(1)
 
-	var splitter *MsgSplitter
-	if initPatched {
-		splitter, _ = newMsgSplitter(init)
-	}
-
 	// Send init packet
 	if err := ws.Send(init); err != nil {
+		logWarn.Printf("[%s] DC%d%s first client->ws write failed for %s: %v",
+			label, dc, mTag, joinAddr(dst, port), err)
 		logDebug.Printf("[%s] reconnecting via TCP fallback (WS broken): %v", label, err)
 		ws.Close()
 		tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
@@ -1690,7 +2262,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	dcOpt = dcOptMap
 	dcOptMu.Unlock()
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := joinAddr(host, port)
 	lc := net.ListenConfig{}
 
 	listener, err := lc.Listen(ctx, "tcp", addr)
@@ -1716,6 +2288,18 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	logInfo.Println("  Target DC IPs:")
 	for dc, ip := range dcOptMap {
 		logInfo.Printf("    DC%d: %s", dc, ip)
+	}
+	cfg := getCfProxyConfig()
+	if cfg.Enabled {
+		mode := "fallback"
+		if cfg.Only {
+			mode = "only"
+		} else if cfg.Priority {
+			mode = "cf_first"
+		}
+		logInfo.Printf("  CF proxy:     enabled domain=%s mode=%s", cfg.Domain, mode)
+	} else {
+		logInfo.Println("  CF proxy:     disabled")
 	}
 	logInfo.Println(strings.Repeat("=", 60))
 	logInfo.Printf("  Configure Telegram Desktop:")
@@ -1751,11 +2335,16 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		}
 	}()
 
-	// Warmup WS pool
-	wsPool.Warmup(dcOptMap)
+	cfg = getCfProxyConfig()
+	if cfg.Only {
+		logInfo.Println("  WS pool warmup skipped in CF only mode")
+	} else {
+		// Warmup WS pool
+		wsPool.Warmup(dcOptMap)
 
-	// Periodic pool maintenance
-	go wsPool.Maintain(srvCtx, dcOptMap)
+		// Periodic pool maintenance
+		go wsPool.Maintain(srvCtx, dcOptMap)
+	}
 
 	// Track active connections for graceful shutdown
 	var activeConns sync.WaitGroup
@@ -1816,22 +2405,66 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 
 func parseCIDRPool(cidrsStr string) (map[int]string, error) {
 	result := make(map[int]string)
-	
+
 	pairs := strings.Split(cidrsStr, ",")
 	for _, pair := range pairs {
 		parts := strings.Split(pair, ":")
 		if len(parts) == 2 {
 			dcRaw := strings.TrimSpace(parts[0])
 			ipRaw := strings.TrimSpace(parts[1])
-			
+
 			dc, err := strconv.Atoi(dcRaw)
 			if err == nil && ipRaw != "" {
 				result[dc] = ipRaw
 			}
 		}
 	}
-	
+
 	return result, nil
+}
+
+func parseRuntimeConfig(raw string) (map[int]string, cfProxyConfig, error) {
+	dcMap := make(map[int]string)
+	cfg := cfProxyConfig{Domain: defaultCfProxyDomain}
+
+	for _, token := range strings.Split(raw, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+
+		if strings.HasPrefix(token, "@") {
+			kv := strings.SplitN(strings.TrimPrefix(token, "@"), "=", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(kv[0]))
+			val := strings.TrimSpace(kv[1])
+			switch key {
+			case "cfproxy":
+				cfg.Enabled = parseBoolValue(val)
+			case "cfproxy_priority":
+				cfg.Priority = parseBoolValue(val)
+			case "cfproxy_only":
+				cfg.Only = parseBoolValue(val)
+			case "cfproxy_domain":
+				if val != "" {
+					cfg.Domain = val
+				}
+			}
+			continue
+		}
+
+		parsed, err := parseCIDRPool(token)
+		if err != nil {
+			return nil, cfg, err
+		}
+		for dc, ip := range parsed {
+			dcMap[dc] = ip
+		}
+	}
+
+	return dcMap, normalizeCfProxyConfig(cfg), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1860,11 +2493,12 @@ func StartProxy(cHost *C.char, port C.int, cDcIps *C.char, verbose C.int) C.int 
 
 	initLogging(isVerbose)
 
-	dcOptMap, err := parseCIDRPool(dcIpsStr)
+	dcOptMap, cfg, err := parseRuntimeConfig(dcIpsStr)
 	if err != nil {
-		logError.Printf("parseCIDRPool: %v", err)
+		logError.Printf("parseRuntimeConfig: %v", err)
 		return -2
 	}
+	setCfProxyConfig(cfg)
 
 	globalCtx, globalCancel = context.WithCancel(context.Background())
 
@@ -1943,6 +2577,7 @@ func main() {
 		2: "149.154.167.220",
 		4: "149.154.167.220",
 	}
+	setCfProxyConfig(cfProxyConfig{Enabled: false, Priority: false, Only: false, Domain: defaultCfProxyDomain})
 
 	host := "127.0.0.1"
 	port := defaultPort
@@ -1969,14 +2604,39 @@ func main() {
 			if i+1 < len(args) {
 				i++
 				entry := args[i]
-				parsed, err := parseCIDRPool(entry)
+				parsed, cfg, err := parseRuntimeConfig(entry)
 				if err != nil {
 					logError.Printf("%v", err)
 					os.Exit(1)
 				}
+				if strings.Contains(entry, "@cfproxy") {
+					setCfProxyConfig(cfg)
+				}
 				for k, v := range parsed {
 					dcOptMap[k] = v
 				}
+			}
+		case "--cfproxy":
+			cfg := getCfProxyConfig()
+			cfg.Enabled = true
+			setCfProxyConfig(cfg)
+		case "--cfproxy-priority":
+			cfg := getCfProxyConfig()
+			cfg.Enabled = true
+			cfg.Priority = true
+			setCfProxyConfig(cfg)
+		case "--cfproxy-only":
+			cfg := getCfProxyConfig()
+			cfg.Enabled = true
+			cfg.Priority = true
+			cfg.Only = true
+			setCfProxyConfig(cfg)
+		case "--cfproxy-domain":
+			if i+1 < len(args) {
+				i++
+				cfg := getCfProxyConfig()
+				cfg.Domain = args[i]
+				setCfProxyConfig(cfg)
 			}
 		}
 	}

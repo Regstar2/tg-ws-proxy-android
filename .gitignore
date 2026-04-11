@@ -1,0 +1,11 @@
+.gradle/
+local.properties
+app/build/
+artifacts/native/
+artifacts/apk/**/*.apk
+artifacts/**/*.apk
+artifacts/**/*.so
+artifacts/apk/runtime-logs/
+artifacts/apk/upstream-sweep-*.txt
+artifacts/baselines/
+app/src/main/jniLibs/**/*.so
