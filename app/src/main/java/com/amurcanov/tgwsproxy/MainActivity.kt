@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -74,7 +75,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.1.0-cf"
+private const val APP_INFO_VERSION = "1.2.0-ui"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -83,6 +84,12 @@ private enum class PendingFolderAction {
 private enum class ProxyScreenPage {
     Main,
     Settings,
+}
+
+private enum class ThemeMode {
+    System,
+    Light,
+    Dark,
 }
 
 class MainActivity : ComponentActivity() {
@@ -102,7 +109,17 @@ class MainActivity : ComponentActivity() {
         checkBatteryOptimizations()
         
         setContent {
-            val isDarkTheme = isSystemInDarkTheme()
+            val prefs = remember { getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE) }
+            var themeModeName by rememberSaveable {
+                mutableStateOf(prefs.getString("theme_mode", ThemeMode.System.name) ?: ThemeMode.System.name)
+            }
+            val themeMode = runCatching { ThemeMode.valueOf(themeModeName) }.getOrDefault(ThemeMode.System)
+            val systemDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = when (themeMode) {
+                ThemeMode.System -> systemDarkTheme
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
             val context = LocalContext.current
 
             // Dynamic colors logic for Android 12+ (Material You)
@@ -119,7 +136,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ProxyScreen()
+                    ProxyScreen(
+                        themeMode = themeMode,
+                        onThemeModeChange = {
+                            themeModeName = it.name
+                            prefs.edit().putString("theme_mode", it.name).apply()
+                        }
+                    )
                 }
             }
         }
@@ -143,7 +166,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProxyScreen() {
+private fun ProxyScreen(
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit
+) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
@@ -286,11 +312,32 @@ fun ProxyScreen() {
         val proxyUrl = "tg://socks?server=127.0.0.1&port=$port"
         openTelegram(context, proxyUrl)
     }
+    val proxyAddress = "127.0.0.1:${portText.ifBlank { "1080" }}"
+    val proxyModeText = when {
+        cfProxyOnly -> "CF only"
+        cfProxyPriority -> "CF first"
+        cfProxyEnabled -> "Direct + CF fallback"
+        else -> "Direct"
+    }
+    val copyProxyAddressAction by rememberUpdatedState {
+        val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+        cm?.setPrimaryClip(ClipData.newPlainText("Proxy address", proxyAddress))
+        Toast.makeText(context, context.getString(R.string.proxy_address_copied), Toast.LENGTH_SHORT).show()
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Telegram WS Proxy", fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Text(
+                        if (currentPage == ProxyScreenPage.Settings) {
+                            stringResource(R.string.screen_settings_title)
+                        } else {
+                            stringResource(R.string.screen_main_title)
+                        },
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
                 actions = {
                     TextButton(
                         onClick = { showInfoModal = true },
@@ -300,18 +347,7 @@ fun ProxyScreen() {
                         ),
                         modifier = Modifier.padding(end = 12.dp)
                     ) {
-                        Text("инфо", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
-                    }
-                    if (currentPage == ProxyScreenPage.Settings) {
-                        TextButton(
-                            onClick = { currentPage = ProxyScreenPage.Main },
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        ) {
-                            Text("Главная", fontWeight = FontWeight.SemiBold)
-                        }
+                        Text(stringResource(R.string.action_info), fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -350,25 +386,62 @@ fun ProxyScreen() {
                                 .padding(20.dp),
                             horizontalAlignment = Alignment.Start
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.proxy_address_label),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = if (isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                                ) {
+                                    Text(
+                                        text = if (isRunning) stringResource(R.string.status_running) else stringResource(R.string.status_stopped),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = if (isRunning) "Прокси включен" else "Прокси выключен",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Текущий порт: 127.0.0.1:${portText.ifBlank { "1080" }}",
+                                text = proxyAddress,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Режим: ${if (cfProxyOnly) "CF only" else if (cfProxyPriority) "CF first" else "Direct/CF fallback"}",
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = stringResource(R.string.active_mode_label),
+                                style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    text = proxyModeText,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
+
+                    HintText(stringResource(R.string.main_hint_bydpi))
+                    HintText(stringResource(R.string.main_hint_background))
+
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Spacer(modifier = Modifier.height(20.dp))
 
@@ -392,7 +465,7 @@ fun ProxyScreen() {
                             )
                         ) {
                             Text(
-                                if (running) "Выключить прокси" else "Включить прокси",
+                                if (running) stringResource(R.string.stop_proxy) else stringResource(R.string.start_proxy),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -403,16 +476,37 @@ fun ProxyScreen() {
 
                     FilledTonalButton(
                         onClick = applyInTelegramAction,
+                        enabled = isRunning,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(64.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            "Применить в Telegram",
+                            stringResource(R.string.apply_telegram),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                    if (!isRunning) {
+                        Text(
+                            stringResource(R.string.apply_telegram_disabled_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    FilledTonalButton(
+                        onClick = copyProxyAddressAction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(stringResource(R.string.copy_proxy_address), fontWeight = FontWeight.SemiBold)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -424,25 +518,24 @@ fun ProxyScreen() {
                             .height(56.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Настройки", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.action_settings), fontWeight = FontWeight.SemiBold)
                     }
                 } else {
-                    Row(
+                    OutlinedButton(
+                        onClick = { currentPage = ProxyScreenPage.Main },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .height(48.dp)
+                            .padding(bottom = 8.dp),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(
-                            "Настройки",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        TextButton(onClick = { currentPage = ProxyScreenPage.Main }) {
-                            Text("Главная")
-                        }
+                        Text(stringResource(R.string.action_back), fontWeight = FontWeight.SemiBold)
                     }
+
+                SectionTitle(stringResource(R.string.section_connection))
+                if (cfProxyOnly) {
+                    HintText(stringResource(R.string.cf_only_hint))
+                }
 
                 // Proxy Port Input
                 OutlinedTextField(
@@ -524,14 +617,7 @@ fun ProxyScreen() {
                     }
                 }
 
-                Text(
-                    "Cloudflare Proxy",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                )
+                SectionTitle(stringResource(R.string.section_cloudflare))
 
                 OutlinedTextField(
                     value = cfProxyDomainText,
@@ -540,7 +626,7 @@ fun ProxyScreen() {
                         prefs.edit().putString("cfproxy_domain", it).apply()
                     },
                     enabled = !isRunning,
-                    label = { Text("CF domain") },
+                    label = { Text(stringResource(R.string.cf_domain_label)) },
                     shape = RoundedCornerShape(24.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -559,7 +645,14 @@ fun ProxyScreen() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("CF proxy", style = MaterialTheme.typography.bodyLarge)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.cf_proxy_title), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.cf_proxy_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Switch(
                         checked = cfProxyEnabled,
                         enabled = !isRunning,
@@ -581,7 +674,14 @@ fun ProxyScreen() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("CF first", style = MaterialTheme.typography.bodyLarge)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.cf_first_title), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.cf_first_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Switch(
                         checked = cfProxyPriority,
                         enabled = !isRunning && cfProxyEnabled,
@@ -599,7 +699,14 @@ fun ProxyScreen() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("CF only", style = MaterialTheme.typography.bodyLarge)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.cf_only_title), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.cf_only_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Switch(
                         checked = cfProxyOnly,
                         enabled = !isRunning,
@@ -618,6 +725,34 @@ fun ProxyScreen() {
                     )
                 }
 
+                SectionTitle(stringResource(R.string.section_appearance))
+                Text(
+                    stringResource(R.string.theme_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        ThemeMode.System to stringResource(R.string.theme_system),
+                        ThemeMode.Light to stringResource(R.string.theme_light),
+                        ThemeMode.Dark to stringResource(R.string.theme_dark)
+                    ).forEach { (mode, label) ->
+                        FilterChip(
+                            selected = themeMode == mode,
+                            onClick = { onThemeModeChange(mode) },
+                            label = { Text(label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                SectionTitle(stringResource(R.string.section_logs))
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -626,9 +761,9 @@ fun ProxyScreen() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Ведение логов", style = MaterialTheme.typography.bodyLarge)
+                        Text(stringResource(R.string.logs_enabled_title), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (logsEnabled) "Logcat читается в окно логов" else "Сбор логов остановлен",
+                            if (logsEnabled) stringResource(R.string.logs_enabled_hint_on) else stringResource(R.string.logs_enabled_hint_off),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -641,6 +776,8 @@ fun ProxyScreen() {
                         }
                     )
                 }
+
+                HintText(stringResource(R.string.settings_hint_logs))
 
                 FilledTonalButton(
                     onClick = { reportFolderLauncher.launch(null) },
@@ -680,6 +817,8 @@ fun ProxyScreen() {
                             .padding(bottom = 12.dp)
                     )
                 }
+
+                SectionTitle(stringResource(R.string.section_diagnostics))
 
                 // Logs toggle button — same style as main buttons
                 Button(
@@ -757,9 +896,9 @@ fun ProxyScreen() {
                     ) {
                         Text(
                             text = if (!logsEnabled) {
-                                "Ведение логов выключено."
+                                stringResource(R.string.logs_disabled)
                             } else if (logs.isEmpty()) {
-                                "Logs will appear here after the proxy starts."
+                                stringResource(R.string.logs_empty)
                             } else {
                                 logs.joinToString("\n") { formatLogLine(it) }
                             },
@@ -864,6 +1003,37 @@ fun ProxyScreen() {
 }
 
 @Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, bottom = 10.dp)
+    )
+}
+
+@Composable
+private fun HintText(text: String) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+        )
+    }
+}
+
+@Composable
 fun IpSetupDialog(
     dc1Text: String, onDc1Change: (String) -> Unit,
     dc2Text: String, onDc2Change: (String) -> Unit,
@@ -943,7 +1113,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Версия $APP_INFO_VERSION",
+                    text = stringResource(R.string.info_title, APP_INFO_VERSION),
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
@@ -951,37 +1121,30 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Что важно в этой сборке:",
+                    text = stringResource(R.string.info_current_build_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
                 Text(
-                    text = "1. Основной рабочий режим сейчас — CF proxy через hostname dial.",
+                    text = stringResource(R.string.info_current_build_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 4.dp)
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
 
                 Text(
-                    text = "2. Кнопка теста upstream убрана из интерфейса, чтобы не мешать повседневной работе.",
+                    text = stringResource(R.string.info_mobile_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 4.dp)
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
 
                 Text(
-                    text = "3. Папка экспорта теперь нужна в первую очередь для сохранения runtime-логов и быстрых проверок после сбоев.",
+                    text = stringResource(R.string.info_attribution_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-
-                Text(
-                    text = "Эта сборка не является исходным проектом: она собрана поверх Android-форка и сохраняет атрибуцию исходной работе.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
@@ -1054,7 +1217,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {
-                        Text("Закрыть", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.info_close), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
