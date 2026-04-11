@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Telegram WS Proxy</string>
-    <string name="screen_main_title">Telegram WS Proxy</string>
+    <string name="screen_main_title">TgWsProxy</string>
     <string name="screen_settings_title">Настройки</string>
     <string name="action_info">инфо</string>
     <string name="action_tips">Подсказки</string>
@@ -15,7 +15,7 @@
     <string name="start_proxy">Включить прокси</string>
     <string name="stop_proxy">Выключить прокси</string>
     <string name="apply_telegram">Применить в Telegram</string>
-    <string name="apply_telegram_disabled_hint">Сначала включи прокси, потом применяй его в Telegram.</string>
+    <string name="apply_telegram_disabled_hint">Сначала включите прокси, затем примените его в Telegram.</string>
     <string name="copy_proxy_address">Скопировать адрес прокси</string>
     <string name="proxy_address_copied">Адрес прокси скопирован</string>
     <string name="section_connection">Подключение</string>
@@ -27,6 +27,10 @@
     <string name="theme_system">Системная</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
+    <string name="language_mode_label">Язык</string>
+    <string name="language_system">Системный язык</string>
+    <string name="language_russian">Русский</string>
+    <string name="language_english">English</string>
     <string name="cf_domain_label">Cloudflare-домен</string>
     <string name="cf_proxy_title">CF proxy</string>
     <string name="cf_proxy_hint">Включает Cloudflare WebSocket-маршрут.</string>
@@ -38,15 +42,16 @@
     <string name="logs_enabled_hint_on">Logcat читается в окно runtime-логов.</string>
     <string name="logs_enabled_hint_off">Сбор runtime-логов остановлен.</string>
     <string name="main_hint_bydpi">Если используется ByeDPI или аналог, порт 1081 обычно безопаснее.</string>
-    <string name="main_hint_background">Для стабильной работы убери ограничения фоновой активности и закрепи приложение, если оболочка агрессивно убивает сервисы.</string>
+    <string name="main_hint_background">Для стабильной работы уберите ограничения фоновой активности и закрепите приложение, если оболочка агрессивно убивает сервисы.</string>
     <string name="settings_hint_logs">Логи лучше включать только для диагностики, иначе это лишний шум.</string>
     <string name="logs_empty">Логи появятся здесь после запуска прокси.</string>
     <string name="logs_disabled">Ведение логов выключено.</string>
     <string name="info_title">Версия %1$s</string>
-    <string name="info_current_build_title">Текущая сборка</string>
-    <string name="info_current_build_body">Эта сборка сфокусирована на режимах CF only / CF first, IPv4-first подключении к Cloudflare, экспорте runtime-логов и упрощённом главном экране.</string>
-    <string name="info_mobile_body">На ограниченных мобильных сетях основной рабочий путь сейчас — Cloudflare proxy. Прямые Telegram IPv4/IPv6 upstream не являются основной ставкой этой сборки.</string>
-    <string name="info_attribution_body">Это рабочий форк Android-проекта amurcanov с runtime-кодом на базе Flowseal tg-ws-proxy. При распространении сохраняй атрибуцию и лицензионные заметки оригинальных проектов.</string>
+    <string name="info_current_build_title">О приложении</string>
+    <string name="info_current_build_body">TG WS Proxy для Android поднимает локальный SOCKS5-прокси для Telegram и переводит поддерживаемый MTProto-трафик в WebSocket-соединения.</string>
+    <string name="info_mobile_body">Если мобильная сеть блокирует прямые маршруты Telegram, используйте CF only: трафик пойдёт через настроенный Cloudflare-домен, по умолчанию pclead.co.uk.</string>
+    <string name="info_attribution_body">Приложение основано на Android-форке amurcanov и runtime-идеях/коде Flowseal tg-ws-proxy. Атрибуция оригинальных проектов и лицензионные заметки сохранены в репозитории.</string>
+    <string name="info_usage_body">Запустите прокси, затем нажмите «Применить в Telegram». Для диагностики временно включите логи и сохраните их в выбранную папку отчётов.</string>
     <string name="info_close">Закрыть</string>
     <string name="tips_title">Подсказки</string>
 </resources>

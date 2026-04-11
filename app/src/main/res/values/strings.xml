@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Telegram WS Proxy</string>
-    <string name="screen_main_title">Telegram WS Proxy</string>
+    <string name="screen_main_title">TgWsProxy</string>
     <string name="screen_settings_title">Settings</string>
     <string name="action_info">info</string>
     <string name="action_tips">Tips</string>
@@ -27,6 +27,10 @@
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+    <string name="language_mode_label">Language</string>
+    <string name="language_system">System language</string>
+    <string name="language_russian">Russian</string>
+    <string name="language_english">English</string>
     <string name="cf_domain_label">Cloudflare domain</string>
     <string name="cf_proxy_title">CF proxy</string>
     <string name="cf_proxy_hint">Enable the Cloudflare WebSocket route.</string>
@@ -43,10 +47,11 @@
     <string name="logs_empty">Logs will appear here after the proxy starts.</string>
     <string name="logs_disabled">Log collection is disabled.</string>
     <string name="info_title">Version %1$s</string>
-    <string name="info_current_build_title">Current build</string>
-    <string name="info_current_build_body">This build focuses on CF only / CF first operation, IPv4-preferred Cloudflare dialing, runtime log export, and a simplified main screen.</string>
-    <string name="info_mobile_body">On restricted mobile networks, the main working path is Cloudflare proxy. Direct Telegram IPv4/IPv6 upstreams are not the primary route in this build.</string>
-    <string name="info_attribution_body">This is a working fork of the Android project by amurcanov, with runtime code based on Flowseal tg-ws-proxy. Keep the original attribution and license notes when redistributing.</string>
+    <string name="info_current_build_title">About the app</string>
+    <string name="info_current_build_body">TG WS Proxy for Android runs a local SOCKS5 proxy for Telegram and routes supported MTProto traffic through WebSocket connections.</string>
+    <string name="info_mobile_body">If your mobile network blocks direct Telegram routes, use CF only: traffic will go through the configured Cloudflare domain, pclead.co.uk by default.</string>
+    <string name="info_attribution_body">This app is based on the Android fork by amurcanov and runtime ideas/code from Flowseal tg-ws-proxy. The original projects and license notes are kept in the repository.</string>
+    <string name="info_usage_body">Start the proxy, then tap “Apply in Telegram”. For diagnostics, enable logs temporarily and save them to the selected report folder.</string>
     <string name="info_close">Close</string>
     <string name="tips_title">Tips</string>
 </resources>

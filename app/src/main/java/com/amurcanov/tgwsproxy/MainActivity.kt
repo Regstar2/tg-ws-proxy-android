@@ -7,10 +7,12 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.LocaleList
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -45,11 +47,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,6 +55,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.Locale
 import kotlin.math.max
 
 // DataCenters list removed
@@ -79,7 +77,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.2.0-ui"
+private const val APP_INFO_VERSION = "1.2.1-ui"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -94,6 +92,23 @@ private enum class ThemeMode {
     System,
     Light,
     Dark,
+}
+
+private enum class LanguageMode {
+    System,
+    Russian,
+    English,
+}
+
+private fun Context.withLocale(locale: Locale): Context {
+    val config = Configuration(resources.configuration)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        config.setLocales(LocaleList(locale))
+    } else {
+        @Suppress("DEPRECATION")
+        config.setLocale(locale)
+    }
+    return createConfigurationContext(config)
 }
 
 class MainActivity : ComponentActivity() {
@@ -114,17 +129,28 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             val prefs = remember { getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE) }
+            val context = LocalContext.current
             var themeModeName by rememberSaveable {
                 mutableStateOf(prefs.getString("theme_mode", ThemeMode.System.name) ?: ThemeMode.System.name)
             }
+            var languageModeName by rememberSaveable {
+                mutableStateOf(prefs.getString("language_mode", LanguageMode.System.name) ?: LanguageMode.System.name)
+            }
             val themeMode = runCatching { ThemeMode.valueOf(themeModeName) }.getOrDefault(ThemeMode.System)
+            val languageMode = runCatching { LanguageMode.valueOf(languageModeName) }.getOrDefault(LanguageMode.System)
             val systemDarkTheme = isSystemInDarkTheme()
             val isDarkTheme = when (themeMode) {
                 ThemeMode.System -> systemDarkTheme
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true
             }
-            val context = LocalContext.current
+            val localizedContext = remember(context, languageMode) {
+                when (languageMode) {
+                    LanguageMode.System -> context
+                    LanguageMode.Russian -> context.withLocale(Locale("ru"))
+                    LanguageMode.English -> context.withLocale(Locale.ENGLISH)
+                }
+            }
 
             // Dynamic colors logic for Android 12+ (Material You)
             val colorScheme = when {
@@ -136,17 +162,24 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = colorScheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    ProxyScreen(
-                        themeMode = themeMode,
-                        onThemeModeChange = {
-                            themeModeName = it.name
-                            prefs.edit().putString("theme_mode", it.name).apply()
-                        }
-                    )
+                CompositionLocalProvider(LocalContext provides localizedContext) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        ProxyScreen(
+                            themeMode = themeMode,
+                            onThemeModeChange = {
+                                themeModeName = it.name
+                                prefs.edit().putString("theme_mode", it.name).apply()
+                            },
+                            languageMode = languageMode,
+                            onLanguageModeChange = {
+                                languageModeName = it.name
+                                prefs.edit().putString("language_mode", it.name).apply()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -172,7 +205,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ProxyScreen(
     themeMode: ThemeMode,
-    onThemeModeChange: (ThemeMode) -> Unit
+    onThemeModeChange: (ThemeMode) -> Unit,
+    languageMode: LanguageMode,
+    onLanguageModeChange: (LanguageMode) -> Unit
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
@@ -481,11 +516,6 @@ private fun ProxyScreen(
                         }
                     }
 
-                    HintText(stringResource(R.string.main_hint_bydpi))
-                    HintText(stringResource(R.string.main_hint_background))
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
                     Spacer(modifier = Modifier.height(20.dp))
 
                     AnimatedContent(
@@ -759,6 +789,43 @@ private fun ProxyScreen(
                             label = { Text(label) },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                }
+
+                Text(
+                    stringResource(R.string.language_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(
+                        LanguageMode.System to stringResource(R.string.language_system),
+                        LanguageMode.Russian to stringResource(R.string.language_russian),
+                        LanguageMode.English to stringResource(R.string.language_english)
+                    ).forEach { (mode, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onLanguageModeChange(mode) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = languageMode == mode,
+                                onClick = { onLanguageModeChange(mode) }
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
                     }
                 }
 
@@ -1157,6 +1224,13 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
+                    text = stringResource(R.string.info_usage_body),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
                     text = stringResource(R.string.info_attribution_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1193,40 +1267,6 @@ fun InfoDialog(onDismiss: () -> Unit) {
                         modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/amurcanov/tg-ws-proxy-android") }
                     )
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Текущая сборка — локальный рабочий fork этого Android-проекта с диагностическими и сетевыми правками под реальный сценарий использования.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-
-                Text(
-                    text = buildAnnotatedString {
-                        append("Актуальный список CIDR Telegram можно проверить ")
-                        withStyle(style = SpanStyle(
-                            color = MaterialTheme.colorScheme.primary,
-                            textDecoration = TextDecoration.Underline
-                        )) {
-                            append("здесь")
-                        }
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clickable { openLink("https://core.telegram.org/resources/cidr.txt") }
-                        .padding(bottom = 16.dp)
-                )
-
-                Text(
-                    text = "Если на мобильной сети снова появятся задержки или обрывы, в первую очередь проверяйте режим CF proxy, домен и экспортированные runtime-логи. " +
-                           "Прямой IPv4/IPv6 путь к Telegram в этой сборке сейчас не является основной ставкой.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
-                )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
