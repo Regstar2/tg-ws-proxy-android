@@ -218,6 +218,6 @@
 
 ## Лицензия и исходная база
 
-- исходный runtime `tg-ws-proxy`: MIT, автор — [Flowseal](https://github.com/Flowseal)
+- исходный runtime `tg-ws-proxy`: MIT, автор — [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
 - Android-форк `amurcanov/tg-ws-proxy-android`: GPLv3
 - текущий репозиторий является локальной рабочей веткой поверх Android-форка и сохраняет атрибуцию исходным авторам

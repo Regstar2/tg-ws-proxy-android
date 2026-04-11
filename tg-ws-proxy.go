@@ -48,7 +48,7 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	defaultPort          = 1080
+	defaultPort          = 1081
 	tcpNodelay           = true
 	defaultRecvBuf       = 256 * 1024
 	defaultSendBuf       = 256 * 1024

@@ -43,7 +43,7 @@ class ProxyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val port = intent.getIntExtra(EXTRA_PORT, 8080)
+                val port = intent.getIntExtra(EXTRA_PORT, 1081)
                 val ips = intent.getStringExtra(EXTRA_IPS) ?: ""
                 val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, 4)
                 startProxy(port, ips, poolSize)

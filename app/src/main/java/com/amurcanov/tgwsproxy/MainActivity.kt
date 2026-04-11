@@ -78,7 +78,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.2.2-ui"
+private const val APP_INFO_VERSION = "1.2.3-ui"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -233,7 +233,7 @@ private fun ProxyScreen(
     var dc2Text by remember { mutableStateOf(prefs.getString("dc2", "149.154.167.220") ?: "149.154.167.220") }
     var dc4Text by remember { mutableStateOf(prefs.getString("dc4", "149.154.167.220") ?: "149.154.167.220") }
     var dc203Text by remember { mutableStateOf(prefs.getString("dc203", "149.154.167.220") ?: "149.154.167.220") }
-    var portText by remember { mutableStateOf(prefs.getString("port", "1080") ?: "1080") }
+    var portText by remember { mutableStateOf(prefs.getString("port", "1081") ?: "1081") }
     var selectedPoolSize by remember { mutableStateOf(prefs.getInt("pool", 4)) }
     var cfProxyEnabled by remember { mutableStateOf(prefs.getBoolean("cfproxy_enabled", true)) }
     var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
@@ -364,11 +364,11 @@ private fun ProxyScreen(
     }
 
     val applyInTelegramAction by rememberUpdatedState {
-        val port = portText.toIntOrNull() ?: 1080
+        val port = portText.toIntOrNull() ?: 1081
         val proxyUrl = "tg://socks?server=127.0.0.1&port=$port"
         openTelegram(context, proxyUrl)
     }
-    val proxyAddress = "127.0.0.1:${portText.ifBlank { "1080" }}"
+    val proxyAddress = "127.0.0.1:${portText.ifBlank { "1081" }}"
     val proxyModeText = when {
         cfProxyOnly -> "CF only"
         cfProxyPriority -> "CF first"
@@ -1266,6 +1266,20 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
+                    text = stringResource(R.string.info_cfproxy_body),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
+                    text = stringResource(R.string.info_custom_domain_body),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
                     text = stringResource(R.string.info_usage_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1293,9 +1307,9 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.runtime_link_label), style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = "→ Flowseal",
+                        text = "→ Flowseal/tg-ws-proxy",
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/Flowseal") }
+                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/Flowseal/tg-ws-proxy") }
                     )
                 }
 
@@ -1328,6 +1342,9 @@ fun TipsDialog(onDismiss: () -> Unit) {
         stringResource(R.string.main_hint_bydpi),
         stringResource(R.string.main_hint_background),
         stringResource(R.string.cf_only_hint),
+        stringResource(R.string.cf_default_domain_hint),
+        stringResource(R.string.cf_media_hint),
+        stringResource(R.string.cf_custom_domain_hint),
         stringResource(R.string.settings_hint_logs),
     )
     Dialog(onDismissRequest = onDismiss) {
