@@ -27,7 +27,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -188,6 +191,7 @@ private fun ProxyScreen(
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
+    var showTipsModal by remember { mutableStateOf(false) }
     var showIpSetupModal by remember { mutableStateOf(false) }
     var reportFolderUriText by remember { mutableStateOf(prefs.getString("report_folder_uri", "") ?: "") }
     var lastLogStatus by remember { mutableStateOf(prefs.getString("last_log_status", "") ?: "") }
@@ -339,7 +343,32 @@ private fun ProxyScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 },
+                navigationIcon = {
+                    if (currentPage == ProxyScreenPage.Settings) {
+                        IconButton(onClick = { currentPage = ProxyScreenPage.Main }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                },
                 actions = {
+                    IconButton(onClick = { showTipsModal = true }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.HelpOutline,
+                            contentDescription = stringResource(R.string.action_tips),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    IconButton(onClick = { showInfoModal = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = stringResource(R.string.action_info),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     if (currentPage == ProxyScreenPage.Main) {
                         IconButton(onClick = { currentPage = ProxyScreenPage.Settings }) {
                             Icon(
@@ -348,16 +377,6 @@ private fun ProxyScreen(
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    }
-                    TextButton(
-                        onClick = { showInfoModal = true },
-                        colors = ButtonDefaults.textButtonColors(
-                            containerColor = Color.Transparent,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier.padding(end = 12.dp)
-                    ) {
-                        Text(stringResource(R.string.action_info), fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -421,11 +440,25 @@ private fun ProxyScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = proxyAddress,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = proxyAddress,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = copyProxyAddressAction) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = stringResource(R.string.copy_proxy_address),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = stringResource(R.string.active_mode_label),
@@ -509,27 +542,7 @@ private fun ProxyScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    FilledTonalButton(
-                        onClick = copyProxyAddressAction,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(stringResource(R.string.copy_proxy_address), fontWeight = FontWeight.SemiBold)
-                    }
                 } else {
-                    OutlinedButton(
-                        onClick = { currentPage = ProxyScreenPage.Main },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .padding(bottom = 8.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(stringResource(R.string.action_back), fontWeight = FontWeight.SemiBold)
-                    }
-
                 SectionTitle(stringResource(R.string.section_connection))
                 if (cfProxyOnly) {
                     HintText(stringResource(R.string.cf_only_hint))
@@ -973,6 +986,10 @@ private fun ProxyScreen(
         InfoDialog(onDismiss = { showInfoModal = false })
     }
 
+    if (showTipsModal) {
+        TipsDialog(onDismiss = { showTipsModal = false })
+    }
+
     if (showIpSetupModal) {
         IpSetupDialog(
             dc1Text = dc1Text,
@@ -1212,6 +1229,54 @@ fun InfoDialog(onDismiss: () -> Unit) {
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.info_close), style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TipsDialog(onDismiss: () -> Unit) {
+    val tips = listOf(
+        stringResource(R.string.main_hint_bydpi),
+        stringResource(R.string.main_hint_background),
+        stringResource(R.string.cf_only_hint),
+        stringResource(R.string.settings_hint_logs),
+    )
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = stringResource(R.string.tips_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                tips.forEach { tip ->
+                    Text(
+                        text = "• $tip",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {

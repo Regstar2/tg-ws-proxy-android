@@ -4,6 +4,7 @@
     <string name="screen_main_title">Telegram WS Proxy</string>
     <string name="screen_settings_title">Настройки</string>
     <string name="action_info">инфо</string>
+    <string name="action_tips">Подсказки</string>
     <string name="action_back">Назад</string>
     <string name="action_settings">Настройки</string>
     <string name="status_running">Работает</string>
@@ -47,4 +48,5 @@
     <string name="info_mobile_body">На ограниченных мобильных сетях основной рабочий путь сейчас — Cloudflare proxy. Прямые Telegram IPv4/IPv6 upstream не являются основной ставкой этой сборки.</string>
     <string name="info_attribution_body">Это рабочий форк Android-проекта amurcanov с runtime-кодом на базе Flowseal tg-ws-proxy. При распространении сохраняй атрибуцию и лицензионные заметки оригинальных проектов.</string>
     <string name="info_close">Закрыть</string>
+    <string name="tips_title">Подсказки</string>
 </resources>
