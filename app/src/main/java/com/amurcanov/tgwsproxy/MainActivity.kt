@@ -20,14 +20,13 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.NightsStay
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -81,6 +80,11 @@ private enum class PendingFolderAction {
     SaveRuntimeLogs,
 }
 
+private enum class ProxyScreenPage {
+    Main,
+    Settings,
+}
+
 class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -98,7 +102,7 @@ class MainActivity : ComponentActivity() {
         checkBatteryOptimizations()
         
         setContent {
-            var isDarkTheme by remember { mutableStateOf(false) }
+            val isDarkTheme = isSystemInDarkTheme()
             val context = LocalContext.current
 
             // Dynamic colors logic for Android 12+ (Material You)
@@ -115,10 +119,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ProxyScreen(
-                        isDarkTheme = isDarkTheme,
-                        onThemeChange = { isDarkTheme = !isDarkTheme }
-                    )
+                    ProxyScreen()
                 }
             }
         }
@@ -142,10 +143,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
+fun ProxyScreen() {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
+    var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
     var dc1Text by remember { mutableStateOf(prefs.getString("dc1", "149.154.167.220") ?: "149.154.167.220") }
     var dc2Text by remember { mutableStateOf(prefs.getString("dc2", "149.154.167.220") ?: "149.154.167.220") }
     var dc4Text by remember { mutableStateOf(prefs.getString("dc4", "149.154.167.220") ?: "149.154.167.220") }
@@ -156,6 +158,7 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
     var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
     var cfProxyOnly by remember { mutableStateOf(prefs.getBoolean("cfproxy_only", false)) }
     var cfProxyDomainText by remember { mutableStateOf(prefs.getString("cfproxy_domain", "pclead.co.uk") ?: "pclead.co.uk") }
+    var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
     var showIpSetupModal by remember { mutableStateOf(false) }
@@ -220,9 +223,17 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
         }
     }
 
-    DisposableEffect(Unit) {
-        LogManager.startListening()
-        onDispose { LogManager.stopListening() }
+    DisposableEffect(logsEnabled) {
+        if (logsEnabled) {
+            LogManager.startListening()
+        } else {
+            LogManager.stopListening(clear = false)
+        }
+        onDispose {
+            if (logsEnabled) {
+                LogManager.stopListening(clear = false)
+            }
+        }
     }
 
     LaunchedEffect(showLogs) {
@@ -291,21 +302,15 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                     ) {
                         Text("инфо", fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
                     }
-                    IconButton(onClick = onThemeChange) {
-                        Crossfade(targetState = isDarkTheme, animationSpec = tween(400), label = "themeAnim") { isDark ->
-                            if (isDark) {
-                                Icon(
-                                    imageVector = Icons.Default.WbSunny,
-                                    contentDescription = "Светлая тема",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.NightsStay,
-                                    contentDescription = "Темная тема",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
+                    if (currentPage == ProxyScreenPage.Settings) {
+                        TextButton(
+                            onClick = { currentPage = ProxyScreenPage.Main },
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
+                            Text("Главная", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
@@ -334,6 +339,110 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top // Push top fields higher
             ) {
+                if (currentPage == ProxyScreenPage.Main) {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = if (isRunning) "Прокси включен" else "Прокси выключен",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Текущий порт: 127.0.0.1:${portText.ifBlank { "1080" }}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Режим: ${if (cfProxyOnly) "CF only" else if (cfProxyPriority) "CF first" else "Direct/CF fallback"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    AnimatedContent(
+                        targetState = isRunning,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                        },
+                        label = "mainRunAnim"
+                    ) { running ->
+                        Button(
+                            onClick = {
+                                if (running) stopProxyAction() else startProxyAction()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Text(
+                                if (running) "Выключить прокси" else "Включить прокси",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    FilledTonalButton(
+                        onClick = applyInTelegramAction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "Применить в Telegram",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { currentPage = ProxyScreenPage.Settings },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Настройки", fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Настройки",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(onClick = { currentPage = ProxyScreenPage.Main }) {
+                            Text("Главная")
+                        }
+                    }
 
                 // Proxy Port Input
                 OutlinedTextField(
@@ -509,53 +618,29 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                     )
                 }
 
-                // Proxy Start/Stop Button
-                AnimatedContent(
-                    targetState = isRunning,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
-                    },
-                    label = "runAnim"
-                ) { running ->
-                    Button(
-                        onClick = {
-                            if (running) stopProxyAction() else startProxyAction()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Text(
-                            if (running) "Остановить прокси" else "Запустить прокси",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Apply in Telegram Button
-                FilledTonalButton(
-                    onClick = applyInTelegramAction,
-                    enabled = isRunning,
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp),
-                    shape = RoundedCornerShape(12.dp)
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "Применить в телеграмм", 
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Ведение логов", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (logsEnabled) "Logcat читается в окно логов" else "Сбор логов остановлен",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = logsEnabled,
+                        onCheckedChange = {
+                            logsEnabled = it
+                            prefs.edit().putBoolean("logs_enabled", it).apply()
+                        }
                     )
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 FilledTonalButton(
                     onClick = { reportFolderLauncher.launch(null) },
@@ -671,7 +756,9 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Text(
-                            text = if (logs.isEmpty()) {
+                            text = if (!logsEnabled) {
+                                "Ведение логов выключено."
+                            } else if (logs.isEmpty()) {
                                 "Logs will appear here after the proxy starts."
                             } else {
                                 logs.joinToString("\n") { formatLogLine(it) }
@@ -739,6 +826,7 @@ fun ProxyScreen(isDarkTheme: Boolean, onThemeChange: () -> Unit) {
                     }
                 } else {
                     Spacer(modifier = Modifier.height(4.dp))
+                }
                 }
             }
         }
@@ -1066,11 +1154,13 @@ object LogManager {
         }
     }
 
-    fun stopListening() {
+    fun stopListening(clear: Boolean = true) {
         job?.cancel()
         job = null
         logcatProcess?.destroy()
         logcatProcess = null
-        logs.value = emptyList()
+        if (clear) {
+            logs.value = emptyList()
+        }
     }
 }
