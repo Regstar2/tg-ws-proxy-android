@@ -198,7 +198,6 @@ var ipToDC = map[string]dcInfo{
 }
 
 var dcOverrides = map[int]int{
-	1:   2,
 	203: 2,
 }
 
@@ -570,41 +569,48 @@ func cfProxyFallback(ctx context.Context, client net.Conn, init []byte, label st
 		label, dc, mTag, host)
 
 	resolved, err := resolvePreferredIPs(host, 10)
+	var candidates []string
+	var dnsErr error
 	if err != nil {
+		dnsErr = err
 		logWarn.Printf("[%s] DC%d%s cfproxy dns resolve failure for %s (%s): %v",
 			label, dc, mTag, host, classifyConnError(err), err)
-		return false, fmt.Sprintf("dns_resolve_failed: %v", err)
-	}
-
-	logDebug.Printf("[%s] DC%d%s cfproxy dns resolve success host=%s %s",
-		label, dc, mTag, host, resolved.String())
-
-	candidates := resolved.Preferred()
-	if len(candidates) == 0 {
-		logWarn.Printf("[%s] DC%d%s cfproxy dns resolve produced no usable IPs for %s",
-			label, dc, mTag, host)
-		return false, "dns_resolve_empty"
+	} else {
+		logDebug.Printf("[%s] DC%d%s cfproxy dns resolve success host=%s %s",
+			label, dc, mTag, host, resolved.String())
+		candidates = resolved.Preferred()
+		if len(candidates) == 0 {
+			logWarn.Printf("[%s] DC%d%s cfproxy dns resolve produced no usable IPs for %s",
+				label, dc, mTag, host)
+		}
 	}
 
 	prefix := fmt.Sprintf("[%s] DC%d%s cfproxy", label, dc, mTag)
 	var ws *RawWebSocket
-	var usedIP string
+	usedTarget := "hostname"
 	var lastErr error
 
+	logDebug.Printf("[%s] DC%d%s cfproxy hostname dial start host=%s",
+		label, dc, mTag, host)
+	ws, lastErr = wsConnect(host, host, "/apiws", 10)
+	if lastErr != nil {
+		logDomainConnectFailure(prefix, host, host, lastErr)
+	}
+
 	for _, ip := range candidates {
+		if ws != nil {
+			break
+		}
 		logDebug.Printf("[%s] DC%d%s cfproxy tcp dial start host=%s ip=%s",
 			label, dc, mTag, host, ip)
 		ws, lastErr = wsConnect(ip, host, "/apiws", 10)
 		if lastErr == nil {
-			usedIP = ip
+			usedTarget = ip
 			break
 		}
 		logDomainConnectFailure(prefix, host, ip, lastErr)
 		var wsErr *WsHandshakeError
 		if errors.As(lastErr, &wsErr) {
-			if wsErr.IsRateLimited() {
-				return false, fmt.Sprintf("cfproxy_rate_limited: %s", wsErr.StatusLine)
-			}
 			if wsErr.IsRedirect() {
 				break
 			}
@@ -615,11 +621,14 @@ func cfProxyFallback(ctx context.Context, client net.Conn, init []byte, label st
 		if lastErr != nil {
 			return false, fmt.Sprintf("ws_connect_failed: %v", lastErr)
 		}
+		if dnsErr != nil {
+			return false, fmt.Sprintf("dns_resolve_failed: %v", dnsErr)
+		}
 		return false, "ws_connect_failed"
 	}
 
 	logInfo.Printf("[%s] DC%d%s cfproxy connected host=%s via=%s",
-		label, dc, mTag, host, usedIP)
+		label, dc, mTag, host, usedTarget)
 
 	stats.connectionsCfProxy.Add(1)
 
@@ -1598,7 +1607,14 @@ func socks5Reply(status byte) []byte {
 // ---------------------------------------------------------------------------
 
 type bridgeCloseSummary struct {
-	Reason string
+	Reason  string
+	Primary bool
+}
+
+type bridgeCloseTracker struct {
+	mu      sync.Mutex
+	reason  string
+	primary bool
 }
 
 func (s bridgeCloseSummary) String() string {
@@ -1608,14 +1624,24 @@ func (s bridgeCloseSummary) String() string {
 	return s.Reason
 }
 
-func recordBridgeCloseReason(ch chan<- string, reason string) {
+func (t *bridgeCloseTracker) Record(reason string, primary bool) bool {
 	if reason == "" {
-		return
+		return false
 	}
-	select {
-	case ch <- reason:
-	default:
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.reason != "" {
+		return false
 	}
+	t.reason = reason
+	t.primary = primary
+	return true
+}
+
+func (t *bridgeCloseTracker) Summary() bridgeCloseSummary {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return bridgeCloseSummary{Reason: t.reason, Primary: t.primary}
 }
 
 func formatBridgeCloseReason(prefix string, err error) string {
@@ -1639,14 +1665,14 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 	startTime := time.Now()
 
 	ctx2, cancel := context.WithCancel(ctx)
-	closeReason := make(chan string, 1)
+	closeTracker := &bridgeCloseTracker{}
 
 	// Critical: close connections when context is cancelled
 	// This unblocks the Read() calls in goroutines
 	go func() {
 		<-ctx2.Done()
-		if err := ctx2.Err(); err != nil {
-			recordBridgeCloseReason(closeReason, formatBridgeCloseReason("context_cancel", err))
+		if err := ctx.Err(); err != nil {
+			closeTracker.Record(formatBridgeCloseReason("context_cancel", err), true)
 		}
 		_ = conn.Close()
 		ws.Close()
@@ -1681,9 +1707,12 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 					sendErr = ws.Send(chunk)
 				}
 				if sendErr != nil {
-					recordBridgeCloseReason(closeReason, formatBridgeCloseReason("client_to_ws_write", sendErr))
-					if firstPacket {
-						logWarn.Printf("[%s] %s first client->ws write failed for %s: %v",
+					primary := closeTracker.Record(formatBridgeCloseReason("client_to_ws_write", sendErr), true)
+					if firstPacket && primary {
+						logWarn.Printf("[%s] %s bridge first-exit primary dir=client->ws stage=write dst=%s up=%s/%d down=%s/%d err=%v",
+							label, dcTag, dstTag, humanBytes(upBytes), upPkts, humanBytes(downBytes), downPkts, sendErr)
+					} else if firstPacket {
+						logDebug.Printf("[%s] %s bridge secondary dir=client->ws stage=write dst=%s err=%v",
 							label, dcTag, dstTag, sendErr)
 					}
 					return
@@ -1691,7 +1720,11 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 				firstPacket = false
 			}
 			if err != nil {
-				recordBridgeCloseReason(closeReason, formatBridgeCloseReason("client_read", err))
+				primary := closeTracker.Record(formatBridgeCloseReason("client_read", err), true)
+				if primary {
+					logInfo.Printf("[%s] %s bridge first-exit primary dir=client->ws stage=read dst=%s up=%s/%d down=%s/%d err=%v",
+						label, dcTag, dstTag, humanBytes(upBytes), upPkts, humanBytes(downBytes), downPkts, err)
+				}
 				return
 			}
 		}
@@ -1706,13 +1739,16 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 			data, err := ws.Recv()
 			if err != nil || data == nil {
 				if err != nil {
-					recordBridgeCloseReason(closeReason, formatBridgeCloseReason("ws_read", err))
+					primary := closeTracker.Record(formatBridgeCloseReason("ws_read", err), true)
+					if err != nil && firstPacket && primary {
+						logWarn.Printf("[%s] %s bridge first-exit primary dir=ws->client stage=read dst=%s up=%s/%d down=%s/%d err=%v",
+							label, dcTag, dstTag, humanBytes(upBytes), upPkts, humanBytes(downBytes), downPkts, err)
+					} else if err != nil && firstPacket {
+						logDebug.Printf("[%s] %s bridge secondary dir=ws->client stage=read dst=%s err=%v",
+							label, dcTag, dstTag, err)
+					}
 				} else {
-					recordBridgeCloseReason(closeReason, "ws_read: nil_frame")
-				}
-				if err != nil && firstPacket {
-					logWarn.Printf("[%s] %s first ws->client read failed for %s: %v",
-						label, dcTag, dstTag, err)
+					closeTracker.Record("ws_read: nil_frame", true)
 				}
 				return
 			}
@@ -1721,9 +1757,12 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 			downBytes += int64(n)
 			downPkts++
 			if _, err := conn.Write(data); err != nil {
-				recordBridgeCloseReason(closeReason, formatBridgeCloseReason("ws_to_client_write", err))
-				if firstPacket {
-					logWarn.Printf("[%s] %s first ws->client write failed for %s: %v",
+				primary := closeTracker.Record(formatBridgeCloseReason("ws_to_client_write", err), true)
+				if firstPacket && primary {
+					logWarn.Printf("[%s] %s bridge first-exit primary dir=ws->client stage=write dst=%s up=%s/%d down=%s/%d err=%v",
+						label, dcTag, dstTag, humanBytes(upBytes), upPkts, humanBytes(downBytes), downPkts, err)
+				} else if firstPacket {
+					logDebug.Printf("[%s] %s bridge secondary dir=ws->client stage=write dst=%s err=%v",
 						label, dcTag, dstTag, err)
 				}
 				return
@@ -1734,12 +1773,10 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 
 	wg.Wait()
 
-	reason := "unknown"
-	select {
-	case reason = <-closeReason:
-	default:
+	summary := closeTracker.Summary()
+	if summary.Reason == "" {
+		summary.Reason = "unknown"
 	}
-	summary := bridgeCloseSummary{Reason: reason}
 	elapsed := time.Since(startTime).Seconds()
 	logInfo.Printf("[%s] %s (%s) WS session closed: ^%s (%d pkts) v%s (%d pkts) in %.1fs reason=%s",
 		label, dcTag, dstTag,
@@ -2103,6 +2140,18 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	if cfg.Enabled && cfg.Priority {
+		logInfo.Printf("[%s] DC%d%s fallback reason=cfproxy_priority -> CF first",
+			label, dc, mTag)
+		if ok, reason := cfProxyFallback(ctx, conn, init, label, dc, isMedia, splitter); ok {
+			logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
+			return
+		} else {
+			logInfo.Printf("[%s] DC%d%s CF priority unavailable reason=%s -> direct WS",
+				label, dc, mTag, reason)
+		}
+	}
+
 	// -- Try WebSocket --
 	dcFailMu.RLock()
 	failUntil := dcFailUntil[dcKey]
@@ -2336,8 +2385,12 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	}()
 
 	cfg = getCfProxyConfig()
-	if cfg.Only {
-		logInfo.Println("  WS pool warmup skipped in CF only mode")
+	if cfg.Only || cfg.Priority {
+		if cfg.Only {
+			logInfo.Println("  WS pool warmup skipped in CF only mode")
+		} else {
+			logInfo.Println("  WS pool warmup skipped in CF first mode")
+		}
 	} else {
 		// Warmup WS pool
 		wsPool.Warmup(dcOptMap)

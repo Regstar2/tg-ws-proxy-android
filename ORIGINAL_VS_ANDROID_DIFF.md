@@ -1,206 +1,79 @@
 # Original vs Android Diff
 
-Updated: 2026-04-10
+Updated: 2026-04-11
 
 ## Scope
 
-Compared:
+Compared projects:
 
-- Original project: `Flowseal/tg-ws-proxy` (Python)
-- Current Android fork: `amurcanov/tg-ws-proxy-android` (Go + Android UI)
+- Runtime origin: `Flowseal/tg-ws-proxy`
+- Android origin: `amurcanov/tg-ws-proxy-android`
+- Current repository: Android fork with local runtime and UI fixes
 
-Focus areas:
+This file tracks high-level behavior that matters for the current Cloudflare Proxy baseline.
 
-- WS path selection
-- fallback logic
-- cooldown logic
-- pool refill/reuse
-- missing DC handling
-- Cloudflare Proxy path
+## What changed since the first comparison
 
-## Android fork map
+The first audit found that the Android fork did not have a practical Cloudflare Proxy runtime branch. That is no longer true for this working tree.
 
-### Runtime
+Current fork now has:
 
-- `handleClient()` in `tg-ws-proxy.go`
-  - Parses SOCKS5 connect, extracts Telegram init, maps DC, selects WS or TCP fallback.
-- `wsDomains()` in `tg-ws-proxy.go`
-  - Builds `kws*.web.telegram.org` domains.
-- `wsConnect()` in `tg-ws-proxy.go`
-  - Pinned IP + domain/SNI WSS connection.
-- `WsPool.Get/refill/connectOneWS()` in `tg-ws-proxy.go`
-  - Prewarms and reuses WS connections.
-- `tcpFallback()` in `tg-ws-proxy.go`
-  - Direct TCP fallback to destination Telegram IP.
-- `ipToDC` and `dcOverrides` in `tg-ws-proxy.go`
-  - Static IPv4 DC mapping and overrides.
+- `CF proxy`, `CF first`, and `CF only` runtime modes.
+- Cloudflare fallback to `wss://kws{dc}.<domain>/apiws`.
+- Hostname-first Cloudflare dialing, followed by resolved IP candidates when needed.
+- DNS/TCP/WS diagnostic logs for Cloudflare attempts.
+- UI settings for Cloudflare mode and domain.
+- Bridge first-exit logging for close-reason diagnosis.
+- WS pool warmup disabled in CF-first and CF-only modes to reduce direct-path noise.
 
-### Android UI / diagnostics
+## Runtime behavior notes
 
-- `MainActivity.kt`
-  - UI, DC IP settings, report folder, upstream test button.
-- `UpstreamDiagnostics.kt`
-  - Transport reachability tests for DC IPs and `kws*`.
+### Cloudflare path
 
-## Original project map
+The useful Android path now matches the important part of Flowseal's strategy:
 
-### Runtime
+- derive the Telegram DC from the client request/init data;
+- route the session to `kws{dc}.<cf_domain>`;
+- bridge the client socket to the Cloudflare WebSocket;
+- fall back only when the selected CF route cannot be established.
 
-- `_handle_client()` in `proxy/tg_ws_proxy.py`
-  - Parses MTProto obfuscation handshake, extracts `dc`, tries WS, then fallback.
-- `_ws_domains()` in `proxy/tg_ws_proxy.py`
-  - Builds `kws*.web.telegram.org` domains, with only `DC203 -> DC2` override.
-- `_WsPool.get/_refill/_connect_one()` in `proxy/tg_ws_proxy.py`
-  - Prewarms and reuses WS connections.
-- `do_fallback()` in `proxy/bridge.py`
-  - Chooses between CF proxy and direct TCP fallback.
-- `_cfproxy_fallback()` in `proxy/bridge.py`
-  - Connects to `kws{dc}.{cf_domain}` and bridges through CF.
-- `_tcp_fallback()` in `proxy/bridge.py`
-  - Direct TCP fallback to default DC IP map.
+The default domain remains `pclead.co.uk`, but it is a shared endpoint and can return `429 Too Many Requests`. A user-owned Cloudflare domain is still the better long-term setup.
 
-### Config / UI
+### Direct WS domains
 
-- `proxy/config.py`
-  - Default `cfproxy=True`, `cfproxy_priority=True`, default encoded CF domain pool.
-- `docs/CfProxy.md`
-  - Documents CF mode and required `kws1..kws5,kws203` DNS records.
-- `ui/ctk_tray_ui.py`
-  - Has CF proxy settings and CF connectivity test.
-
-## Key behavioral differences
-
-### 1. Original has a dedicated `CfProxy` branch; Android fork does not
-
-Original:
-
-- Missing DC or WS failure goes into `do_fallback()`
-- `do_fallback()` can try:
-  - `CF proxy first`
-  - or `TCP first`
-- `CF proxy` targets `wss://kws{dc}.{cf_domain}/apiws`
-
-Android fork:
-
-- Missing DC goes to direct TCP passthrough/fallback
-- WS failure goes to direct TCP fallback
-- No `CfProxy` domain path exists in runtime
-
-Why it matters:
-
-- This is the biggest gap explaining why the original can partially survive mobile tethering while Android direct path does not.
-
-### 2. Original handles `DC not in config` as structured fallback; Android treats it as direct passthrough
-
-Original:
-
-- `DC1 not in config -> fallback`
-- then tries `CfProxy`, then TCP if configured by priority
-
-Android fork:
-
-- unknown or not configured DC logs:
-  - `mapped_dc=... configured=false -> TCP passthrough`
-  - `unknown DC... -> TCP passthrough`
-
-Why it matters:
-
-- The original still gives missing DCs a chance through CF.
-- The Android fork currently drops straight into a path that is already known to be blocked on mobile.
-
-### 3. Original has `CfProxy` domain pool and automatic domain rotation
-
-Original:
-
-- Default encoded domain pool in `proxy/config.py`
-- Optional user domain
-- Background refresh from GitHub
-- Tracks `active_cfproxy_domain`
-
-Android fork:
-
-- No CF domain pool
-- No CF domain selection state
-- No CF connectivity tester in runtime settings
-
-Why it matters:
-
-- The original can move between CF domains or use a custom domain.
-- The Android fork has no equivalent escape hatch.
-
-### 4. Original exposes `CfProxy` controls in UI; Android fork exposes only direct DC IP settings
-
-Original:
-
-- Enable/disable CF proxy
-- CF priority
-- User CF domain
-- CF connectivity test
-
-Android fork:
-
-- DC IPs
-- pool size
-- transport sweep tool
-- no CF mode settings
-
-Why it matters:
-
-- The original gives the user a first-class way to route around blocked direct paths.
-- The Android fork currently forces all traffic through direct Telegram endpoints.
-
-### 5. Pool tuning differs, but this is secondary
-
-Original:
-
-- `WS_POOL_MAX_AGE = 120.0`
-
-Android fork:
-
-- `wsPoolMaxAge = 60.0`
-
-Why it matters:
-
-- This may affect churn and reuse behavior.
-- It does not explain the mobile-network failure as strongly as the missing `CfProxy` branch.
-
-### 6. DC override policy differs
-
-Original:
-
-- Only `DC203 -> DC2`
-
-Android fork:
+The current override policy is back to the safer baseline:
 
 - `DC203 -> DC2`
-- `DC1 -> DC2` was added locally during debugging
 
-Why it matters:
+The temporary debug override:
 
-- This can influence domain selection and `kws*` routing.
-- It is still lower priority than the absence of `CfProxy`.
+- `DC1 -> DC2`
 
-## Ranked top differences
+was removed because it could make logs and direct WS domain selection misleading, for example mapping DC1 traffic to `kws2.*`.
 
-1. No `CfProxy` runtime path in Android fork.
-2. `DC not in config` goes to direct passthrough in Android instead of structured CF/TCP fallback.
-3. No CF domain pool, no active domain rotation, no custom domain support in Android.
-4. No Android UI/config for `CfProxy` enable/priority/domain/test.
-5. Smaller pool age / different override behavior, which may affect stability but not the main mobile-network dead end.
+### Bridge close handling
+
+The bridge now records the first primary close reason before cancelling the paired copy loop. Secondary `net.ErrClosed` / EOF-like errors should no longer hide the primary cause.
+
+Useful log categories:
+
+- `bridge first-exit primary ...`
+- `bridge secondary ...`
+- `CF proxy closed: reason=...`
+
+## Remaining differences from Flowseal runtime
+
+- No automatic encoded Cloudflare domain pool/rotation in Android.
+- No full Cloudflare domain tester UI yet.
+- Android has foreground service, Compose UI, log export, theme/language settings, and mobile-specific UX that the desktop/runtime project does not need.
+- Direct path remains available, but it is not the primary working route for tested mobile networks.
 
 ## Practical conclusion
 
-The original Windows proxy is not proving that "direct Telegram path is fine". It is proving something narrower:
+The current Android fork is no longer blocked on "missing CfProxy". The active question is now operational stability:
 
-- direct path is unstable or partially blocked,
-- but `CfProxy` sometimes keeps sessions alive long enough to work.
+- Does `CF first` / `CF only` remain usable for real Telegram traffic on mobile networks?
+- Does the default domain hit Cloudflare limits too often?
+- Is a custom domain workflow needed before a public release?
 
-That makes `CfProxy` the next rational implementation target in the Android fork.
-
-## Recommended next sequence
-
-1. Add `CfProxy` diagnostics only.
-2. Add `CfProxy preferred` and `CfProxy only` modes.
-3. Add IPv4-preferred resolution only for CF proxy hostnames.
-4. Add Android UI/config for CF domain selection and CF test.
-5. Only after that, decide whether plain TCP MTProto probing is still needed.
+Until Cloudflare Proxy is proven insufficient, avoid spending more time on random direct Telegram IP/path selection.

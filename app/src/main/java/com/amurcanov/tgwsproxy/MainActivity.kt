@@ -15,6 +15,7 @@ import android.content.ClipboardManager
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -78,7 +79,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.2.3-ui"
+private const val APP_INFO_VERSION = "1.2.5-ui"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -244,6 +245,7 @@ private fun ProxyScreen(
     var showInfoModal by remember { mutableStateOf(false) }
     var showTipsModal by remember { mutableStateOf(false) }
     var showIpSetupModal by remember { mutableStateOf(false) }
+    var showExitConfirm by remember { mutableStateOf(false) }
     var reportFolderUriText by remember { mutableStateOf(prefs.getString("report_folder_uri", "") ?: "") }
     var lastLogStatus by remember { mutableStateOf(prefs.getString("last_log_status", "") ?: "") }
     var isSavingLogs by remember { mutableStateOf(false) }
@@ -251,6 +253,15 @@ private fun ProxyScreen(
     val coroutineScope = rememberCoroutineScope()
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val screenScroll = rememberScrollState()
+    val hasOpenModal = showInfoModal || showTipsModal || showIpSetupModal || showExitConfirm
+
+    BackHandler(enabled = currentPage == ProxyScreenPage.Settings && !hasOpenModal) {
+        currentPage = ProxyScreenPage.Main
+    }
+
+    BackHandler(enabled = currentPage == ProxyScreenPage.Main && !hasOpenModal) {
+        showExitConfirm = true
+    }
 
     val runRuntimeLogSave by rememberUpdatedState<(Uri) -> Unit> { treeUri ->
         if (isSavingLogs) return@rememberUpdatedState
@@ -1097,6 +1108,29 @@ private fun ProxyScreen(
 
     if (showTipsModal) {
         TipsDialog(onDismiss = { showTipsModal = false })
+    }
+
+    if (showExitConfirm) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirm = false },
+            title = { Text(stringResource(R.string.exit_confirm_title)) },
+            text = { Text(stringResource(R.string.exit_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirm = false
+                        (context as? ComponentActivity)?.finish()
+                    }
+                ) {
+                    Text(stringResource(R.string.exit_confirm_positive))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitConfirm = false }) {
+                    Text(stringResource(R.string.exit_confirm_negative))
+                }
+            }
+        )
     }
 
     if (showIpSetupModal) {

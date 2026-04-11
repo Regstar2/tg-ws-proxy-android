@@ -1,0 +1,12 @@
+* text=auto
+
+*.apk binary
+*.aab binary
+*.so binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.png binary
+*.webp binary
+*.jpg binary
+*.jpeg binary

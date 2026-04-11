@@ -1,223 +1,138 @@
-# TG WS Proxy Android
+# TgWsProxy Android
 
-Локальный SOCKS5-прокси для Android-клиентов Telegram. Проект основан на `tg-ws-proxy`, но адаптирован под Android: нативный рантайм на Go, UI на Jetpack Compose, foreground service, локальная диагностика и экспорт отчётов.
+Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
 
-## Происхождение проекта
+Текущая версия рабочей ветки: `1.2.5-ui`.
 
-Важно не путать уровни исходной базы:
+## Происхождение
 
-- оригинальный runtime-проект: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy);
-- исходный Android-проект: [amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android);
-- этот репозиторий: локальный рабочий fork Android-проекта, в котором ведутся аудит, отладка и точечные фиксы под текущий сценарий использования.
+Проект является форком Android-версии `tg-ws-proxy` и сохраняет атрибуцию исходным авторам:
 
-Ниже в README описано состояние именно этой локальной рабочей ветки, а не исходного Android-репозитория в целом.
+- Runtime-идея и исходный проект: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
+- Исходный Android-форк: [amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android)
+
+Android-форк распространяется под GPLv3. Оригинальный runtime-проект Flowseal распространяется под MIT; соответствующая атрибуция сохранена.
+
+## Что умеет приложение
+
+- Локальный SOCKS5-прокси на `127.0.0.1`, порт по умолчанию `1081`.
+- Быстрое применение прокси в Telegram через deep link.
+- Foreground service для фоновой работы.
+- Jetpack Compose UI с системной, светлой и тёмной темой.
+- Выбор языка интерфейса: системный, русский, английский.
+- Настройки DC/IP, Cloudflare-домена и режимов CF Proxy.
+- Runtime-логи в приложении и экспорт логов в выбранную папку.
+- Диагностическое логирование стадий `DNS -> TCP -> TLS -> WS`.
+
+## Cloudflare Proxy
+
+На мобильной сети текущий рабочий путь подтверждён через CF Proxy. Direct path до Telegram endpoint-ов на тестовых сетях часто недоступен или нестабилен, поэтому для реального использования сейчас рекомендуется режим `CF first` или `CF only`.
+
+Режимы:
+
+- `CF proxy` - включает Cloudflare fallback.
+- `CF first` - сначала пробует `kws{dc}.<domain>`, затем direct WS, если CF недоступен.
+- `CF only` - не использует direct Telegram upstream для поддерживаемого Telegram-трафика.
+
+Домен по умолчанию: `pclead.co.uk`. Он взят из подхода Flowseal и удобен для проверки, но это общий endpoint. Cloudflare ограничивает одновременные WebSocket-подключения, поэтому домен по умолчанию может временно отдавать `429 Too Many Requests` или перестать работать. Для постоянного использования лучше настроить собственный Cloudflare-домен и указать его в настройках приложения.
+
+Для собственного домена используются хосты вида:
+
+```text
+kws1.<domain>
+kws2.<domain>
+kws3.<domain>
+kws4.<domain>
+kws5.<domain>
+kws203.<domain>
+```
+
+Ориентируйтесь на инструкцию Flowseal по Cloudflare Proxy: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy).
+
+## Как пользоваться
+
+1. Установите APK.
+2. Откройте TgWsProxy.
+3. Проверьте порт. По умолчанию используется `1081`.
+4. Для мобильной сети включите `CF first` или `CF only`.
+5. Нажмите `Включить прокси`.
+6. Нажмите `Применить в Telegram`.
+7. Для диагностики временно включите runtime-логи и сохраните отчёт в выбранную папку.
+
+Если используется ByeDPI или другой локальный прокси, порт `1081` обычно удобнее `1080`, чтобы избежать конфликта.
+
+## Сборка
+
+Требования:
+
+- JDK 17
+- Android SDK
+- Gradle wrapper из репозитория
+- Go toolchain для сборки native runtime
+
+Debug APK:
+
+```powershell
+.\gradlew.bat assembleDebug
+```
+
+Готовый debug APK Gradle кладёт в:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
+Локальный helper-скрипт дополнительно копирует APK в `artifacts/apk/debug/`:
+
+```powershell
+.\scripts\build-apk.ps1 -Configuration Debug
+```
+
+Release-подпись хранится только локально. Keystore не должен попадать в git; credentials передаются через переменные окружения:
+
+```powershell
+$env:KEYSTORE_PASSWORD="..."
+$env:KEY_PASSWORD="..."
+$env:KEY_ALIAS="amurcanov"
+.\scripts\build-apk.ps1 -Configuration Release
+```
+
+Файлы APK, runtime-логи, `.so` и локальные Android build artifacts не должны попадать в git. Это зафиксировано в `.gitignore`.
+
+## Диагностика
+
+Полезные признаки в runtime-логах:
+
+- `cfproxy hostname dial start` - попытка подключиться через системный hostname path.
+- `cfproxy connected host=... via=hostname` - Cloudflare WebSocket успешно поднят.
+- `bridge first-exit primary ...` - первичная причина закрытия bridge-сессии.
+- `bridge secondary ...` - вторичная ошибка после закрытия одной из сторон.
+- `stats: ... cf=... up=... down=...` - счётчики активных CF-сессий и трафика.
+
+Если `cfproxy connected` есть, но `down=0.0B`, смотрите `bridge first-exit primary`: чаще всего это означает, что клиент Telegram закрыл локальный SOCKS-сокет до начала полезного обмена.
 
 ## Текущий статус
 
-Этот репозиторий находится в активной отладке под реальный сценарий обхода блокировок Telegram на Android.
+Подтверждено:
 
-Что уже сделано:
+- CF hostname-first порядок подключения работает.
+- `CF first` теперь реально выполняется до direct WS path.
+- В CF-first/CF-only режиме WS pool warmup отключён, чтобы не шуметь direct-попытками.
+- `DC1` больше не подменяется на `kws2.*` в direct WS domain mapping.
+- Bridge-логирование фиксирует первичную причину закрытия сессии.
 
-- проведён поэтапный аудит рантайма;
-- добавлены подробные сетевые логи по стадиям `DNS -> TCP -> TLS -> WS`;
-- добавлена минимальная поддержка SOCKS5 `ATYP=0x04` для IPv6;
-- заменена небезопасная ручная сборка `host:port` на корректный `JoinHostPort`;
-- исправлен патч `dc_id` в MTProto init;
-- добавлен `DC1` в Android UI;
-- добавлен экспорт runtime-логов в отдельную папку артефактов;
-- добавлена первичная `CfProxy`-ветка по мотивам оригинального проекта.
+Не считается финально закрытым:
 
-## Что мы уже выяснили
+- стабильность на всех мобильных операторах;
+- долгосрочная надёжность общего домена `pclead.co.uk`;
+- workflow для настройки собственного Cloudflare-домена в один клик.
 
-### 1. Прямой direct path нестабилен и сильно зависит от сети
+## Документация по расследованию
 
-По итогам диагностических прогонов и runtime-логов:
+- [DEBUG_STATE.md](DEBUG_STATE.md) - краткое текущее состояние.
+- [NEXT_STEPS.md](NEXT_STEPS.md) - ближайший roadmap.
+- [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
 
-- на мобильной сети прямой путь до проверенных Telegram endpoint IP часто полностью мёртв;
-- на части Wi-Fi-сетей отдельные IP могут открываться, но `kws*.web.telegram.org` всё равно не обязаны работать;
-- проблема в ряде случаев не в одном конкретном баге кода, а в фактической недоступности нужных Telegram endpoint-ов по сети.
+## Лицензия
 
-### 2. IPv6 изначально ломался слишком рано
-
-Было:
-
-- SOCKS5 `ATYP=0x04` принимался неполноценно;
-- IPv6-назначения сразу отбрасывались;
-- ручная сборка адресов ломала `dial` для IPv6 literal.
-
-Сейчас:
-
-- IPv6 destination больше не режется сразу на входе;
-- адреса собираются корректно;
-- рантайм даёт нормальные диагностические логи.
-
-Важно:
-
-- это не означает, что Telegram IPv6-маршрут уже полноценно поддержан как транспорт;
-- на ряде сетей IPv6 destination по-прежнему уходит в passthrough и может падать на `network is unreachable` или `tcp_dial_timeout`.
-
-### 3. Android-форк сильно отличался от оригинального проекта по fallback-логике
-
-После сравнения с оригинальным `Flowseal/tg-ws-proxy` стало ясно:
-
-- оригинал использует отдельную `CfProxy`-ветку;
-- при `DC not in config` оригинал идёт в structured fallback, а не в тупой direct passthrough;
-- оригинал умеет пробовать `CF proxy` раньше direct fallback;
-- именно это частично объясняет, почему оригинальный Windows-вариант иногда жил даже через мобильный интернет/тетеринг.
-
-Зафиксировано в:
-
-- [DEBUG_STATE.md](DEBUG_STATE.md)
-- [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md)
-
-### 4. Пул WS-соединений был не главным корнем проблемы
-
-Пул влияет на задержку и повторное использование готовых соединений, но по логам стало ясно:
-
-- часть проблем происходила до полезного обмена данными;
-- на мобильной сети основная боль часто была на уровне reachability endpoint-а;
-- увеличение или уменьшение пула само по себе не решает блокировку сети.
-
-## Что именно исправлено в коде
-
-### Рантайм и диагностика
-
-В `tg-ws-proxy.go` добавлено:
-
-- логирование `raw destination / parsed destination / mapped DC / selected endpoint`;
-- разделение ошибок на:
-  - `dns_resolution_failure`
-  - `tcp_dial_timeout`
-  - `network_error`
-  - `tls_handshake`
-  - `websocket upgrade write/read`
-- явные причины `fallback` и `cooldown`;
-- логирование первых ошибок моста `client -> ws` и `ws -> client`.
-
-### IPv6 и сборка адресов
-
-Добавлено:
-
-- приём SOCKS5 `ATYP=0x04`;
-- отказ от немедленного reject IPv6;
-- переход на `net.JoinHostPort()` вместо ручных строк `host:port`.
-
-### MTProto init / DC routing
-
-Исправлено:
-
-- патч `signed_dc` для `media/non-media`;
-- fallback `dc_id` через `ipToDC`, когда init приходит с мусорным `dc_raw`;
-- поддержка `DC1` в Android UI.
-
-### Экспорт логов
-
-В Android-приложение добавлено:
-
-- выбор папки для логов;
-- сохранение runtime-логов в отдельную подпапку;
-- быстрый экспорт текстового снимка текущего состояния прокси.
-
-### Cloudflare Proxy
-
-Добавлено минимальное повторение логики оригинального проекта:
-
-- `CF proxy` fallback через `wss://kws{dc}.<domain>/apiws`;
-- режимы:
-  - `CF proxy`
-  - `CF first`
-  - `CF only`
-- отдельные логи для `CfProxy`:
-  - выбор ветки
-  - DNS resolve
-  - TCP dial
-  - успешное подключение
-  - первая ошибка записи в WS
-
-## Что уже известно по сетям
-
-### Android direct path
-
-По уже собранным Android-отчётам:
-
-- мобильная сеть:
-  - прямой путь до проверенных Telegram endpoint-ов не подтверждён;
-  - `kws*.web.telegram.org` также не показали стабильного рабочего транспорта;
-- Wi-Fi:
-  - отдельные IP могут быть reachable;
-  - но сам `kws*`-путь не гарантированно живой.
-
-### Оригинальный Windows-проект
-
-По логам оригинального `tg-ws-proxy` v1.5.1:
-
-- direct path там тоже нестабилен;
-- при этом `CfProxy` реально участвует в fallback-цепочке;
-- некоторые сессии через tethering жили десятки секунд и дольше;
-- значит сам подход `CfProxy` заслуживает отдельной ставки и в Android-форке.
-
-## Текущий фокус разработки
-
-На данный момент приоритет такой:
-
-1. не плодить случайные эксперименты с direct IP;
-2. довести до ума `CfProxy` в Android-форке;
-3. получить чистые runtime-логи и отчёты по `CfProxy`;
-4. только после этого решать, нужен ли relay/VPS режим.
-
-## Как сейчас тестировать
-
-### APK
-
-Готовый `debug` APK после локальной сборки копируется сюда:
-
-- `artifacts/apk/debug/tgwsproxy-debug.apk`
-
-### Сценарий проверки
-
-1. Установить свежий APK.
-2. Выбрать папку для логов.
-3. При необходимости сохранить runtime-лог.
-4. Проверить запуск прокси в одном из режимов:
-   - direct
-   - `CF proxy`
-   - `CF first`
-   - `CF only`
-5. Сохранить логи и/или отчёт.
-
-### Что особенно важно в логах
-
-Для direct path:
-
-- `SOCKS5 CONNECT raw_atyp=...`
-- `mapped_dc=...`
-- `selected_endpoint=...`
-- `TCP dial failure ...`
-- `WS cooldown ...`
-- `fallback reason=...`
-
-Для `CfProxy`:
-
-- `CF proxy: enabled domain=... mode=...`
-- `cfproxy dns resolve start`
-- `cfproxy dns resolve success`
-- `cfproxy tcp dial start`
-- `cfproxy connected host=... via=...`
-- `cfproxy dns resolve failure`
-
-## Что ещё не считается решённым
-
-Пока нельзя считать завершённым:
-
-- стабильную работу через мобильную сеть;
-- полноценный Telegram IPv6 transport path;
-- финальную стратегию endpoint selection;
-- окончательную оценку эффективности `CfProxy` на Android.
-
-Новые результаты тестов будут добавлены после следующего цикла полевых проверок.
-
-## Лицензия и исходная база
-
-- исходный runtime `tg-ws-proxy`: MIT, автор — [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
-- Android-форк `amurcanov/tg-ws-proxy-android`: GPLv3
-- текущий репозиторий является локальной рабочей веткой поверх Android-форка и сохраняет атрибуцию исходным авторам
+См. [LICENSE](LICENSE).

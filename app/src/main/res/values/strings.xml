@@ -7,6 +7,10 @@
     <string name="action_tips">Tips</string>
     <string name="action_back">Back</string>
     <string name="action_settings">Settings</string>
+    <string name="exit_confirm_title">Exit TgWsProxy?</string>
+    <string name="exit_confirm_message">The proxy service will continue only if Android keeps the foreground service running. Exit the app?</string>
+    <string name="exit_confirm_positive">Exit</string>
+    <string name="exit_confirm_negative">Stay</string>
     <string name="status_running">Running</string>
     <string name="status_stopped">Stopped</string>
     <string name="status_error">Error</string>

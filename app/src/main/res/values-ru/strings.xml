@@ -7,6 +7,10 @@
     <string name="action_tips">Подсказки</string>
     <string name="action_back">Назад</string>
     <string name="action_settings">Настройки</string>
+    <string name="exit_confirm_title">Выйти из TgWsProxy?</string>
+    <string name="exit_confirm_message">Прокси-сервис продолжит работать только если Android сохранит foreground service. Выйти из приложения?</string>
+    <string name="exit_confirm_positive">Выйти</string>
+    <string name="exit_confirm_negative">Остаться</string>
     <string name="status_running">Работает</string>
     <string name="status_stopped">Остановлен</string>
     <string name="status_error">Ошибка</string>

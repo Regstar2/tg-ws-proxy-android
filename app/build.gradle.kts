@@ -28,14 +28,14 @@ android {
         applicationId = "com.amurcanov.tgwsproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.3-ui"
+        versionCode = 8
+        versionName = "1.2.5-ui"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
-        
+
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -43,13 +43,16 @@ android {
 
     signingConfigs {
         val keystoreFile = file("amurcanov.jks")
-        if (keystoreFile.exists()) {
+        val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+        val keyPasswordValue = System.getenv("KEY_PASSWORD")
+        val keyAliasValue = System.getenv("KEY_ALIAS") ?: "amurcanov"
+
+        if (keystoreFile.exists() && !keystorePassword.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
             create("release") {
                 storeFile = keystoreFile
-                // Берем пароли из локальных переменных среды или файла
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "flowseal-fork"
-                keyAlias = "amurcanov"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "flowseal-fork"
+                storePassword = keystorePassword
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
             }
         }
     }
@@ -100,8 +103,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-
-    // JNA for easy C-shared library calls
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation("androidx.compose.material:material-icons-extended")
 }
