@@ -28,6 +28,13 @@ Android-форк распространяется под GPLv3. Оригинал
 - Runtime-логи в приложении и экспорт логов в выбранную папку.
 - Диагностическое логирование стадий `DNS -> TCP -> TLS -> WS`.
 
+## Скриншоты
+
+<p>
+  <img src="docs/screenshots/main-screen.jpg" width="260" alt="Главный экран TgWsProxy">
+  <img src="docs/screenshots/settings-screen.jpg" width="260" alt="Экран настроек TgWsProxy">
+</p>
+
 ## Cloudflare Proxy
 
 На мобильной сети текущий рабочий путь подтверждён через CF Proxy. Direct path до Telegram endpoint-ов на тестовых сетях часто недоступен или нестабилен, поэтому для реального использования сейчас рекомендуется режим `CF first` или `CF only`.
