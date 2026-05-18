@@ -41,6 +41,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"tg-ws-proxy/tgwsroute"
 )
 
 // ---------------------------------------------------------------------------
@@ -103,100 +105,6 @@ func initLogging(verbose bool) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Telegram IP ranges
-// ---------------------------------------------------------------------------
-
-type ipRange struct {
-	lo, hi uint32
-}
-
-var tgRanges []ipRange
-
-func init() {
-	ranges := [][2]string{
-		{"185.76.151.0", "185.76.151.255"},
-		{"149.154.160.0", "149.154.175.255"},
-		{"91.105.192.0", "91.105.193.255"},
-		{"91.108.0.0", "91.108.255.255"},
-	}
-	for _, r := range ranges {
-		lo := ipToUint32(net.ParseIP(r[0]))
-		hi := ipToUint32(net.ParseIP(r[1]))
-		tgRanges = append(tgRanges, ipRange{lo, hi})
-	}
-}
-
-func ipToUint32(ip net.IP) uint32 {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return 0
-	}
-	return binary.BigEndian.Uint32(ip4)
-}
-
-func isTelegramIP(ipStr string) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	n := ipToUint32(ip)
-	if n == 0 {
-		return false
-	}
-	for _, r := range tgRanges {
-		if n >= r.lo && n <= r.hi {
-			return true
-		}
-	}
-	return false
-}
-
-// ---------------------------------------------------------------------------
-// IP -> DC mapping
-// ---------------------------------------------------------------------------
-
-type dcInfo struct {
-	dc      int
-	isMedia bool
-}
-
-var ipToDC = map[string]dcInfo{
-	// DC1
-	"149.154.175.50": {1, false}, "149.154.175.51": {1, false},
-	"149.154.175.53": {1, false}, "149.154.175.54": {1, false},
-	"149.154.175.52": {1, true},
-	// DC2
-	"149.154.167.41": {2, false}, "149.154.167.50": {2, false},
-	"149.154.167.51": {2, false}, "149.154.167.220": {2, false},
-	"149.154.167.35": {2, false}, "149.154.167.36": {2, false},
-	"95.161.76.100":   {2, false},
-	"149.154.167.151": {2, true}, "149.154.167.222": {2, true},
-	"149.154.167.223": {2, true}, "149.154.162.123": {2, true},
-	// DC3
-	"149.154.175.100": {3, false}, "149.154.175.101": {3, false},
-	"149.154.175.102": {3, true},
-	// DC4
-	"149.154.167.91": {4, false}, "149.154.167.92": {4, false},
-	"149.154.164.250": {4, true}, "149.154.166.120": {4, true},
-	"149.154.166.121": {4, true}, "149.154.167.118": {4, true},
-	"149.154.165.111": {4, true},
-	// Telegram Android may open MTProto sessions to IPv6 literals. Keep this
-	// list exact; broad IPv6 ranges risk routing unknown traffic to the wrong DC.
-	"2001:b28:f23d:f001::a": {1, false},
-	"2001:67c:4e8:f002::a":  {2, false}, "2001:67c:4e8:f002::b": {2, false},
-	"2001:67c:4e8:f004::a": {4, false}, "2001:67c:4e8:f004::b": {4, false},
-	// DC5
-	"91.108.56.100": {5, false}, "91.108.56.101": {5, false},
-	"91.108.56.116": {5, false}, "91.108.56.126": {5, false},
-	"91.108.56.198": {5, false},
-	"149.154.171.5": {5, false},
-	"91.108.56.102": {5, true}, "91.108.56.128": {5, true},
-	"91.108.56.151": {5, true},
-	// DC203
-	"91.105.192.100": {203, false},
-}
-
 var dcOverrides = map[int]int{
 	203: 2,
 }
@@ -244,6 +152,7 @@ type Stats struct {
 	connectionsTotal       atomic.Int64
 	connectionsWs          atomic.Int64
 	connectionsCfProxy     atomic.Int64
+	connectionsCfWorker    atomic.Int64
 	connectionsTcpFallback atomic.Int64
 	connectionsHttpReject  atomic.Int64
 	connectionsPassthrough atomic.Int64
@@ -258,10 +167,11 @@ func (s *Stats) Summary() string {
 	ph := s.poolHits.Load()
 	pm := s.poolMisses.Load()
 	return fmt.Sprintf(
-		"total=%d ws=%d cf=%d tcp_fb=%d http_skip=%d pass=%d err=%d pool=%d/%d up=%s down=%s",
+		"total=%d ws=%d cf=%d worker=%d tcp_fb=%d http_skip=%d pass=%d err=%d pool=%d/%d up=%s down=%s",
 		s.connectionsTotal.Load(),
 		s.connectionsWs.Load(),
 		s.connectionsCfProxy.Load(),
+		s.connectionsCfWorker.Load(),
 		s.connectionsTcpFallback.Load(),
 		s.connectionsHttpReject.Load(),
 		s.connectionsPassthrough.Load(),
@@ -276,6 +186,7 @@ func (s *Stats) Reset() {
 	s.connectionsTotal.Store(0)
 	s.connectionsWs.Store(0)
 	s.connectionsCfProxy.Store(0)
+	s.connectionsCfWorker.Store(0)
 	s.connectionsTcpFallback.Store(0)
 	s.connectionsHttpReject.Store(0)
 	s.connectionsPassthrough.Store(0)
@@ -404,9 +315,10 @@ func (r resolvedIPs) String() string {
 }
 
 func normalizeCfProxyConfig(cfg cfProxyConfig) cfProxyConfig {
-	cfg.Domain = strings.TrimSpace(cfg.Domain)
-	if cfg.Domain == "" {
-		cfg.Domain = defaultCfProxyDomain
+	if normalized, ok := tgwsroute.NormalizeCFDomain(cfg.Domain); ok {
+		cfg.Domain = normalized
+	} else {
+		cfg.Domain = ""
 	}
 	if cfg.Only {
 		cfg.Enabled = true
@@ -420,6 +332,13 @@ func setCfProxyConfig(cfg cfProxyConfig) {
 	cfCfgMu.Lock()
 	cfCfg = cfg
 	cfCfgMu.Unlock()
+
+	settings := getRuntimeSettings()
+	settings.CF = cfg
+	if settings.Mode == "" {
+		settings.Mode = legacyModeFromCF(cfg)
+	}
+	setRuntimeSettings(settings)
 }
 
 func getCfProxyConfig() cfProxyConfig {
@@ -550,142 +469,10 @@ func fallbackTarget(dc int, dst string) string {
 	return dst
 }
 
-func cfProxyFallback(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
-	cfg := getCfProxyConfig()
-	if !cfg.Enabled || cfg.Domain == "" {
-		return false, "cfproxy_disabled"
-	}
-
-	mTag := ""
-	if isMedia {
-		mTag = " media"
-	}
-
-	host := cfProxyHost(dc, cfg.Domain)
-	url := fmt.Sprintf("wss://%s/apiws", host)
-	logInfo.Printf("[%s] DC%d%s -> CF proxy %s",
-		label, dc, mTag, url)
-	logDebug.Printf("[%s] DC%d%s cfproxy dns resolve start host=%s",
-		label, dc, mTag, host)
-
-	resolved, err := resolvePreferredIPs(host, 10)
-	var candidates []string
-	var dnsErr error
-	if err != nil {
-		dnsErr = err
-		logWarn.Printf("[%s] DC%d%s cfproxy dns resolve failure for %s (%s): %v",
-			label, dc, mTag, host, classifyConnError(err), err)
-	} else {
-		logDebug.Printf("[%s] DC%d%s cfproxy dns resolve success host=%s %s",
-			label, dc, mTag, host, resolved.String())
-		candidates = resolved.Preferred()
-		if len(candidates) == 0 {
-			logWarn.Printf("[%s] DC%d%s cfproxy dns resolve produced no usable IPs for %s",
-				label, dc, mTag, host)
-		}
-	}
-
-	prefix := fmt.Sprintf("[%s] DC%d%s cfproxy", label, dc, mTag)
-	var ws *RawWebSocket
-	usedTarget := "hostname"
-	var lastErr error
-
-	logDebug.Printf("[%s] DC%d%s cfproxy hostname dial start host=%s",
-		label, dc, mTag, host)
-	ws, lastErr = wsConnect(host, host, "/apiws", 10)
-	if lastErr != nil {
-		logDomainConnectFailure(prefix, host, host, lastErr)
-	}
-
-	for _, ip := range candidates {
-		if ws != nil {
-			break
-		}
-		logDebug.Printf("[%s] DC%d%s cfproxy tcp dial start host=%s ip=%s",
-			label, dc, mTag, host, ip)
-		ws, lastErr = wsConnect(ip, host, "/apiws", 10)
-		if lastErr == nil {
-			usedTarget = ip
-			break
-		}
-		logDomainConnectFailure(prefix, host, ip, lastErr)
-		var wsErr *WsHandshakeError
-		if errors.As(lastErr, &wsErr) {
-			if wsErr.IsRedirect() {
-				break
-			}
-		}
-	}
-
-	if ws == nil {
-		if lastErr != nil {
-			return false, fmt.Sprintf("ws_connect_failed: %v", lastErr)
-		}
-		if dnsErr != nil {
-			return false, fmt.Sprintf("dns_resolve_failed: %v", dnsErr)
-		}
-		return false, "ws_connect_failed"
-	}
-
-	logInfo.Printf("[%s] DC%d%s cfproxy connected host=%s via=%s",
-		label, dc, mTag, host, usedTarget)
-
-	stats.connectionsCfProxy.Add(1)
-
-	if err := ws.Send(init); err != nil {
-		logWarn.Printf("[%s] DC%d%s cfproxy first client->ws write failed for %s: %v",
-			label, dc, mTag, host, err)
-		ws.Close()
-		return false, fmt.Sprintf("first_client_to_ws_write_failed: %v", err)
-	}
-
-	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter)
-	return true, summary.String()
-}
-
 func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter) bool {
-	cfg := getCfProxyConfig()
-
-	mTag := ""
-	if isMedia {
-		mTag = " media"
-	}
-
-	methods := make([]string, 0, 2)
-	if cfg.Enabled {
-		if cfg.Priority || cfg.Only {
-			methods = append(methods, "cf")
-		}
-		if !cfg.Only {
-			methods = append(methods, "tcp")
-		}
-		if !cfg.Priority && !cfg.Only {
-			methods = append(methods, "cf")
-		}
-	} else {
-		methods = append(methods, "tcp")
-	}
-
-	target := fallbackTarget(dc, dst)
-	for _, method := range methods {
-		switch method {
-		case "cf":
-			if ok, reason := cfProxyFallback(ctx, client, init, label, dc, isMedia, splitter); ok {
-				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
-				return true
-			}
-		case "tcp":
-			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s",
-				label, dc, mTag, joinAddr(target, port))
-			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
-				logInfo.Printf("[%s] DC%d%s TCP fallback closed", label, dc, mTag)
-				return true
-			}
-		}
-	}
-
-	logWarn.Printf("[%s] DC%d%s no fallback available", label, dc, mTag)
-	return false
+	settings := getRuntimeSettings()
+	routes := routesForMode(settings.Mode, settings, true)
+	return runRouteChain(ctx, client, init, label, dc, isMedia, dst, port, splitter, routes)
 }
 
 func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSocket, string, resolvedIPs, error) {
@@ -1980,20 +1767,25 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	logDebug.Printf("[%s] SOCKS5 CONNECT raw_atyp=0x%02x raw_dst=%s parsed_dst=%s",
 		label, atyp, rawDst, joinAddr(dst, port))
 
-	cfg := getCfProxyConfig()
-	forceTelegramPipeline := cfg.Only && atyp == 4 && port == 443
+	settings := getRuntimeSettings()
+	cfg := settings.CF
+	effectiveMode := settings.Mode
+	if cfg.Only {
+		effectiveMode = modeCFOnly
+	}
+	telegramLike := isTelegramLikeIP(dst)
 
 	if atyp == 4 {
 		logInfo.Printf("[%s] IPv6 destination accepted into pipeline: %s",
 			label, joinAddr(dst, port))
-		if forceTelegramPipeline {
-			logInfo.Printf("[%s] IPv6 destination will use Telegram pipeline in CF only mode: %s",
+		if telegramLike {
+			logInfo.Printf("[%s] Telegram IPv6 destination accepted into routing pipeline: %s",
 				label, joinAddr(dst, port))
 		}
 	}
 
 	// -- Non-Telegram IP -> direct passthrough --
-	if !forceTelegramPipeline && !isTelegramIP(dst) {
+	if !telegramLike {
 		stats.connectionsPassthrough.Add(1)
 		logDebug.Printf("[%s] passthrough raw_dst=%s parsed_dst=%s mapped_dc=none",
 			label, rawDst, joinAddr(dst, port))
@@ -2055,9 +1847,9 @@ func handleClient(ctx context.Context, conn net.Conn) {
 
 	// Android with useSecret=0 has random dc_id bytes - patch it.
 	if !dcOk {
-		if info, found := ipToDC[dst]; found {
-			dc = info.dc
-			isMedia = info.isMedia
+		if info, found := lookupTelegramDC(dst); found {
+			dc = info.DC
+			isMedia = info.Media
 			isMediaPtr = &isMedia
 			dcOk = true
 
@@ -2092,9 +1884,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d configured=%t -> TCP passthrough",
 			label, rawDst, joinAddr(dst, port), dc, dcConfigured)
 		logDebug.Printf("[%s] unknown DC%d for %s:%d -> TCP passthrough", label, dc, dst, port)
-		if forceTelegramPipeline {
-			logWarn.Printf("[%s] IPv6 Telegram pipeline could not determine DC for %s in CF only mode -> closing fast",
-				label, joinAddr(dst, port))
+		if blocksDirectPassthrough(effectiveMode, dst, false) {
+			if atyp == 4 {
+				logWarn.Printf("[%s] telegram IPv6 destination is not mapped, mode=%s blocks direct passthrough dst=%s",
+					label, effectiveMode, joinAddr(dst, port))
+			} else {
+				logWarn.Printf("[%s] telegram destination is not mapped, mode=%s blocks direct passthrough dst=%s",
+					label, effectiveMode, joinAddr(dst, port))
+			}
 			_ = conn.Close()
 			return
 		}
@@ -2133,23 +1930,26 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	if cfg.Only {
-		logInfo.Printf("[%s] DC%d%s fallback reason=cfproxy_only -> CF fallback only",
-			label, dc, mTag)
+	if settings.Mode == modeCFOnly || settings.Mode == modeWorkerOnly || cfg.Only {
+		logInfo.Printf("[%s] DC%d%s fallback reason=restricted_mode mode=%s -> route chain",
+			label, dc, mTag, settings.Mode)
 		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
 		return
 	}
 
-	if cfg.Enabled && cfg.Priority {
-		logInfo.Printf("[%s] DC%d%s fallback reason=cfproxy_priority -> CF first",
-			label, dc, mTag)
-		if ok, reason := cfProxyFallback(ctx, conn, init, label, dc, isMedia, splitter); ok {
-			logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
+	if pre := primaryRoutesBeforeDirectWS(settings.Mode, settings); len(pre) > 0 {
+		logInfo.Printf("[%s] DC%d%s trying primary routes before direct WS mode=%s",
+			label, dc, mTag, settings.Mode)
+		if runRouteChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, pre) {
 			return
-		} else {
-			logInfo.Printf("[%s] DC%d%s CF priority unavailable reason=%s -> direct WS",
-				label, dc, mTag, reason)
 		}
+	}
+
+	if shouldSkipDirectWS(dcKey, settings.Mode) {
+		logInfo.Printf("[%s] DC%d%s skipping direct WS (mode=%s cooldown/active)",
+			label, dc, mTag, settings.Mode)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		return
 	}
 
 	// -- Try WebSocket --
@@ -2338,18 +2138,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	for dc, ip := range dcOptMap {
 		logInfo.Printf("    DC%d: %s", dc, ip)
 	}
-	cfg := getCfProxyConfig()
-	if cfg.Enabled {
-		mode := "fallback"
-		if cfg.Only {
-			mode = "only"
-		} else if cfg.Priority {
-			mode = "cf_first"
-		}
-		logInfo.Printf("  CF proxy:     enabled domain=%s mode=%s", cfg.Domain, mode)
-	} else {
-		logInfo.Println("  CF proxy:     disabled")
-	}
+	logRuntimeRouteConfig()
 	logInfo.Println(strings.Repeat("=", 60))
 	logInfo.Printf("  Configure Telegram Desktop:")
 	logInfo.Printf("    SOCKS5 proxy -> %s:%d  (no user/pass)", host, port)
@@ -2384,13 +2173,12 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		}
 	}()
 
-	cfg = getCfProxyConfig()
-	if cfg.Only || cfg.Priority {
-		if cfg.Only {
-			logInfo.Println("  WS pool warmup skipped in CF only mode")
-		} else {
-			logInfo.Println("  WS pool warmup skipped in CF first mode")
-		}
+	settings := getRuntimeSettings()
+	skipWarmup := settings.Mode == modeCFOnly || settings.Mode == modeWorkerOnly ||
+		settings.Mode == modeCFFirst || settings.Mode == modeWorkerFirst ||
+		settings.CF.Only || settings.CF.Priority
+	if skipWarmup {
+		logInfo.Printf("  WS pool warmup skipped (mode=%s)", settings.Mode)
 	} else {
 		// Warmup WS pool
 		wsPool.Warmup(dcOptMap)
@@ -2476,9 +2264,16 @@ func parseCIDRPool(cidrsStr string) (map[int]string, error) {
 	return result, nil
 }
 
-func parseRuntimeConfig(raw string) (map[int]string, cfProxyConfig, error) {
+func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 	dcMap := make(map[int]string)
-	cfg := cfProxyConfig{Domain: defaultCfProxyDomain}
+	cfg := cfProxyConfig{Domain: defaultCfProxyDomain, Enabled: true}
+	settings := runtimeSettings{
+		Mode: "",
+		CF:   cfg,
+		Worker: workerConfig{
+			Enabled: false,
+		},
+	}
 
 	for _, token := range strings.Split(raw, ",") {
 		token = strings.TrimSpace(token)
@@ -2494,6 +2289,10 @@ func parseRuntimeConfig(raw string) (map[int]string, cfProxyConfig, error) {
 			key := strings.ToLower(strings.TrimSpace(kv[0]))
 			val := strings.TrimSpace(kv[1])
 			switch key {
+			case "connection_mode":
+				if mode, ok := parseConnectionMode(val); ok {
+					settings.Mode = mode
+				}
 			case "cfproxy":
 				cfg.Enabled = parseBoolValue(val)
 			case "cfproxy_priority":
@@ -2502,7 +2301,21 @@ func parseRuntimeConfig(raw string) (map[int]string, cfProxyConfig, error) {
 				cfg.Only = parseBoolValue(val)
 			case "cfproxy_domain":
 				if val != "" {
-					cfg.Domain = val
+					if normalized, ok := tgwsroute.NormalizeCFDomain(val); ok {
+						cfg.Domain = normalized
+						settings.CFManualDomain = normalized
+					}
+				}
+			case "cf_use_manual_domain":
+				if parseBoolValue(val) && cfg.Domain != "" {
+					settings.CFManualDomain = cfg.Domain
+				}
+			case "worker_enabled":
+				settings.Worker.Enabled = parseBoolValue(val)
+			case "worker_domain":
+				settings.Worker.Domain = NormalizeWorkerDomain(val)
+				if settings.Worker.Domain != "" {
+					settings.Worker.Enabled = true
 				}
 			}
 			continue
@@ -2510,14 +2323,22 @@ func parseRuntimeConfig(raw string) (map[int]string, cfProxyConfig, error) {
 
 		parsed, err := parseCIDRPool(token)
 		if err != nil {
-			return nil, cfg, err
+			return nil, settings, err
 		}
 		for dc, ip := range parsed {
 			dcMap[dc] = ip
 		}
 	}
 
-	return dcMap, normalizeCfProxyConfig(cfg), nil
+	cfg = normalizeCfProxyConfig(cfg)
+	settings.CF = cfg
+	if settings.Mode == "" {
+		settings.Mode = legacyModeFromCF(cfg)
+	}
+	if settings.Worker.Domain != "" {
+		settings.Worker.Enabled = true
+	}
+	return dcMap, settings, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -2546,12 +2367,13 @@ func StartProxy(cHost *C.char, port C.int, cDcIps *C.char, verbose C.int) C.int 
 
 	initLogging(isVerbose)
 
-	dcOptMap, cfg, err := parseRuntimeConfig(dcIpsStr)
+	dcOptMap, settings, err := parseRuntimeConfig(dcIpsStr)
 	if err != nil {
 		logError.Printf("parseRuntimeConfig: %v", err)
 		return -2
 	}
-	setCfProxyConfig(cfg)
+	setRuntimeSettings(settings)
+	setCfProxyConfig(settings.CF)
 
 	globalCtx, globalCancel = context.WithCancel(context.Background())
 
@@ -2612,6 +2434,11 @@ func GetStats() *C.char {
 	return C.CString(s)
 }
 
+//export ResetCFDomainCooldowns
+func ResetCFDomainCooldowns() {
+	cfPool.ResetCooldowns()
+}
+
 //export FreeString
 func FreeString(p *C.char) {
 	C.free(unsafe.Pointer(p))
@@ -2657,13 +2484,14 @@ func main() {
 			if i+1 < len(args) {
 				i++
 				entry := args[i]
-				parsed, cfg, err := parseRuntimeConfig(entry)
+				parsed, settings, err := parseRuntimeConfig(entry)
 				if err != nil {
 					logError.Printf("%v", err)
 					os.Exit(1)
 				}
-				if strings.Contains(entry, "@cfproxy") {
-					setCfProxyConfig(cfg)
+				if strings.Contains(entry, "@") {
+					setRuntimeSettings(settings)
+					setCfProxyConfig(settings.CF)
 				}
 				for k, v := range parsed {
 					dcOptMap[k] = v

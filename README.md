@@ -2,7 +2,7 @@
 
 Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
 
-Текущая версия рабочей ветки: `1.2.5-ui`.
+Текущая версия рабочей ветки: `1.3.2` (CF domain pool polishing).
 
 ## Происхождение
 
@@ -43,9 +43,13 @@ Android-форк распространяется под GPLv3. Оригинал
 
 - `CF proxy` - включает Cloudflare fallback.
 - `CF first` - сначала пробует `kws{dc}.<domain>`, затем direct WS, если CF недоступен.
-- `CF only` - не использует direct Telegram upstream для поддерживаемого Telegram-трафика.
+- `CF only` - не использует direct Telegram upstream и direct TCP passthrough для Telegram-like трафика.
+- `Worker only` - использует только Worker и тоже не допускает direct TCP passthrough для Telegram-like трафика.
+- `Direct + fallback routes` - честное имя для цепочки `Direct -> Worker -> CF -> TCP`.
 
 Домен по умолчанию: `pclead.co.uk`. Он взят из подхода Flowseal и удобен для проверки, но это общий endpoint. Cloudflare ограничивает одновременные WebSocket-подключения, поэтому домен по умолчанию может временно отдавать `429 Too Many Requests` или перестать работать. Для постоянного использования лучше настроить собственный Cloudflare-домен и указать его в настройках приложения.
+
+Начиная с `v1.3.2`, ручной CF-домен больше не является единственной опорой. Android fork сохраняет поле для пользовательского домена, но также включает встроенный CF-domain pool. Если ручной домен возвращает `429`, `403`, `5xx` или повторно падает на timeout/TLS/WebSocket handshake, runtime временно переводит его в cooldown и пробует другой CF-домен либо следующий маршрут, разрешённый выбранным режимом.
 
 Для собственного домена используются хосты вида:
 
@@ -131,6 +135,9 @@ $env:KEY_ALIAS="tgwsproxy"
 - В CF-first/CF-only режиме WS pool warmup отключён, чтобы не шуметь direct-попытками.
 - `DC1` больше не подменяется на `kws2.*` в direct WS domain mapping.
 - Bridge-логирование фиксирует первичную причину закрытия сессии.
+- Android routing намеренно отличается от Flowseal desktop: Android сохраняет `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto` и `Direct + fallback routes`.
+- `v1.3.2` добавляет built-in CF pool, per-domain health/cooldown, диагностику CF-доменов и ручной сброс cooldown.
+- `Fake TLS` и автообновление CF-доменов из GitHub не входят в v1.3.2. Автообновление списка остаётся задачей для `v1.4.0`.
 
 Не считается финально закрытым:
 

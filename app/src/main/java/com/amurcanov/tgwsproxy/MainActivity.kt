@@ -57,6 +57,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.text.DateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
@@ -79,7 +81,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.2.5-ui"
+private const val APP_INFO_VERSION = "1.3.2"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -240,6 +242,23 @@ private fun ProxyScreen(
     var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
     var cfProxyOnly by remember { mutableStateOf(prefs.getBoolean("cfproxy_only", false)) }
     var cfProxyDomainText by remember { mutableStateOf(prefs.getString("cfproxy_domain", "pclead.co.uk") ?: "pclead.co.uk") }
+    var connectionMode by remember {
+        mutableStateOf(
+            prefs.getString("connection_mode", null)?.let { ConnectionMode.fromPref(it) }
+                ?: ConnectionMode.fromLegacy(
+                    prefs.getBoolean("cfproxy_enabled", true),
+                    prefs.getBoolean("cfproxy_priority", true),
+                    prefs.getBoolean("cfproxy_only", false),
+                )
+        )
+    }
+    var workerEnabled by remember { mutableStateOf(prefs.getBoolean("worker_enabled", false)) }
+    var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
+    var diagStatusText by remember { mutableStateOf(prefs.getString("diag_last_status", "") ?: "") }
+    var isDiagRunning by remember { mutableStateOf(false) }
+    var cfDomainRows by remember { mutableStateOf(CfDomainDiagnosticsState.snapshot(cfProxyDomainText)) }
+    var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
+    var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
@@ -342,16 +361,22 @@ private fun ProxyScreen(
             Toast.makeText(context, context.getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
-        val parsedIps = buildList {
+        val dcEntries = buildList {
             if (dc1Text.isNotBlank()) add("1:${dc1Text.trim()}")
             if (dc2Text.isNotBlank()) add("2:${dc2Text.trim()}")
             if (dc4Text.isNotBlank()) add("4:${dc4Text.trim()}")
             if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
-            add("@cfproxy=${if (cfProxyEnabled) 1 else 0}")
-            add("@cfproxy_priority=${if (cfProxyPriority) 1 else 0}")
-            add("@cfproxy_only=${if (cfProxyOnly) 1 else 0}")
-            if (cfProxyDomainText.isNotBlank()) add("@cfproxy_domain=${cfProxyDomainText.trim()}")
-        }.joinToString(",")
+        }
+        val parsedIps = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = dcEntries,
+            mode = connectionMode,
+            cfProxyEnabled = cfProxyEnabled,
+            cfProxyPriority = cfProxyPriority,
+            cfProxyOnly = cfProxyOnly,
+            cfDomain = cfProxyDomainText,
+            workerEnabled = workerEnabled,
+            workerDomain = workerDomainText,
+        )
 
         if (parsedIps.isEmpty()) {
             Toast.makeText(context, context.getString(R.string.dc_ip_required), Toast.LENGTH_SHORT).show()
@@ -380,12 +405,19 @@ private fun ProxyScreen(
         openTelegram(context, proxyUrl)
     }
     val proxyAddress = "127.0.0.1:${portText.ifBlank { "1081" }}"
-    val proxyModeText = when {
-        cfProxyOnly -> "CF only"
-        cfProxyPriority -> "CF first"
-        cfProxyEnabled -> "Direct + CF fallback"
-        else -> "Direct"
+    val proxyModeText = stringResource(connectionMode.displayLabelRes())
+    val openUrl = { url: String ->
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.open_link_failed), Toast.LENGTH_SHORT).show()
+        }
     }
+    val diagLabelDirect = stringResource(R.string.diag_test_direct)
+    val diagLabelWorker = stringResource(R.string.diag_test_worker)
+    val diagLabelCf = stringResource(R.string.diag_test_cf)
+    val diagLabelTcp = stringResource(R.string.diag_test_tcp)
+    val diagLabelAll = stringResource(R.string.diag_test_all)
     val copyProxyAddressAction by rememberUpdatedState {
         val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
         cm?.setPrimaryClip(ClipData.newPlainText("Proxy address", proxyAddress))
@@ -687,10 +719,166 @@ private fun ProxyScreen(
 
                 SectionTitle(stringResource(R.string.section_cloudflare))
 
+                Text(
+                    stringResource(R.string.connection_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+                val connectionModes = ConnectionMode.entries
+                var connectionMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    OutlinedButton(
+                        onClick = { connectionMenuExpanded = true },
+                        enabled = !isRunning,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(stringResource(connectionMode.displayLabelRes()))
+                    }
+                    DropdownMenu(
+                        expanded = connectionMenuExpanded,
+                        onDismissRequest = { connectionMenuExpanded = false }
+                    ) {
+                        connectionModes.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(mode.displayLabelRes())) },
+                                onClick = {
+                                    connectionMenuExpanded = false
+                                    connectionMode = mode
+                                    prefs.edit().putString("connection_mode", mode.prefValue).apply()
+                                    when (mode) {
+                                        ConnectionMode.CFOnly -> {
+                                            cfProxyOnly = true
+                                            cfProxyPriority = true
+                                            cfProxyEnabled = true
+                                        }
+                                        ConnectionMode.CFFirst -> {
+                                            cfProxyOnly = false
+                                            cfProxyPriority = true
+                                            cfProxyEnabled = true
+                                        }
+                                        ConnectionMode.DirectOnly -> {
+                                            cfProxyOnly = false
+                                            cfProxyPriority = false
+                                            cfProxyEnabled = false
+                                        }
+                                        ConnectionMode.WorkerOnly, ConnectionMode.WorkerFirst -> {
+                                            cfProxyOnly = false
+                                            cfProxyPriority = false
+                                            cfProxyEnabled = true
+                                            workerEnabled = true
+                                        }
+                                        else -> {
+                                            cfProxyOnly = false
+                                            cfProxyPriority = false
+                                            cfProxyEnabled = true
+                                        }
+                                    }
+                                    prefs.edit()
+                                        .putBoolean("cfproxy_only", cfProxyOnly)
+                                        .putBoolean("cfproxy_priority", cfProxyPriority)
+                                        .putBoolean("cfproxy_enabled", cfProxyEnabled)
+                                        .putBoolean("worker_enabled", workerEnabled)
+                                        .apply()
+                                }
+                            )
+                        }
+                    }
+                }
+
+                SectionTitle(stringResource(R.string.cf_worker_title))
+
+                OutlinedTextField(
+                    value = workerDomainText,
+                    onValueChange = {
+                        workerDomainText = it
+                        val normalized = WorkerDomain.normalize(it)
+                        if (normalized.isNotBlank()) {
+                            workerEnabled = true
+                        }
+                        prefs.edit()
+                            .putString("worker_domain", it)
+                            .putBoolean("worker_enabled", workerEnabled)
+                            .apply()
+                    },
+                    enabled = !isRunning,
+                    label = { Text(stringResource(R.string.cf_worker_domain_label)) },
+                    placeholder = { Text("example.username.workers.dev") },
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    singleLine = true
+                )
+                Text(
+                    stringResource(R.string.cf_worker_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                WorkerDomain.validationWarning(WorkerDomain.normalize(workerDomainText))?.let { warnRes ->
+                    Text(
+                        stringResource(warnRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(stringResource(R.string.cf_worker_enable), style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = workerEnabled,
+                        enabled = !isRunning,
+                        onCheckedChange = {
+                            workerEnabled = it
+                            prefs.edit().putBoolean("worker_enabled", it).apply()
+                        }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (WorkerDomain.normalize(workerDomainText).isBlank()) {
+                                Toast.makeText(context, context.getString(R.string.cf_worker_not_configured), Toast.LENGTH_SHORT).show()
+                                return@OutlinedButton
+                            }
+                            if (isDiagRunning) return@OutlinedButton
+                            isDiagRunning = true
+                            diagStatusText = context.getString(R.string.diag_running)
+                            coroutineScope.launch {
+                                val report = ConnectionDiagnostics.probeWorker(workerDomainText)
+                                ConnectionDiagnostics.logReport(report)
+                                val status = if (report.successCount > 0) {
+                                    context.getString(R.string.cf_worker_test_ok, report.successCount, report.totalCount)
+                                } else {
+                                    context.getString(R.string.cf_worker_test_fail)
+                                }
+                                diagStatusText = status
+                                prefs.edit().putString("diag_last_status", status).apply()
+                                isDiagRunning = false
+                                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        enabled = !isRunning && !isDiagRunning,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(stringResource(R.string.cf_worker_test))
+                    }
+                    TextButton(onClick = { openUrl("https://github.com/Regstar2/TgWsProxy_Android/blob/main/docs/cloudflare-worker.md") }) {
+                        Text(stringResource(R.string.cf_worker_help_link))
+                    }
+                }
+
                 OutlinedTextField(
                     value = cfProxyDomainText,
                     onValueChange = {
                         cfProxyDomainText = it
+                        cfDomainRows = CfDomainDiagnosticsState.snapshot(it)
                         prefs.edit().putString("cfproxy_domain", it).apply()
                     },
                     enabled = !isRunning,
@@ -704,6 +892,60 @@ private fun ProxyScreen(
                         unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant
                     ),
                     singleLine = true
+                )
+                CfDomain.validationWarning(cfProxyDomainText)?.let { warningRes ->
+                    Text(
+                        stringResource(warningRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
+                CfDomainsPanel(
+                    rows = cfDomainRows,
+                    manualDomainRaw = cfProxyDomainText,
+                    lastCheckAtMs = cfDomainLastCheckAtMs,
+                    expanded = cfDomainsExpanded,
+                    onExpandedChange = { cfDomainsExpanded = it },
+                    proxyRunning = isRunning,
+                    isDiagRunning = isDiagRunning,
+                    onTest = {
+                        if (!isDiagRunning) {
+                            isDiagRunning = true
+                            diagStatusText = context.getString(R.string.diag_running)
+                            coroutineScope.launch {
+                                val report = ConnectionDiagnostics.probeCfPool(cfProxyDomainText)
+                                ConnectionDiagnostics.logReport(report.routeReport)
+                                cfDomainRows = report.domains
+                                cfDomainLastCheckAtMs = report.checkedAtMs
+                                val manual = report.summary.manualResult?.let {
+                                    "${it.domain} ${cfDomainStatusLabel(context, it.status())}"
+                                } ?: context.getString(R.string.cf_domains_unset)
+                                val best = report.summary.bestDomain?.let {
+                                    "${it.domain}, ${it.lastLatencyMs ?: 0} ms"
+                                } ?: context.getString(R.string.cf_domains_none)
+                                val status = context.getString(
+                                    R.string.cf_domains_test_summary,
+                                    manual,
+                                    report.summary.availableBuiltIn,
+                                    report.summary.failedBuiltIn,
+                                    report.summary.uncheckedBuiltIn,
+                                    best,
+                                )
+                                diagStatusText = status
+                                prefs.edit().putString("diag_last_status", status).apply()
+                                isDiagRunning = false
+                                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    onResetCooldown = {
+                        CfDomainDiagnosticsState.resetCooldowns()
+                        NativeProxy.resetCfDomainCooldowns()
+                        cfDomainRows = CfDomainDiagnosticsState.snapshot(cfProxyDomainText)
+                        Toast.makeText(context, context.getString(R.string.cf_domains_cooldown_reset_done), Toast.LENGTH_SHORT).show()
+                    },
                 )
 
                 Row(
@@ -791,6 +1033,33 @@ private fun ProxyScreen(
                             prefs.edit().putBoolean("cfproxy_only", it).apply()
                         }
                     )
+                }
+
+                SectionTitle(stringResource(R.string.section_diagnostics))
+                if (diagStatusText.isNotBlank()) {
+                    Text(
+                        stringResource(R.string.diag_last_result, diagStatusText),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                DiagnosticRunButton(diagLabelDirect, isRunning, isDiagRunning, coroutineScope, context, prefs,
+                    onRunningChange = { isDiagRunning = it },
+                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeDirectWs() }
+                DiagnosticRunButton(diagLabelWorker, isRunning, isDiagRunning, coroutineScope, context, prefs,
+                    onRunningChange = { isDiagRunning = it },
+                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeWorker(workerDomainText) }
+                DiagnosticRunButton(diagLabelCf, isRunning, isDiagRunning, coroutineScope, context, prefs,
+                    onRunningChange = { isDiagRunning = it },
+                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeCfProxy(cfProxyDomainText) }
+                DiagnosticRunButton(diagLabelTcp, isRunning, isDiagRunning, coroutineScope, context, prefs,
+                    onRunningChange = { isDiagRunning = it },
+                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeTcpFallback() }
+                DiagnosticRunButton(diagLabelAll, isRunning, isDiagRunning, coroutineScope, context, prefs,
+                    onRunningChange = { isDiagRunning = it },
+                    onStatusChange = { diagStatusText = it }) {
+                    ConnectionDiagnostics.probeAll(workerDomainText, cfProxyDomainText)
                 }
 
                 SectionTitle(stringResource(R.string.section_appearance))
@@ -1192,6 +1461,133 @@ private fun HintText(text: String) {
 }
 
 @Composable
+private fun CfDomainsPanel(
+    rows: List<CfDomainHealth>,
+    manualDomainRaw: String,
+    lastCheckAtMs: Long?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    proxyRunning: Boolean,
+    isDiagRunning: Boolean,
+    onTest: () -> Unit,
+    onResetCooldown: () -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val manualDomain = CfDomain.normalize(manualDomainRaw).ifBlank { stringResource(R.string.cf_domains_unset) }
+    val builtInCount = rows.count { it.source == CfDomainSource.BUILT_IN }
+    val activeCount = rows.count { it.status(now) != CfDomainStatus.COOLDOWN }
+    val cooldownCount = rows.count { it.status(now) == CfDomainStatus.COOLDOWN }
+    val lastCheck = lastCheckAtMs?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    } ?: stringResource(R.string.cf_domains_unchecked)
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(R.string.cf_domains_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                TextButton(onClick = { onExpandedChange(!expanded) }) {
+                    Text(if (expanded) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs))
+                }
+            }
+
+            Text("${stringResource(R.string.cf_domains_manual)}: $manualDomain", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_builtin)}: $builtInCount", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_active)}: $activeCount", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_cooldown)}: $cooldownCount", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_last_check)}: $lastCheck", style = MaterialTheme.typography.bodySmall)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onTest,
+                    enabled = !proxyRunning && !isDiagRunning,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.cf_domains_test))
+                }
+                TextButton(onClick = onResetCooldown) {
+                    Text(stringResource(R.string.cf_domains_reset_cooldown))
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 10.dp)) {
+                    rows.forEach { row ->
+                        CfDomainHealthRow(row = row)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CfDomainHealthRow(row: CfDomainHealth) {
+    val status = row.status()
+    val source = when (row.source) {
+        CfDomainSource.MANUAL -> stringResource(R.string.cf_domains_source_manual)
+        CfDomainSource.BUILT_IN -> stringResource(R.string.cf_domains_source_builtin)
+        CfDomainSource.CACHED_UPSTREAM -> stringResource(R.string.cf_domains_source_cached)
+    }
+    val cooldown = row.cooldownUntilMs?.takeIf { it > System.currentTimeMillis() }?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Text(
+            "${row.domain} · $source · ${cfDomainStatusLabel(LocalContext.current, status)}",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium
+        )
+        val detail = buildList {
+            row.lastLatencyMs?.let { add("${it} ms") }
+            row.lastFailureReason?.let { add("${stringResource(R.string.cf_domains_last_error)}: $it") }
+            cooldown?.let { add("${stringResource(R.string.cf_domains_cooldown_until)}: $it") }
+        }.joinToString(" · ")
+        if (detail.isNotBlank()) {
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun cfDomainStatusLabel(context: Context, status: CfDomainStatus): String {
+    return context.getString(
+        when (status) {
+            CfDomainStatus.OK -> R.string.cf_domains_status_ok
+            CfDomainStatus.FAILED -> R.string.cf_domains_status_failed
+            CfDomainStatus.COOLDOWN -> R.string.cf_domains_status_cooldown
+            CfDomainStatus.UNCHECKED -> R.string.cf_domains_status_unchecked
+        }
+    )
+}
+
+@Composable
 fun IpSetupDialog(
     dc1Text: String, onDc1Change: (String) -> Unit,
     dc2Text: String, onDc2Change: (String) -> Unit,
@@ -1475,6 +1871,40 @@ fun openTelegram(context: Context, url: String) {
         context.startActivity(fallbackIntent)
     } catch (e: Exception) {
         Toast.makeText(context, context.getString(R.string.telegram_not_found), Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+private fun DiagnosticRunButton(
+    label: String,
+    proxyRunning: Boolean,
+    isDiagRunning: Boolean,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    context: Context,
+    prefs: android.content.SharedPreferences,
+    onRunningChange: (Boolean) -> Unit,
+    onStatusChange: (String) -> Unit,
+    block: suspend () -> ConnectionProbeReport,
+) {
+    OutlinedButton(
+        onClick = {
+            if (isDiagRunning) return@OutlinedButton
+            onRunningChange(true)
+            onStatusChange(context.getString(R.string.diag_running))
+            coroutineScope.launch {
+                val report = block()
+                ConnectionDiagnostics.logReport(report)
+                val status = "$label: ${report.successCount}/${report.totalCount}"
+                onStatusChange(status)
+                prefs.edit().putString("diag_last_status", status).apply()
+                onRunningChange(false)
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            }
+        },
+        enabled = !proxyRunning && !isDiagRunning,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+    ) {
+        Text(label)
     }
 }
 

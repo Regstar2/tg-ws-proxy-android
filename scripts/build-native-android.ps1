@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourceFile = Join-Path $repoRoot "tg-ws-proxy.go"
+$sourceDir = $repoRoot
 $artifactDir = Join-Path $repoRoot "artifacts\native\arm64-v8a"
 $jniLibDir = Join-Path $repoRoot "app\src\main\jniLibs\arm64-v8a"
 $outLib = Join-Path $artifactDir "libtgwsproxy.so"
@@ -68,7 +68,12 @@ try {
     $env:CGO_ENABLED = "1"
     $env:CC = $clang
 
-    & $goExe build -buildmode=c-shared -trimpath -o $outLib $sourceFile
+    Push-Location $sourceDir
+    try {
+        & $goExe build -buildmode=c-shared -trimpath -o $outLib .
+    } finally {
+        Pop-Location
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "go build failed with exit code $LASTEXITCODE"
     }

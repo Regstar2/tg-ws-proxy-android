@@ -1,6 +1,6 @@
 # Original vs Android Diff
 
-Updated: 2026-04-11
+Updated: 2026-05-18
 
 ## Scope
 
@@ -61,12 +61,36 @@ Useful log categories:
 - `bridge secondary ...`
 - `CF proxy closed: reason=...`
 
+## Added in 1.3.0-worker (vs Flowseal v1.7.0 baseline)
+
+- Cloudflare Worker route: `wss://<domain>/apiws?dst=...&dc=...&media=...`
+- Connection modes: Auto, Direct + fallback routes, Worker first, CF first, Worker only, CF only, Direct only
+- CF domain pool with manual-domain priority and per-domain cooldown (no GitHub refresh yet)
+- In-app connectivity tests (Direct / Worker / CF / TCP / all)
+- See [docs/cloudflare-worker.md](docs/cloudflare-worker.md) and [docs/CONNECTION_MODES.md](docs/CONNECTION_MODES.md)
+
 ## Remaining differences from Flowseal runtime
 
-- No automatic encoded Cloudflare domain pool/rotation in Android.
-- No full Cloudflare domain tester UI yet.
+- No automatic GitHub fetch for CF domain list (pool is built-in + manual domain).
+- No Fake TLS masking (TODO in docs).
 - Android has foreground service, Compose UI, log export, theme/language settings, and mobile-specific UX that the desktop/runtime project does not need.
 - Direct path remains available, but it is not the primary working route for tested mobile networks.
+
+## v1.3.1 routing hardening
+
+- `Worker only` and `CF only` now block direct TCP passthrough for Telegram-like IPv4/IPv6 destinations when the destination is not mapped to a DC.
+- Telegram mapping includes the observed `149.154.175.55 -> DC1` edge case.
+- CF pool health now cools down `429`, `403`, `5xx`, and repeated timeout/TLS/WebSocket failures; a manual domain can temporarily yield to the built-in pool while unhealthy.
+- Android routing intentionally keeps mobile-specific `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto`, and `Direct + fallback routes` modes even though Flowseal desktop v1.7.0 removed the separate CF-priority surface.
+- Fake TLS and GitHub-backed CF-domain auto-update remain out of scope for v1.3.1.
+
+## v1.3.2 CF domain pool
+
+- Manual CF domains remain supported, but the Android fork now carries a built-in fallback pool derived from the Flowseal upstream list.
+- Per-domain health tracks success/failure counts, last reason, cooldown, and latency.
+- `429`, `403`, `5xx`, and transport/setup failures move a bad domain out of the hot path so `Auto`, `CF first`, and fallback modes do not keep retrying the same endpoint forever.
+- The diagnostics UI now exposes manual vs built-in domain status and offers a cooldown reset action.
+- GitHub-backed upstream refresh and Fake TLS are still intentionally deferred to `v1.4.0` and later work.
 
 ## Practical conclusion
 

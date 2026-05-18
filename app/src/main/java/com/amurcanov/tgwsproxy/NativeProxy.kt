@@ -13,6 +13,7 @@ interface ProxyLibrary : Library {
     fun StopProxy(): Int
     fun SetPoolSize(size: Int)
     fun GetStats(): Pointer?
+    fun ResetCFDomainCooldowns()
     fun FreeString(p: Pointer)
 }
 
@@ -31,5 +32,8 @@ object NativeProxy {
         val res = ptr.getString(0)
         ProxyLibrary.INSTANCE.FreeString(ptr)
         return res
+    }
+    fun resetCfDomainCooldowns() {
+        ProxyLibrary.INSTANCE.ResetCFDomainCooldowns()
     }
 }
