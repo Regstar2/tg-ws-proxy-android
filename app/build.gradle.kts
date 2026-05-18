@@ -21,11 +21,16 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
 
 val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/generate-icons.py")
+    val isWindows = System.getProperty("os.name").lowercase().contains("windows")
     inputs.file(script)
     inputs.file(rootProject.file("icon.png"))
     outputs.dir(project.file("src/main/res"))
     workingDir = rootProject.projectDir
-    commandLine("python", script.absolutePath)
+    if (isWindows) {
+        commandLine("py", "-3", script.absolutePath)
+    } else {
+        commandLine("python3", script.absolutePath)
+    }
 }
 
 tasks.named("preBuild") {

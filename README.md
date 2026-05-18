@@ -1,6 +1,6 @@
 # TgWsProxy Android
 
-Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
+Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Текущая версия умеет выбирать между Direct, Cloudflare Worker и Cloudflare Proxy маршрутами и рассчитана на сети, где прямые Telegram endpoint-ы недоступны или нестабильны.
 
 Текущая версия рабочей ветки: `1.6.0` (production polish: notifications, metrics, onboarding).
 
@@ -26,7 +26,7 @@ Android-форк распространяется под GPLv3. Оригинал
 - Foreground service для фоновой работы.
 - Jetpack Compose UI с системной, светлой и тёмной темой.
 - Выбор языка интерфейса: системный, русский, английский.
-- Настройки DC/IP, Cloudflare-домена и режимов CF Proxy.
+- Настройки Worker domain, CF-domain pool и режимов маршрутизации.
 - Runtime-логи в приложении и экспорт логов в выбранную папку.
 - Диагностическое логирование стадий `DNS -> TCP -> TLS -> WS`.
 
@@ -39,15 +39,17 @@ Android-форк распространяется под GPLv3. Оригинал
 
 ## Cloudflare Proxy
 
-На мобильной сети текущий рабочий путь подтверждён через CF Proxy. Direct path до Telegram endpoint-ов на тестовых сетях часто недоступен или нестабилен, поэтому для реального использования сейчас рекомендуется режим `CF first` или `CF only`.
+На мобильной сети текущий рабочий путь подтверждён через CF Proxy и Cloudflare Worker. Direct path до Telegram endpoint-ов на тестовых сетях часто недоступен или нестабилен, поэтому для обычного использования сейчас рекомендуется `Auto`, а при необходимости явного приоритета - `Worker first` или `CF first`.
 
 Режимы:
 
-- `CF proxy` - включает Cloudflare fallback.
-- `CF first` - сначала пробует `kws{dc}.<domain>`, затем direct WS, если CF недоступен.
+- `Auto` - адаптивно выбирает маршрут по текущей сети, истории успехов/ошибок, cooldown и last-good route.
+- `Direct + fallback routes` - цепочка `Direct -> Worker -> CF -> TCP`.
+- `Worker first` - сначала пробует Cloudflare Worker, затем разрешённые fallback-маршруты.
+- `CF first` - сначала пробует `kws{dc}.<domain>`, затем fallback-маршруты.
 - `CF only` - не использует direct Telegram upstream и direct TCP passthrough для Telegram-like трафика.
 - `Worker only` - использует только Worker и тоже не допускает direct TCP passthrough для Telegram-like трафика.
-- `Direct + fallback routes` - честное имя для цепочки `Direct -> Worker -> CF -> TCP`.
+- `Direct only` - только прямой WebSocket route.
 
 Домен по умолчанию: `pclead.co.uk`. Он взят из подхода Flowseal и удобен для проверки, но это общий endpoint. Cloudflare ограничивает одновременные WebSocket-подключения, поэтому домен по умолчанию может временно отдавать `429 Too Many Requests` или перестать работать. Для постоянного использования лучше настроить собственный Cloudflare-домен и указать его в настройках приложения.
 
@@ -77,7 +79,7 @@ kws203.<domain>
 1. Установите APK.
 2. Откройте TgWsProxy.
 3. Проверьте порт. По умолчанию используется `1081`.
-4. Для мобильной сети включите `CF first` или `CF only`.
+4. Для большинства пользователей выберите `Auto`. Если Direct часто ломается, попробуйте `Worker first`; если есть проверенный CF domain - `CF first`.
 5. Нажмите `Включить прокси`.
 6. Нажмите `Применить в Telegram`.
 7. Для диагностики временно включите runtime-логи и сохраните отчёт в выбранную папку.
@@ -164,10 +166,9 @@ $env:KEY_ALIAS="tgwsproxy"
 - долгосрочная надёжность общего домена `pclead.co.uk`;
 - workflow для настройки собственного Cloudflare-домена в один клик.
 
-## Документация по расследованию
+## Документация
 
-- [DEBUG_STATE.md](DEBUG_STATE.md) - краткое текущее состояние.
-- [NEXT_STEPS.md](NEXT_STEPS.md) - ближайший roadmap.
+- [RELEASE_NOTES_v1.6.0.md](RELEASE_NOTES_v1.6.0.md) - заметки к текущему релизу.
 - [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
 - [docs/CF_DOMAIN_POOL.md](docs/CF_DOMAIN_POOL.md) - источники CF-доменов, cache policy и fallback order.
 - [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) - foreground notification, метрики и действия.

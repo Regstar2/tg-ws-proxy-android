@@ -728,7 +728,11 @@ class CfDomainListUpdater(
                 enabled = current.mirrorEnabled,
                 rawUrl = current.mirrorUrl,
             )
-            if (current.mirrorEnabled && mirrorValidation is CfDomainMirrorValidation.Invalid) {
+            if (
+                mode == CfDomainUpdateMode.TEST_MIRROR &&
+                current.mirrorEnabled &&
+                mirrorValidation is CfDomainMirrorValidation.Invalid
+            ) {
                 return CfDomainListUpdateResult.MirrorInvalid(mirrorValidation.message)
             }
 
@@ -747,6 +751,7 @@ class CfDomainListUpdater(
                 else -> MAX_ATTEMPTS_MANUAL
             }
 
+            var lastFailure: CfDomainListDownloadResult.Failed? = null
             for (source in sources) {
                 logger.info(
                     "CF update trying source=${source.type.logName} url=${safeUrlForLog(source.url)}",
@@ -804,6 +809,7 @@ class CfDomainListUpdater(
                         }
 
                         is CfDomainListDownloadResult.Failed -> {
+                            lastFailure = result
                             logger.warn(
                                 "CF update source failed source=${source.type.logName} " +
                                     "stage=${result.stage.logName} reason=${result.message}" +
@@ -829,8 +835,8 @@ class CfDomainListUpdater(
 
             failAll(
                 current = current,
-                stage = current.lastErrorStage ?: CfDomainUpdateStage.UNKNOWN,
-                message = current.lastError ?: "all_sources_failed",
+                stage = lastFailure?.stage ?: current.lastErrorStage ?: CfDomainUpdateStage.UNKNOWN,
+                message = lastFailure?.let(::formatFailureMessage) ?: current.lastError ?: "all_sources_failed",
                 dryRun = dryRun,
             )
         } finally {

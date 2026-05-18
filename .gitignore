@@ -1,4 +1,5 @@
 .gradle/
+.vscode/
 local.properties
 app/build/
 artifacts/native/

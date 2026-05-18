@@ -68,19 +68,20 @@ data class ProxyRuntimeMetrics(
 class SpeedSampler(private val windowMs: Long = 4000) {
     private var lastBytesUp: Long = 0
     private var lastBytesDown: Long = 0
-    private var lastSampleAtMs: Long = 0
+    private var lastSampleAtMs: Long? = null
     private var downloadBps: Double = 0.0
     private var uploadBps: Double = 0.0
 
     fun sample(bytesUp: Long, bytesDown: Long, nowMs: Long = System.currentTimeMillis()): Pair<Double, Double> {
-        if (lastSampleAtMs == 0L) {
+        val previousSampleAtMs = lastSampleAtMs
+        if (previousSampleAtMs == null) {
             lastBytesUp = bytesUp
             lastBytesDown = bytesDown
             lastSampleAtMs = nowMs
             return 0.0 to 0.0
         }
-        val elapsedSec = (nowMs - lastSampleAtMs).coerceAtLeast(1L) / 1000.0
-        if (nowMs - lastSampleAtMs >= windowMs / 2) {
+        val elapsedSec = (nowMs - previousSampleAtMs).coerceAtLeast(1L) / 1000.0
+        if (nowMs - previousSampleAtMs >= windowMs / 2) {
             val upDelta = (bytesUp - lastBytesUp).coerceAtLeast(0)
             val downDelta = (bytesDown - lastBytesDown).coerceAtLeast(0)
             downloadBps = downDelta / elapsedSec
@@ -95,7 +96,7 @@ class SpeedSampler(private val windowMs: Long = 4000) {
     fun reset() {
         lastBytesUp = 0
         lastBytesDown = 0
-        lastSampleAtMs = 0
+        lastSampleAtMs = null
         downloadBps = 0.0
         uploadBps = 0.0
     }
