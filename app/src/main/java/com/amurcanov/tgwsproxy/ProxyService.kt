@@ -120,7 +120,15 @@ class ProxyService : Service() {
     private fun stopProxy() {
         statsJob?.cancel()
         statsJob = null
-        Thread { NativeProxy.stopProxy() }.start()
+        Thread {
+            val exported = NativeProxy.getAdaptiveRouteStats()
+            NativeProxy.stopProxy()
+            if (!exported.isNullOrBlank()) {
+                AdaptiveRouteStatsRepository(
+                    getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE),
+                ).mergeFromNative(exported)
+            }
+        }.start()
         releaseWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

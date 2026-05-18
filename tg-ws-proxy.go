@@ -471,7 +471,7 @@ func fallbackTarget(dc int, dst string) string {
 
 func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter) bool {
 	settings := getRuntimeSettings()
-	routes := routesForMode(settings.Mode, settings, true)
+	routes := adaptiveRoutesForMode(settings.Mode, settings, true, dc, isMedia)
 	return runRouteChain(ctx, client, init, label, dc, isMedia, dst, port, splitter, routes)
 }
 
@@ -1945,7 +1945,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		}
 	}
 
-	if shouldSkipDirectWS(dcKey, settings.Mode) {
+	if shouldSkipDirectWSAdaptive(dcKey, settings.Mode) {
 		logInfo.Printf("[%s] DC%d%s skipping direct WS (mode=%s cooldown/active)",
 			label, dc, mTag, settings.Mode)
 		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
@@ -2075,6 +2075,13 @@ func handleClient(ctx context.Context, conn net.Conn) {
 				label, dc, mTag, int(dcFailCooldown))
 		}
 
+		if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+			reason := "ws_connect_failure"
+			if wsFailedRedirect {
+				reason = "ws_302"
+			}
+			recordAdaptiveFailure(routeDirectWS, dc, isMedia, reason, 0)
+		}
 		logInfo.Printf("[%s] DC%d%s fallback reason=ws_unavailable -> fallback chain",
 			label, dc, mTag)
 		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
@@ -2085,6 +2092,10 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	dcFailMu.Lock()
 	delete(dcFailUntil, dcKey)
 	dcFailMu.Unlock()
+
+	if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+		recordAdaptiveSuccess(routeDirectWS, dc, isMedia, 0)
+	}
 
 	stats.connectionsWs.Add(1)
 
@@ -2326,6 +2337,14 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				if settings.Worker.Domain != "" {
 					settings.Worker.Enabled = true
 				}
+			case "network_profile_id":
+				settings.NetworkProfileID = val
+			case "network_profile_type":
+				settings.NetworkProfileType = val
+			case "network_profile_label":
+				settings.NetworkProfileLabel = val
+			case "adaptive_route_stats":
+				settings.AdaptiveRouteStats = val
 			}
 			continue
 		}
@@ -2472,6 +2491,21 @@ func SetManualCFDomains(cDomains *C.char) {
 		settings.CF.Domain = domains[0]
 	}
 	setRuntimeSettings(settings)
+}
+
+//export GetAdaptiveRouteStats
+func GetAdaptiveRouteStats() *C.char {
+	return C.CString(exportAdaptiveRouteStats())
+}
+
+//export ResetAdaptiveRouteStats
+func ResetAdaptiveRouteStats(all C.int) {
+	resetAdaptiveRouteStats(int(all) != 0, "")
+}
+
+//export ResetAdaptiveNetworkRouteStats
+func ResetAdaptiveNetworkRouteStats(cProfileID *C.char) {
+	resetAdaptiveRouteStats(false, C.GoString(cProfileID))
 }
 
 //export FreeString

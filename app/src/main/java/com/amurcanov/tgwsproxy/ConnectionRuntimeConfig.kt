@@ -21,6 +21,8 @@ object ConnectionRuntimeConfig {
         workerEnabled: Boolean,
         workerDomain: String,
         cachedCfDomains: List<String> = emptyList(),
+        networkProfile: NetworkProfile? = null,
+        adaptiveRouteStats: String = "",
     ): String {
         val effectiveMode = when {
             mode != ConnectionMode.DirectWithFallback -> mode
@@ -61,6 +63,16 @@ object ConnectionRuntimeConfig {
             add("@worker_enabled=${if (workerOn) 1 else 0}")
             if (normalizedWorker.isNotBlank()) {
                 add("@worker_domain=$normalizedWorker")
+            }
+            networkProfile?.let { profile ->
+                add("@network_profile_id=${profile.id}")
+                add("@network_profile_type=${profile.type.prefValue}")
+                if (profile.label.isNotBlank()) {
+                    add("@network_profile_label=${profile.label}")
+                }
+            }
+            if (adaptiveRouteStats.isNotBlank()) {
+                add("@adaptive_route_stats=$adaptiveRouteStats")
             }
         }
         return tokens.joinToString(",")

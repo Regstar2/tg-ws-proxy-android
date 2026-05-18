@@ -236,6 +236,9 @@ private fun ProxyScreen(
     val manualCfDomainRepository = remember {
         SharedPreferencesManualCfDomainRepository(prefs)
     }
+    val adaptiveRouteStatsRepository = remember {
+        AdaptiveRouteStatsRepository(prefs)
+    }
     val cfDomainListUpdater = remember {
         CfDomainListUpdater(
             repository = cfDomainListRepository,
@@ -282,6 +285,7 @@ private fun ProxyScreen(
     }
     var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
     var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
+    var adaptiveRoutingExpanded by rememberSaveable { mutableStateOf(false) }
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
@@ -509,6 +513,8 @@ private fun ProxyScreen(
             workerEnabled = workerEnabled,
             workerDomain = workerDomainText,
             cachedCfDomains = cfUpstreamState.domains,
+            networkProfile = NetworkProfileProvider.current(context),
+            adaptiveRouteStats = adaptiveRouteStatsRepository.loadEncodedStats(),
         )
 
         if (parsedIps.isEmpty()) {
@@ -1105,6 +1111,36 @@ private fun ProxyScreen(
                         Toast.makeText(context, context.getString(R.string.cf_domains_cooldown_reset_done), Toast.LENGTH_SHORT).show()
                     },
                 )
+
+                if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
+                    AdaptiveRoutingPanel(
+                        profile = NetworkProfileProvider.current(context),
+                        stats = adaptiveRouteStatsRepository.snapshotForDisplay(
+                            NetworkProfileProvider.current(context).id,
+                        ),
+                        expanded = adaptiveRoutingExpanded,
+                        onExpandedChange = { adaptiveRoutingExpanded = it },
+                        onResetAll = {
+                            adaptiveRouteStatsRepository.resetAll()
+                            NativeProxy.resetAdaptiveRouteStats(true)
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.adaptive_stats_reset_done),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                        onResetNetwork = {
+                            val profile = NetworkProfileProvider.current(context)
+                            adaptiveRouteStatsRepository.resetCurrentNetwork(profile.id)
+                            NativeProxy.resetAdaptiveNetworkRouteStats(profile.id)
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.adaptive_stats_reset_done),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                    )
+                }
 
                 Row(
                     modifier = Modifier
@@ -1927,6 +1963,142 @@ private fun CfDomainHealthRow(row: CfDomainHealth) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun AdaptiveRoutingPanel(
+    profile: NetworkProfile,
+    stats: List<RouteStatSnapshot>,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onResetAll: () -> Unit,
+    onResetNetwork: () -> Unit,
+) {
+    val networkTypeLabel = when (profile.type) {
+        NetworkProfileType.WIFI -> stringResource(R.string.adaptive_network_wifi)
+        NetworkProfileType.MOBILE -> stringResource(R.string.adaptive_network_mobile)
+        NetworkProfileType.UNKNOWN -> stringResource(R.string.adaptive_network_unknown)
+    }
+    val networkLabel = profile.label.ifBlank { networkTypeLabel }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.adaptive_routing_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = { onExpandedChange(!expanded) }) {
+                    Text(if (expanded) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs))
+                }
+            }
+            Text(
+                stringResource(R.string.adaptive_auto_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "${stringResource(R.string.adaptive_network_label)}: $networkLabel",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                "${stringResource(R.string.adaptive_network_type)}: $networkTypeLabel",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    Text(
+                        stringResource(R.string.adaptive_route_stats),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (stats.isEmpty()) {
+                        Text(
+                            stringResource(R.string.adaptive_none),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        stats.forEach { row ->
+                            AdaptiveRouteStatRow(row)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onResetNetwork,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.adaptive_reset_network_stats))
+                        }
+                        OutlinedButton(
+                            onClick = onResetAll,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.adaptive_reset_all_stats))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdaptiveRouteStatRow(row: RouteStatSnapshot) {
+    val routeLabel = when (row.routeType) {
+        "direct_ws" -> stringResource(R.string.adaptive_route_direct)
+        "cf_worker_ws" -> stringResource(R.string.adaptive_route_worker)
+        "cf_proxy_ws" -> stringResource(R.string.adaptive_route_cf)
+        "tcp_fallback" -> stringResource(R.string.adaptive_route_tcp)
+        else -> row.routeType
+    }
+    val cooldown = row.cooldownUntilMs.takeIf { it > System.currentTimeMillis() }?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    }
+    Text(
+        "$routeLabel: ${stringResource(R.string.adaptive_stat_successes)} ${row.successCount}, " +
+            "${stringResource(R.string.adaptive_stat_failures)} ${row.failureCount}",
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+    if (row.averageLatencyMs > 0) {
+        Text(
+            "${stringResource(R.string.adaptive_stat_avg_latency)}: ${row.averageLatencyMs} ms",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    row.lastFailureReason?.let {
+        Text(
+            "${stringResource(R.string.adaptive_stat_last_error)}: $it",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    cooldown?.let {
+        Text(
+            "${stringResource(R.string.adaptive_stat_cooldown)}: $it",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

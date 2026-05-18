@@ -37,11 +37,21 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - ETag / Last-Modified on primary and mirror fetch;
 - source status UI (primary, mirror, last successful source).
 
-## v1.5.0 next
+## v1.5.0 completed
 
-- adaptive Auto routing;
-- per-network route scoring;
-- last-good route persistence.
+- adaptive Auto route scoring;
+- per-network route stats;
+- last-good route (12h TTL);
+- route cooldown integration;
+- Auto diagnostics UI;
+- route stats reset.
+
+## v1.5.1 next
+
+- polish scoring thresholds from real logs;
+- better mobile operator heuristics;
+- export adaptive routing diagnostics with logs;
+- optional user-visible Auto strategy presets.
 
 ## v1.6.0 later
 

@@ -107,6 +107,13 @@ Useful log categories:
 - ETag / Last-Modified supported for conditional requests (`304` keeps cache).
 - Fake TLS and pinned TLS remain out of scope.
 
+## v1.5.0 adaptive Auto routing
+
+- Auto mode scores Direct / Worker / CF / TCP fallback using per-network route statistics.
+- Last-good route, cooldowns, and Wi-Fi vs mobile heuristics speed up reconnects.
+- Route stats persist locally (hashed network profile, no raw SSID).
+- Settings expose adaptive routing diagnostics and reset actions.
+
 ## Practical conclusion
 
 The current Android fork is no longer blocked on "missing CfProxy". The active question is now operational stability:

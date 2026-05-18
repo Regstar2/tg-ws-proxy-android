@@ -55,6 +55,12 @@ The Android fork can update its Cloudflare proxy domain list from Flowseal upstr
 
 `Fake TLS` и GitHub pinned TLS fallback намеренно не входят в `v1.4.x`.
 
+## v1.5.0 adaptive Auto routing
+
+Auto and **Direct + fallback routes** use adaptive scoring in the Android fork. See [ADAPTIVE_ROUTING.md](ADAPTIVE_ROUTING.md).
+
+Manual modes (`Worker only`, `CF only`, `Direct only`, `Worker first`, `CF first`) are unchanged.
+
 ## v1.4.1 mirror / resilient upstream update
 
 CF-domain list updates are best-effort and do not block proxy startup. Primary GitHub is tried first; an optional user HTTPS mirror is used on failure. Failed updates keep the previous cache; the built-in list remains available. See [CF_DOMAIN_POOL.md](CF_DOMAIN_POOL.md) for details.

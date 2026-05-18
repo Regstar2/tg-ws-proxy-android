@@ -44,6 +44,10 @@ type runtimeSettings struct {
 	Worker           workerConfig
 	CFManualDomains  []string // user CF domains override cached and built-in pool entries
 	CFCachedUpstream []string // cached Flowseal upstream domains
+	NetworkProfileID    string
+	NetworkProfileType  string
+	NetworkProfileLabel string
+	AdaptiveRouteStats  string
 }
 
 var (
@@ -65,6 +69,7 @@ func setRuntimeSettings(cfg runtimeSettings) {
 	runtimeCfgMu.Unlock()
 	cfPool.SetManualDomains(cfg.CFManualDomains)
 	cfPool.SetCachedUpstreamDomains(cfg.CFCachedUpstream)
+	applyAdaptiveProfile(cfg)
 }
 
 func getRuntimeSettings() runtimeSettings {
@@ -219,6 +224,9 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 			reason = fmt.Sprintf("worker_ws_connect_failed: %v", lastErr)
 		}
 		logWarn.Printf("[%s] DC%d%s Worker WS failed: %s", label, dc, mTag, reason)
+		if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+			recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, reason, 0)
+		}
 		return false, reason
 	}
 
@@ -231,6 +239,9 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 	}
 
 	summary := bridgeWS(ctx, client, ws, label, dc, domain, 443, isMedia, splitter)
+	if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+		recordAdaptiveSuccess(routeCFWorkerWS, dc, isMedia, 0)
+	}
 	return true, summary.String()
 }
 
@@ -263,6 +274,9 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		ok, reason, failureKind, latencyMs := cfProxyDialHost(ctx, client, init, label, dc, isMedia, splitter, host, baseDomain)
 		if ok {
 			cfPool.MarkSuccess(wsDC, baseDomain, latencyMs)
+			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+				recordAdaptiveSuccess(routeCFProxyWS, dc, isMedia, latencyMs)
+			}
 			logInfo.Printf("[%s] DC%d%s CF proxy selected domain=%s", label, dc, mTag, baseDomain)
 			return true, reason
 		}
@@ -365,6 +379,9 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 				logInfo.Printf("[%s] DC%d%s Worker closed: reason=%s", label, dc, mTag, reason)
 				return true
 			}
+			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+				recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, "worker_failed", 0)
+			}
 		case routeCFProxyWS:
 			if ok, reason := cfProxyFallbackWithPool(ctx, client, init, label, dc, isMedia, splitter); ok {
 				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
@@ -377,12 +394,17 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 				}
 				return false
 			}
+			if settings.Mode != modeCFOnly {
+				recordAdaptiveFailure(routeCFProxyWS, dc, isMedia, "cfproxy_failed", 0)
+			}
 			cfFailed = true
 		case routeTCPFallback:
 			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s", label, dc, mTag, joinAddr(target, port))
 			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
+				recordAdaptiveSuccess(routeTCPFallback, dc, isMedia, 0)
 				return true
 			}
+			recordAdaptiveFailure(routeTCPFallback, dc, isMedia, "tcp_failed", 0)
 		case routeDirectWS:
 			// Direct WS is handled by the caller before fallback chains.
 			continue
@@ -447,6 +469,9 @@ func shouldSkipDirectWS(dcKey [2]int, mode connectionMode) bool {
 	failUntil := dcFailUntil[dcKey]
 	dcFailMu.RUnlock()
 	if mode == modeAuto && now < failUntil {
+		return true
+	}
+	if mode == modeDirectWithFallback && now < failUntil {
 		return true
 	}
 	return false
