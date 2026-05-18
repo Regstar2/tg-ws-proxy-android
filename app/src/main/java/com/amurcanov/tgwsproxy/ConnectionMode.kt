@@ -38,4 +38,14 @@ enum class ConnectionMode(val prefValue: String) {
     fun usesCfProxy(): Boolean = this != DirectOnly
 
     fun isRestrictedDirect(): Boolean = this == CFOnly || this == WorkerOnly
+
+    fun hintRes(): Int? = when (this) {
+        Auto -> R.string.mode_auto_hint_short
+        DirectWithFallback -> R.string.mode_direct_fallback_hint_short
+        WorkerFirst -> R.string.mode_worker_first_hint_short
+        CFFirst -> R.string.mode_cf_first_hint_short
+        WorkerOnly -> R.string.mode_worker_only_hint_short
+        CFOnly -> R.string.mode_cf_only_hint_short
+        DirectOnly -> R.string.mode_direct_only_hint_short
+    }
 }

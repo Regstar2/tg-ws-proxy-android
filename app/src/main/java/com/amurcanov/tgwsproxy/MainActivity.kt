@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -80,8 +81,6 @@ val telegramApps = listOf(
     "cc.modery.cherrygram",
     "io.github.nextalone.nagram"
 )
-
-private const val APP_INFO_VERSION = "1.4.0"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -134,10 +133,19 @@ private fun Context.applyLanguageMode(mode: LanguageMode) {
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_OPEN_STATUS = "extra_open_status"
+    }
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
         // Ignored in this example, but handles Tiramisu+ notifications
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -247,6 +255,13 @@ private fun ProxyScreen(
         )
     }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
+    val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
+    var notificationPrefs by remember {
+        mutableStateOf(NotificationPreferences.load(context))
+    }
+    var showOnboarding by remember {
+        mutableStateOf(!prefs.getBoolean("onboarding_completed", false))
+    }
     var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
     var dc1Text by remember { mutableStateOf(prefs.getString("dc1", "149.154.167.220") ?: "149.154.167.220") }
     var dc2Text by remember { mutableStateOf(prefs.getString("dc2", "149.154.167.220") ?: "149.154.167.220") }
@@ -296,7 +311,8 @@ private fun ProxyScreen(
         mutableStateOf(prefs.getBoolean("include_domains_in_log_export", false))
     }
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
-    var showLogs by rememberSaveable { mutableStateOf(true) }
+    var showRuntimeLogsDialog by remember { mutableStateOf(false) }
+    var workerNormalizeHint by remember { mutableStateOf<String?>(null) }
     var showInfoModal by remember { mutableStateOf(false) }
     var showTipsModal by remember { mutableStateOf(false) }
     var showIpSetupModal by remember { mutableStateOf(false) }
@@ -308,7 +324,7 @@ private fun ProxyScreen(
     val coroutineScope = rememberCoroutineScope()
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val screenScroll = rememberScrollState()
-    val hasOpenModal = showInfoModal || showTipsModal || showIpSetupModal || showExitConfirm
+    val hasOpenModal = showInfoModal || showTipsModal || showIpSetupModal || showExitConfirm || showOnboarding || showRuntimeLogsDialog
 
     BackHandler(enabled = currentPage == ProxyScreenPage.Settings && !hasOpenModal) {
         currentPage = ProxyScreenPage.Main
@@ -331,7 +347,7 @@ private fun ProxyScreen(
                     connectionMode = connectionMode,
                     strategy = autoStrategy,
                     profile = profile,
-                    workerDomain = workerDomainText,
+                    workerDomain = WorkerDomain.normalize(workerDomainText),
                     cachedUpstreamCount = cfUpstreamState.domains.size,
                     builtInCount = CfDomain.builtInDomains.size,
                     stats = adaptiveRouteStatsRepository.snapshotForDisplay(profile.id),
@@ -402,10 +418,11 @@ private fun ProxyScreen(
         }
     }
 
-    LaunchedEffect(showLogs) {
-        if (showLogs) {
-            delay(120)
-            screenScroll.animateScrollTo(screenScroll.maxValue)
+    LaunchedEffect(Unit) {
+        val activity = context as? MainActivity
+        if (activity?.intent?.getBooleanExtra(MainActivity.EXTRA_OPEN_STATUS, false) == true) {
+            currentPage = ProxyScreenPage.Main
+            activity.intent?.removeExtra(MainActivity.EXTRA_OPEN_STATUS)
         }
     }
 
@@ -538,7 +555,7 @@ private fun ProxyScreen(
             cfDomain = "",
             manualCfDomains = manualCfDomains,
             workerEnabled = workerEnabled,
-            workerDomain = workerDomainText,
+            workerDomain = WorkerDomain.normalize(workerDomainText),
             cachedCfDomains = cfUpstreamState.domains,
             networkProfile = NetworkProfileProvider.current(context),
             adaptiveRouteStats = adaptiveRouteStatsRepository.loadEncodedStats(),
@@ -742,6 +759,21 @@ private fun ProxyScreen(
                         }
                     }
 
+                    if (notificationPrefs.showMetricsInApp) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        ProxyConnectionMetricsCard(
+                            ui = uiMetrics.copy(
+                                serviceStatus = when {
+                                    !isRunning -> ProxyServiceStatus.STOPPED
+                                    uiMetrics.serviceStatus == ProxyServiceStatus.STOPPED ->
+                                        ProxyServiceStatus.RUNNING
+                                    else -> uiMetrics.serviceStatus
+                                },
+                            ),
+                            showMetrics = true,
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(20.dp))
 
                     AnimatedContent(
@@ -893,7 +925,7 @@ private fun ProxyScreen(
                 )
                 val connectionModes = ConnectionMode.entries
                 var connectionMenuExpanded by rememberSaveable { mutableStateOf(false) }
-                Box(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { connectionMenuExpanded = true },
                         enabled = !isRunning,
@@ -952,6 +984,14 @@ private fun ProxyScreen(
                         }
                     }
                 }
+                connectionMode.hintRes()?.let { hintRes ->
+                    Text(
+                        stringResource(hintRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
 
                 SectionTitle(stringResource(R.string.cf_worker_title))
 
@@ -959,21 +999,36 @@ private fun ProxyScreen(
                     value = workerDomainText,
                     onValueChange = {
                         workerDomainText = it
-                        val normalized = WorkerDomain.normalize(it)
-                        if (normalized.isNotBlank()) {
+                        workerNormalizeHint = null
+                        if (WorkerDomain.normalize(it).isNotBlank()) {
                             workerEnabled = true
                         }
-                        prefs.edit()
-                            .putString("worker_domain", it)
-                            .putBoolean("worker_enabled", workerEnabled)
-                            .apply()
                     },
                     enabled = !isRunning,
                     label = { Text(stringResource(R.string.cf_worker_domain_label)) },
-                    placeholder = { Text("example.username.workers.dev") },
+                    placeholder = { Text(stringResource(R.string.worker_domain_placeholder)) },
+                    supportingText = { Text(stringResource(R.string.worker_domain_helper)) },
                     shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                    singleLine = true
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp)
+                        .onFocusChanged { focusState ->
+                            if (!focusState.isFocused) {
+                                val normalized = WorkerDomain.normalize(workerDomainText)
+                                if (normalized.isNotBlank() && normalized != workerDomainText.trim()) {
+                                    workerDomainText = normalized
+                                    workerNormalizeHint = context.getString(
+                                        R.string.worker_domain_normalized,
+                                        normalized,
+                                    )
+                                }
+                                prefs.edit()
+                                    .putString("worker_domain", WorkerDomain.normalize(workerDomainText))
+                                    .putBoolean("worker_enabled", workerEnabled)
+                                    .apply()
+                            }
+                        },
+                    singleLine = true,
                 )
                 Text(
                     stringResource(R.string.cf_worker_hint),
@@ -981,6 +1036,14 @@ private fun ProxyScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
+                workerNormalizeHint?.let { hint ->
+                    Text(
+                        hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
                 WorkerDomain.validationWarning(WorkerDomain.normalize(workerDomainText))?.let { warnRes ->
                     Text(
                         stringResource(warnRes),
@@ -1169,7 +1232,7 @@ private fun ProxyScreen(
                                 connectionMode = connectionMode,
                                 strategy = autoStrategy,
                                 profile = adaptiveProfile,
-                                workerDomain = workerDomainText,
+                                workerDomain = WorkerDomain.normalize(workerDomainText),
                                 manualCfDomains = manualCfDomains,
                                 cachedUpstreamCount = cfUpstreamState.domains.size,
                                 builtInCount = CfDomain.builtInDomains.size,
@@ -1290,33 +1353,51 @@ private fun ProxyScreen(
                 }
 
                 SectionTitle(stringResource(R.string.section_diagnostics))
-                if (diagStatusText.isNotBlank()) {
-                    Text(
-                        stringResource(R.string.diag_last_result, diagStatusText),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                val runDiag: (String, suspend () -> ConnectionProbeReport) -> Unit = { label, block ->
+                    if (!isDiagRunning) {
+                        isDiagRunning = true
+                        diagStatusText = context.getString(R.string.diag_running)
+                        coroutineScope.launch {
+                            val report = block()
+                            ConnectionDiagnostics.logReport(report)
+                            val status = "$label: ${report.successCount}/${report.totalCount}"
+                            diagStatusText = status
+                            prefs.edit().putString("diag_last_status", status).apply()
+                            isDiagRunning = false
+                            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
-                DiagnosticRunButton(diagLabelDirect, isRunning, isDiagRunning, coroutineScope, context, prefs,
-                    onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeDirectWs() }
-                DiagnosticRunButton(diagLabelWorker, isRunning, isDiagRunning, coroutineScope, context, prefs,
-                    onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeWorker(workerDomainText) }
-                DiagnosticRunButton(diagLabelCf, isRunning, isDiagRunning, coroutineScope, context, prefs,
-                    onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) {
-                    ConnectionDiagnostics.probeCfProxy(manualCfDomains, cfUpstreamState.domains)
-                }
-                DiagnosticRunButton(diagLabelTcp, isRunning, isDiagRunning, coroutineScope, context, prefs,
-                    onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeTcpFallback() }
-                DiagnosticRunButton(diagLabelAll, isRunning, isDiagRunning, coroutineScope, context, prefs,
-                    onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) {
-                    ConnectionDiagnostics.probeAll(workerDomainText, manualCfDomains, cfUpstreamState.domains)
-                }
+                CompactDiagnosticsSection(
+                    lastStatus = diagStatusText,
+                    isRunning = isRunning,
+                    isDiagRunning = isDiagRunning,
+                    onProbeAll = {
+                        runDiag(diagLabelAll) {
+                            ConnectionDiagnostics.probeAll(
+                                workerDomainText,
+                                manualCfDomains,
+                                cfUpstreamState.domains,
+                            )
+                        }
+                    },
+                    onProbeDirect = { runDiag(diagLabelDirect) { ConnectionDiagnostics.probeDirectWs() } },
+                    onProbeWorker = { runDiag(diagLabelWorker) { ConnectionDiagnostics.probeWorker(workerDomainText) } },
+                    onProbeCf = {
+                        runDiag(diagLabelCf) {
+                            ConnectionDiagnostics.probeCfProxy(manualCfDomains, cfUpstreamState.domains)
+                        }
+                    },
+                    onProbeTcp = { runDiag(diagLabelTcp) { ConnectionDiagnostics.probeTcpFallback() } },
+                )
+
+                NotificationSettingsSection(
+                    prefs = notificationPrefs,
+                    onChange = { updated ->
+                        notificationPrefs = updated
+                        NotificationPreferences.save(context, updated)
+                    },
+                )
 
                 SectionTitle(stringResource(R.string.section_appearance))
                 Text(
@@ -1474,28 +1555,14 @@ private fun ProxyScreen(
                     )
                 }
 
-                SectionTitle(stringResource(R.string.section_diagnostics))
-
-                // Logs toggle button — same style as main buttons
-                Button(
-                    onClick = { showLogs = !showLogs },
+                OutlinedButton(
+                    onClick = { showRuntimeLogsDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                        .padding(bottom = 8.dp),
                 ) {
-                    Text(
-                        if (showLogs) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(stringResource(R.string.logs_show_runtime))
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
 
                 FilledTonalButton(
                     onClick = {
@@ -1511,120 +1578,50 @@ private fun ProxyScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
                         if (isSavingLogs) stringResource(R.string.saving_logs) else stringResource(R.string.save_logs),
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
                     )
-                }
-
-                if (showLogs) {
-                    val scroll = rememberScrollState()
-                    val primaryColor = MaterialTheme.colorScheme.primary
-                    val density = LocalDensity.current
-                    val trackPadding = 12.dp
-                    val scrollbarWidth = 4.dp
-
-                    // Auto-scroll to bottom when new logs arrive
-                    LaunchedEffect(logs.size) {
-                        scroll.animateScrollTo(scroll.maxValue)
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Runtime logs (${logs.size})",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    )
-
-                    BoxWithConstraints(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 220.dp, max = 320.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Text(
-                            text = if (!logsEnabled) {
-                                stringResource(R.string.logs_disabled)
-                            } else if (logs.isEmpty()) {
-                                stringResource(R.string.logs_empty)
-                            } else {
-                                logs.joinToString("\n") { formatLogLine(it) }
-                            },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(start = 12.dp, end = 40.dp, top = 12.dp, bottom = 12.dp)
-                                .verticalScroll(scroll),
-                            color = primaryColor,
-                            style = MaterialTheme.typography.bodySmall,
-                            lineHeight = MaterialTheme.typography.bodySmall.fontSize * 1.5
-                        )
-
-                        val trackHeightPx = max(
-                            with(density) { maxHeight.toPx() - trackPadding.toPx() * 2 },
-                            0f
-                        )
-                        val maxScrollPx = scroll.maxValue.toFloat()
-                        val minThumbPx = with(density) { 28.dp.toPx() }
-                        val thumbHeightPx = if (trackHeightPx <= 0f || maxScrollPx <= 0f) {
-                            trackHeightPx
-                        } else {
-                            max(minThumbPx, (trackHeightPx * trackHeightPx) / (trackHeightPx + maxScrollPx))
-                        }
-                        val thumbOffsetPx = if (maxScrollPx <= 0f || trackHeightPx <= thumbHeightPx) {
-                            0f
-                        } else {
-                            (scroll.value / maxScrollPx) * (trackHeightPx - thumbHeightPx)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = trackPadding, bottom = trackPadding, end = 8.dp)
-                                .fillMaxHeight()
-                                .width(scrollbarWidth)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = trackPadding, end = 8.dp)
-                                .offset(y = with(density) { thumbOffsetPx.toDp() })
-                                .width(scrollbarWidth)
-                                .height(with(density) { thumbHeightPx.toDp() })
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-                        )
-                        IconButton(
-                            onClick = {
-                                val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
-                                cm?.setPrimaryClip(ClipData.newPlainText("Logs", logs.joinToString("\n")))
-                                Toast.makeText(context, context.getString(R.string.logs_copied), Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                stringResource(R.string.copy_logs),
-                                tint = primaryColor.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.height(4.dp))
                 }
                 }
             }
         }
+    }
+
+    if (showRuntimeLogsDialog) {
+        RuntimeLogsDialog(
+            logs = logs,
+            logsEnabled = logsEnabled,
+            onDismiss = { showRuntimeLogsDialog = false },
+            onCopy = {
+                val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+                cm?.setPrimaryClip(ClipData.newPlainText("Logs", logs.joinToString("\n")))
+                Toast.makeText(context, context.getString(R.string.logs_copied), Toast.LENGTH_SHORT).show()
+            },
+            onSave = {
+                if (reportFolderUriText.isBlank()) {
+                    pendingFolderAction = PendingFolderAction.SaveRuntimeLogs
+                    reportFolderLauncher.launch(null)
+                } else {
+                    runRuntimeLogSave(Uri.parse(reportFolderUriText))
+                }
+            },
+        )
+    }
+
+    if (showOnboarding) {
+        OnboardingDialog(
+            onComplete = { dontShow ->
+                if (dontShow) {
+                    prefs.edit().putBoolean("onboarding_completed", true).apply()
+                }
+                showOnboarding = false
+            },
+            onDismiss = { showOnboarding = false },
+        )
     }
 
     if (showInfoModal) {
@@ -1632,7 +1629,13 @@ private fun ProxyScreen(
     }
 
     if (showTipsModal) {
-        TipsDialog(onDismiss = { showTipsModal = false })
+        TipsDialog(
+            onDismiss = { showTipsModal = false },
+            onShowOnboarding = {
+                showTipsModal = false
+                showOnboarding = true
+            },
+        )
     }
 
     if (showExitConfirm) {
@@ -1782,16 +1785,19 @@ private fun CfDomainsPanel(
                     fontWeight = FontWeight.SemiBold
                 )
                 TextButton(onClick = { onExpandedChange(!expanded) }) {
-                    Text(if (expanded) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs))
+                    Text(
+                        if (expanded) stringResource(R.string.cf_hide_details)
+                        else stringResource(R.string.cf_show_details),
+                    )
                 }
             }
 
-            Text("${stringResource(R.string.cf_domains_manual)}: $manualDomainSummary", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_cached_count)}: $cachedCount", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_builtin_count)}: $builtInCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_active)}: $activeCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_cooldown)}: $cooldownCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_last_check)}: $lastCheck", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_last_update)}: $lastUpdate", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_update_last_success_source)}: $lastSuccessfulSource", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_last_update_error)}: $lastUpdateError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             Row(
                 modifier = Modifier
@@ -1813,6 +1819,14 @@ private fun CfDomainsPanel(
 
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
+                    Text(
+                        "${stringResource(R.string.cf_domains_manual)}: $manualDomainSummary",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_domains_cached_count)}: $cachedCount · ${stringResource(R.string.cf_domains_builtin_count)}: $builtInCount",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Text(
                         if (cachedCount > 0) {
                             stringResource(R.string.cf_domains_cached_used)
@@ -2105,7 +2119,10 @@ private fun AdaptiveRoutingPanel(
                     fontWeight = FontWeight.SemiBold,
                 )
                 TextButton(onClick = { onExpandedChange(!expanded) }) {
-                    Text(if (expanded) stringResource(R.string.hide_logs) else stringResource(R.string.show_logs))
+                    Text(
+                        if (expanded) stringResource(R.string.cf_hide_details)
+                        else stringResource(R.string.adaptive_open_stats),
+                    )
                 }
             }
             Text(
@@ -2178,7 +2195,7 @@ private fun AdaptiveRoutingPanel(
                     )
                     if (stats.isEmpty()) {
                         Text(
-                            stringResource(R.string.adaptive_none),
+                            stringResource(R.string.adaptive_stats_empty),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -2197,13 +2214,13 @@ private fun AdaptiveRoutingPanel(
                             onClick = onResetNetwork,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(stringResource(R.string.adaptive_reset_network_stats))
+                            Text(stringResource(R.string.adaptive_reset_network_short))
                         }
                         OutlinedButton(
                             onClick = onResetAll,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text(stringResource(R.string.adaptive_reset_all_stats))
+                            Text(stringResource(R.string.adaptive_reset_all_short))
                         }
                     }
                 }
@@ -2396,11 +2413,24 @@ fun IpSetupDialog(
 @Composable
 fun InfoDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val versionName = appVersionName(context)
+    val openLink = { url: String ->
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+            cm?.setPrimaryClip(ClipData.newPlainText("url", url))
+            Toast.makeText(context, context.getString(R.string.open_link_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth()
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth()
+                .heightIn(max = 560.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -2408,7 +2438,7 @@ fun InfoDialog(onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = stringResource(R.string.info_title, APP_INFO_VERSION),
+                    text = stringResource(R.string.info_title, versionName),
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
@@ -2461,41 +2491,72 @@ fun InfoDialog(onDismiss: () -> Unit) {
                     text = stringResource(R.string.info_attribution_body),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
 
-                Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                Text(
+                    text = stringResource(R.string.info_repo_body),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
 
-                val openLink = { url: String ->
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        Toast.makeText(context, context.getString(R.string.open_link_failed), Toast.LENGTH_SHORT).show()
+                Text(
+                    text = stringResource(R.string.info_privacy_body),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+
+                Text(stringResource(R.string.repo_link_label), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "→ Regstar2/TgWsProxy_Android",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable {
+                        openLink("https://github.com/Regstar2/TgWsProxy_Android")
+                    },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(stringResource(R.string.runtime_link_label), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "→ Flowseal/tg-ws-proxy",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/Flowseal/tg-ws-proxy") },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(stringResource(R.string.android_fork_link_label), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    text = "→ amurcanov/tg-ws-proxy-android",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/amurcanov/tg-ws-proxy-android") },
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { openLink("https://github.com/Regstar2/TgWsProxy_Android") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.about_open_repo))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+                            cm?.setPrimaryClip(ClipData.newPlainText("version", versionName))
+                            Toast.makeText(context, versionName, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.about_copy_version))
                     }
                 }
 
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.runtime_link_label), style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        text = "→ Flowseal/tg-ws-proxy",
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/Flowseal/tg-ws-proxy") }
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(12.dp))
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.android_fork_link_label), style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        text = "→ amurcanov/tg-ws-proxy-android",
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp, start = 8.dp).clickable { openLink("https://github.com/amurcanov/tg-ws-proxy-android") }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {
@@ -2508,21 +2569,25 @@ fun InfoDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-fun TipsDialog(onDismiss: () -> Unit) {
-    val tips = listOf(
-        stringResource(R.string.main_hint_bydpi),
-        stringResource(R.string.main_hint_background),
-        stringResource(R.string.cf_only_hint),
-        stringResource(R.string.cf_default_domain_hint),
-        stringResource(R.string.cf_media_hint),
-        stringResource(R.string.cf_custom_domain_hint),
-        stringResource(R.string.settings_hint_logs),
+fun TipsDialog(onDismiss: () -> Unit, onShowOnboarding: () -> Unit) {
+    val sections = listOf(
+        stringResource(R.string.tips_section_quick_start) to stringResource(R.string.tips_quick_start),
+        stringResource(R.string.tips_section_telegram) to stringResource(R.string.tips_telegram),
+        stringResource(R.string.tips_section_modes) to stringResource(R.string.tips_modes),
+        stringResource(R.string.tips_section_worker) to stringResource(R.string.tips_worker),
+        stringResource(R.string.tips_section_cf) to stringResource(R.string.tips_cf),
+        stringResource(R.string.tips_section_notification) to stringResource(R.string.tips_notification),
+        stringResource(R.string.tips_section_cf_custom) to stringResource(R.string.tips_cf_custom),
+        stringResource(R.string.tips_section_troubleshooting) to stringResource(R.string.tips_troubleshooting),
     )
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 400.dp).fillMaxWidth()
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth()
+                .heightIn(max = 560.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -2532,25 +2597,23 @@ fun TipsDialog(onDismiss: () -> Unit) {
                 Text(
                     text = stringResource(R.string.tips_title),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
-
-                tips.forEach { tip ->
+                sections.forEach { (title, body) ->
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
-                        text = "• $tip",
-                        color = MaterialTheme.colorScheme.onSurface,
+                        body,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 10.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
                     )
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
+                TextButton(onClick = onShowOnboarding) {
+                    Text(stringResource(R.string.help_show_onboarding))
+                }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.info_close), style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.info_close))
                     }
                 }
             }

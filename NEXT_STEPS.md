@@ -57,18 +57,23 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - domain masking in exports by default;
 - network profile cleanup (max 20 profiles).
 
-## v1.6.0 next
+## v1.6.0 completed
 
+- foreground notification actions (start/stop/reconnect/open);
+- notification tap opens app;
+- connection speed/latency metrics in notification and app;
+- notification display modes (normal/compact/minimal);
+- onboarding on first launch;
+- Help/About polish and repository links;
+- settings UI grouping and scrollable dialogs;
+- release checklist and notifications docs.
+
+## v1.6.1 / v1.7.0 later
+
+- Quick Settings Tile (start/stop/status);
 - Fake TLS research;
 - external proxy mode design;
-- decide whether Android local SOCKS5 needs Fake TLS at all.
-
-## v1.7.0 later
-
-- production release polish;
-- onboarding;
-- support/help screens;
-- release checklist.
+- production onboarding polish.
 
 ## Cloudflare Worker (new in 1.3.0-worker)
 

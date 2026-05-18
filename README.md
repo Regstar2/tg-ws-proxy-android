@@ -2,7 +2,9 @@
 
 Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
 
-Текущая версия рабочей ветки: `1.5.1` (adaptive Auto polish: strategy presets, diagnostics export).
+Текущая версия рабочей ветки: `1.6.0` (production polish: notifications, metrics, onboarding).
+
+Репозиторий: https://github.com/Regstar2/TgWsProxy_Android
 
 ## Происхождение
 
@@ -82,6 +84,15 @@ kws203.<domain>
 
 Если используется ByeDPI или другой локальный прокси, порт `1081` обычно удобнее `1080`, чтобы избежать конфликта.
 
+## UI, Help и уведомления (v1.6.0)
+
+- **Onboarding** — при первом запуске; повторно: Настройки → Подсказки → «Показать onboarding снова».
+- **Подсказки** — разделы: быстрый старт, Telegram SOCKS5, режимы, Worker, CF, уведомление Android, диагностика.
+- **О приложении** — версия, описание, ссылки на [репозиторий](https://github.com/Regstar2/TgWsProxy_Android), Flowseal и amurcanov.
+- **Диагностика** — компактные проверки Direct / Worker / CF / «Проверить всё»; экспорт отчёта с маскированием доменов.
+- **Runtime logs** — по умолчанию скрыты; «Показать runtime logs» открывает отдельный диалог.
+- **Foreground notification** — статус, маршрут, скорость/задержка (опционально), действия Start/Stop/Reconnect/Open. Полностью скрыть уведомление при работающем foreground service нельзя (требование Android); доступны режимы Normal / Compact / Minimal. См. [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md).
+
 ## Сборка
 
 Требования:
@@ -159,6 +170,8 @@ $env:KEY_ALIAS="tgwsproxy"
 - [NEXT_STEPS.md](NEXT_STEPS.md) - ближайший roadmap.
 - [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
 - [docs/CF_DOMAIN_POOL.md](docs/CF_DOMAIN_POOL.md) - источники CF-доменов, cache policy и fallback order.
+- [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) - foreground notification, метрики и действия.
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) - чеклист перед релизом.
 
 ## Лицензия
 

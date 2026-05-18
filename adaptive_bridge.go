@@ -72,6 +72,7 @@ func recordAdaptiveSuccess(route routeKind, dc int, isMedia bool, latencyMs int6
 	adaptiveStoreMu.Lock()
 	defer adaptiveStoreMu.Unlock()
 	adaptiveStore.RecordSuccess(route, dc, isMedia, latencyMs)
+	updateProxyMetrics(route, latencyMs, "")
 	logInfo.Printf("Auto updated stats route=%s success latency_ms=%d dc=%d media=%t", route, latencyMs, dc, isMedia)
 	logInfo.Printf("Auto last-good updated route=%s dc=%d media=%t", route, dc, isMedia)
 }
@@ -81,6 +82,7 @@ func recordAdaptiveFailure(route routeKind, dc int, isMedia bool, reason string,
 	defer adaptiveStoreMu.Unlock()
 	kind := tgwsroute.ClassifyFailureReason(reason)
 	adaptiveStore.RecordFailureClassified(route, dc, isMedia, kind, reason, latencyMs)
+	updateProxyMetrics(route, latencyMs, string(kind))
 	logInfo.Printf("Auto updated stats route=%s failure kind=%s dc=%d media=%t", route, kind, dc, isMedia)
 }
 
