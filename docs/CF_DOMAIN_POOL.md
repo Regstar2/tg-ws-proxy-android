@@ -50,18 +50,52 @@ Downloaded lists are normalized and validated before replacing the cache:
 
 If a download is empty or invalid, the previous cache is kept.
 
-## Deferred work
+## v1.4.1 GitHub / mirror download resilience
 
-`v1.4.0` does not implement:
+CF-domain updates are best-effort. The proxy runtime does not depend on GitHub availability.
+If the primary source fails, the app can try a user-provided HTTPS mirror. If all update sources fail,
+the previous cached list is kept. If there is no cache, the built-in list remains available.
+
+### Update sources
+
+1. Primary GitHub raw list (`CfDomainUpdateConfig.PRIMARY_URL`)
+2. Optional user mirror URL (`https://` only, validated)
+3. Cached upstream list (runtime fallback)
+4. Built-in list (emergency fallback)
+
+Manual and auto updates use the same order: primary first, then mirror when enabled and valid.
+
+### Retry / backoff
+
+- Manual update: up to 2 attempts per source for retryable errors (for example `5xx`, timeouts), with a short delay between attempts.
+- Auto update: no aggressive per-source retry; throttle is 24 hours after success and 1 hour after failure.
+- Updates are asynchronous and do not block proxy startup.
+
+### Cache safety
+
+The cache is replaced only after a successful download, parse, validation, and a non-empty domain list.
+Failed downloads, invalid mirror responses, and empty lists keep the previous cache.
+
+### Conditional requests
+
+The downloader sends `If-None-Match` / `If-Modified-Since` when cached validators exist.
+`304 Not Modified` keeps the current cache and updates the last-checked timestamp.
+
+### Diagnostics
+
+Per-source status (last attempt, success, HTTP status, stage, latency) is shown in the CF domains settings panel.
+Download failures are classified into stages such as DNS, TCP, TLS, HTTP, READ, PARSE, and VALIDATION.
+
+### Deferred work
+
+`v1.4.1` does not implement:
 
 - Fake TLS;
-- GitHub pinned TLS fallback;
-- mirror registries;
+- pinned TLS certificate pinning;
 - APK auto-update;
-- a perpetual background worker.
+- WorkManager-based background sync.
 
-Possible `v1.4.1` follow-ups:
+Possible later follow-ups:
 
-- mirror URL support;
-- richer download diagnostics;
-- further resilient-download work around mirrors or pinned transports.
+- additional mirror URLs;
+- pinned TLS research for GitHub/mirror fetch paths.

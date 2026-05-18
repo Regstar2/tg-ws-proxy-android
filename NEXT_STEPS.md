@@ -28,18 +28,25 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - parser/validation;
 - fallback to built-in list.
 
-## v1.4.1 next
+## v1.4.1 completed
 
 - mirror URL support;
-- better download diagnostics;
-- optional ETag/Last-Modified follow-up if needed;
-- optional pinned TLS research.
+- staged download diagnostics;
+- retry/backoff;
+- cache-safe multi-source update flow;
+- ETag / Last-Modified on primary and mirror fetch;
+- source status UI (primary, mirror, last successful source).
 
 ## v1.5.0 next
 
 - adaptive Auto routing;
 - per-network route scoring;
 - last-good route persistence.
+
+## v1.6.0 later
+
+- Fake TLS research;
+- external proxy mode design.
 
 ## Cloudflare Worker (new in 1.3.0-worker)
 

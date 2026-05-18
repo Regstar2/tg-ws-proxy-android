@@ -2,7 +2,7 @@
 
 Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
 
-Текущая версия рабочей ветки: `1.4.0` (CF domain auto-update).
+Текущая версия рабочей ветки: `1.4.1` (CF domain mirror / resilient upstream update).
 
 ## Происхождение
 
@@ -52,6 +52,8 @@ Android-форк распространяется под GPLv3. Оригинал
 Начиная с `v1.3.2`, ручной CF-домен больше не является единственной опорой. Android fork сохраняет поле для пользовательского домена, но также включает встроенный CF-domain pool. Если ручной домен возвращает `429`, `403`, `5xx` или повторно падает на timeout/TLS/WebSocket handshake, runtime временно переводит его в cooldown и пробует другой CF-домен либо следующий маршрут, разрешённый выбранным режимом.
 
 Начиная с `v1.4.0`, приложение также умеет обновлять список CF-доменов из Flowseal upstream GitHub. Обновление не является критической зависимостью: если GitHub недоступен, используется последний кэшированный upstream-список; если кэша ещё нет, остаётся встроенный список. Порядок выбора теперь явный: `Manual -> Cached upstream -> Built-in`. Пустой или битый downloaded list не заменяет сохранённый кэш.
+
+В `v1.4.1` обновление upstream-списка стало устойчивее: можно задать HTTPS-зеркало, primary failure автоматически переходит на mirror, ошибки download классифицируются по этапам (DNS/TCP/TLS/HTTP/parse), а автообновление использует backoff (24 часа после успеха, 1 час после ошибки). `Fake TLS` и pinned TLS для GitHub fetch по-прежнему не реализованы.
 
 Для собственного домена используются хосты вида:
 
@@ -140,7 +142,8 @@ $env:KEY_ALIAS="tgwsproxy"
 - Android routing намеренно отличается от Flowseal desktop: Android сохраняет `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto` и `Direct + fallback routes`.
 - `v1.3.2` добавляет built-in CF pool, per-domain health/cooldown, диагностику CF-доменов и ручной сброс cooldown.
 - `v1.4.0` добавляет cached upstream list, ручное обновление, автообновление с 24-часовым throttle и fallback `Manual -> Cached upstream -> Built-in`.
-- `Fake TLS` и GitHub pinned TLS fallback не входят в v1.4.0; эти улучшения остаются будущей работой.
+- `v1.4.1` добавляет mirror URL, staged download diagnostics, retry/backoff и cache-safe multi-source update.
+- `Fake TLS` и GitHub pinned TLS fallback не реализованы; эти улучшения остаются будущей работой (`v1.6.0` research).
 
 Не считается финально закрытым:
 

@@ -3,8 +3,11 @@ package com.amurcanov.tgwsproxy
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.HttpURLConnection
+import java.net.UnknownHostException
 
 class CfDomainListTest {
     @Test
@@ -57,73 +60,186 @@ class CfDomainListTest {
     }
 
     @Test
-    fun repository_persistsAutoUpdateAndStatus() {
+    fun repository_persistsAutoUpdateMirrorAndStatus() {
         val persistence = FakePersistence()
         val repository = CfDomainListRepository(persistence)
 
-        assertTrue(repository.state().autoUpdateEnabled)
+        repository.setMirrorSettings(enabled = true, url = "https://mirror.example/list.txt")
         repository.setAutoUpdateEnabled(false)
-        repository.recordFailure(1000L, "dns: offline")
+        repository.recordFailure(
+            attemptedAtMs = 1000L,
+            stage = CfDomainUpdateStage.DNS,
+            message = "offline",
+            primaryStatus = CfDomainSourceStatus(
+                sourceType = CfDomainUpdateSourceType.PRIMARY_GITHUB,
+                lastAttemptAtMs = 1000L,
+                lastError = "dns: offline",
+                lastStage = CfDomainUpdateStage.DNS,
+            ),
+            mirrorStatus = CfDomainSourceStatus(
+                sourceType = CfDomainUpdateSourceType.USER_MIRROR,
+                enabled = true,
+            ),
+        )
 
         val reloaded = CfDomainListRepository(persistence).state()
         assertFalse(reloaded.autoUpdateEnabled)
-        assertEquals(1000L, reloaded.lastUpdatedAtMs)
-        assertEquals("dns: offline", reloaded.lastError)
+        assertTrue(reloaded.mirrorEnabled)
+        assertEquals("https://mirror.example/list.txt", reloaded.mirrorUrl)
+        assertEquals("offline", reloaded.lastError)
+        assertEquals(CfDomainUpdateStage.DNS, reloaded.lastErrorStage)
     }
 
     @Test
-    fun updater_successReplacesCacheAndFailureKeepsOldCache() = runBlocking {
-        var now = 1000L
+    fun updater_primary200SuccessReplacesCache() = runBlocking {
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(domains = listOf("old.example")),
+        )
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ ->
+                    okBody("new.example\nsecond.example", etag = "\"abc\"")
+                },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+        assertEquals(listOf("new.example", "second.example"), repository.state().domains)
+        assertEquals("\"abc\"", repository.state().etag)
+        assertEquals(CfDomainUpdateSourceType.PRIMARY_GITHUB, repository.state().lastSuccessfulSource)
+    }
+
+    @Test
+    fun updater_primary304KeepsCache() = runBlocking {
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                domains = listOf("cached.example"),
+                etag = "\"keep\"",
+            ),
+        )
+        val repository = CfDomainListRepository(persistence)
+        var sentEtag: String? = null
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { request ->
+                    sentEtag = request.etag
+                    CfDomainHttpResponse(
+                        statusCode = HttpURLConnection.HTTP_NOT_MODIFIED,
+                        body = null,
+                        etag = "\"keep\"",
+                        lastModified = null,
+                    )
+                },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.NotModified)
+        assertEquals(listOf("cached.example"), repository.state().domains)
+        assertEquals("\"keep\"", sentEtag)
+    }
+
+    @Test
+    fun updater_primaryFailsMirrorSucceeds() = runBlocking {
         val persistence = FakePersistence(
             CfDomainUpstreamState(
                 domains = listOf("old.example"),
-                lastSuccessfulUpdateAtMs = 10L,
-            )
+                mirrorEnabled = true,
+                mirrorUrl = MIRROR_URL,
+            ),
         )
         val repository = CfDomainListRepository(persistence)
-        val successUpdater = CfDomainListUpdater(
+        val updater = buildUpdater(
             repository = repository,
-            downloader = FakeDownloader(
-                CfDomainListDownloadResult.Success(
-                    domains = listOf("new.example"),
-                    fetchedAtMs = now,
-                    sourceUrl = DEFAULT_CF_DOMAIN_SOURCE_URL,
-                    etag = null,
-                    lastModified = null,
-                )
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ ->
+                    throw UnknownHostException("dns down")
+                },
+                MIRROR_URL to { _ -> okBody("mirror.example") },
             ),
-            logger = NoOpCfDomainUpdateLogger,
-            nowMs = { now },
         )
 
-        val success = successUpdater.manualUpdate()
-        assertTrue(success is CfDomainListUpdateResult.Success)
-        assertEquals(listOf("new.example"), repository.state().domains)
-
-        now = 2000L
-        val failureUpdater = CfDomainListUpdater(
-            repository = repository,
-            downloader = FakeDownloader(CfDomainListDownloadResult.ValidationError("no valid Cloudflare domains")),
-            logger = NoOpCfDomainUpdateLogger,
-            nowMs = { now },
-        )
-
-        val failure = failureUpdater.manualUpdate()
-        assertTrue(failure is CfDomainListUpdateResult.Failure)
-        assertEquals(listOf("new.example"), repository.state().domains)
-        assertEquals("parse: no valid Cloudflare domains", repository.state().lastError)
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+        assertEquals(listOf("mirror.example"), repository.state().domains)
+        assertEquals(CfDomainUpdateSourceType.USER_MIRROR, repository.state().lastSuccessfulSource)
     }
 
     @Test
-    fun updater_emptyDownloadedListKeepsOldCache() = runBlocking {
-        val repository = CfDomainListRepository(
-            FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
+    fun updater_primary500RetriesThenMirrorSucceeds() = runBlocking {
+        var primaryCalls = 0
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                domains = listOf("old.example"),
+                mirrorEnabled = true,
+                mirrorUrl = MIRROR_URL,
+            ),
         )
-        val updater = CfDomainListUpdater(
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
             repository = repository,
-            downloader = FakeDownloader(CfDomainListDownloadResult.EmptyListError),
-            logger = NoOpCfDomainUpdateLogger,
-            nowMs = { 3000L },
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to {
+                    primaryCalls += 1
+                    CfDomainHttpResponse(500, null, null, null)
+                },
+                MIRROR_URL to { _ -> okBody("mirror.example") },
+            ),
+            sleeper = {},
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+        assertEquals(2, primaryCalls)
+        assertEquals(listOf("mirror.example"), repository.state().domains)
+    }
+
+    @Test
+    fun updater_primary429FallsBackToMirror() = runBlocking {
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                domains = listOf("old.example"),
+                mirrorEnabled = true,
+                mirrorUrl = MIRROR_URL,
+            ),
+        )
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ ->
+                    CfDomainHttpResponse(429, null, null, null)
+                },
+                MIRROR_URL to { _ -> okBody("mirror.example") },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+        assertEquals(listOf("mirror.example"), repository.state().domains)
+    }
+
+    @Test
+    fun updater_invalidMirrorSkippedWhenBothFailCacheKept() = runBlocking {
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                domains = listOf("old.example"),
+                mirrorEnabled = true,
+                mirrorUrl = "http://localhost/list.txt",
+            ),
+        )
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ ->
+                    CfDomainHttpResponse(404, null, null, null)
+                },
+            ),
         )
 
         val result = updater.manualUpdate()
@@ -132,23 +248,161 @@ class CfDomainListTest {
     }
 
     @Test
-    fun updater_autoUpdateIsThrottledFor24Hours() = runBlocking {
-        val now = 1000L
+    fun updater_invalidBodyParseErrorKeepsCache() = runBlocking {
+        val persistence = FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ ->
+                    okBody("not a domain\n###")
+                },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Failure)
+        assertEquals(listOf("old.example"), repository.state().domains)
+        assertEquals(CfDomainUpdateStage.VALIDATION, (result as CfDomainListUpdateResult.Failure).stage)
+    }
+
+    @Test
+    fun updater_emptyBodyKeepsCache() = runBlocking {
+        val persistence = FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("# only comments") },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Failure)
+        assertEquals(listOf("old.example"), repository.state().domains)
+    }
+
+    @Test
+    fun updater_testPrimaryDoesNotReplaceCache() = runBlocking {
+        val persistence = FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("new.example") },
+            ),
+        )
+
+        val result = updater.testPrimarySource()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+        val success = result as CfDomainListUpdateResult.Success
+        assertTrue(success.dryRun)
+        assertEquals(listOf("old.example"), repository.state().domains)
+        assertEquals(1, success.domainCount)
+    }
+
+    @Test
+    fun updater_testMirrorWithInvalidMirrorReturnsMirrorInvalid() = runBlocking {
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                mirrorEnabled = true,
+                mirrorUrl = "http://localhost/list.txt",
+            ),
+        )
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(repository = repository, handlers = emptyMap())
+
+        val result = updater.testMirrorSource()
+        assertTrue(result is CfDomainListUpdateResult.MirrorInvalid)
+    }
+
+    @Test
+    fun updater_autoUpdateThrottledAfterSuccess() = runBlocking {
+        val now = 10_000L
         val persistence = FakePersistence(
             CfDomainUpstreamState(
                 domains = listOf("cached.example"),
                 lastUpdatedAtMs = now,
+                lastAttemptAtMs = now,
                 lastSuccessfulUpdateAtMs = now,
-            )
+            ),
         )
-        val updater = CfDomainListUpdater(
+        val updater = buildUpdater(
             repository = CfDomainListRepository(persistence),
-            downloader = FakeDownloader(CfDomainListDownloadResult.EmptyListError),
-            logger = NoOpCfDomainUpdateLogger,
+            handlers = emptyMap(),
             nowMs = { now + 1000L },
         )
 
         assertEquals(CfDomainListUpdateResult.SkippedThrottled, updater.maybeAutoUpdate())
+    }
+
+    @Test
+    fun updater_autoUpdateAllowedAfterFailureBackoff() = runBlocking {
+        val now = 10_000L
+        val persistence = FakePersistence(
+            CfDomainUpstreamState(
+                domains = listOf("cached.example"),
+                lastUpdatedAtMs = now,
+                lastAttemptAtMs = now,
+                lastSuccessfulUpdateAtMs = 0L,
+            ),
+        )
+        val updater = buildUpdater(
+            repository = CfDomainListRepository(persistence),
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("fresh.example") },
+            ),
+            nowMs = { now + (60L * 60L * 1000L) + 1L },
+        )
+
+        val result = updater.maybeAutoUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Success)
+    }
+
+    @Test
+    fun httpClient_sendsIfNoneMatchWhenEtagExists() = runBlocking {
+        var capturedEtag: String? = null
+        val client = FakeCfDomainHttpClient(
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { request ->
+                    capturedEtag = request.etag
+                    CfDomainHttpResponse(HttpURLConnection.HTTP_NOT_MODIFIED, null, "\"etag\"", null)
+                },
+            ),
+        )
+        val downloader = CfDomainSourceDownloader(client)
+        val result = downloader.download(
+            sourceType = CfDomainUpdateSourceType.PRIMARY_GITHUB,
+            url = CfDomainUpdateConfig.PRIMARY_URL,
+            etag = "\"etag\"",
+            lastModified = null,
+        )
+        assertTrue(result is CfDomainListDownloadResult.NotModified)
+        assertEquals("\"etag\"", capturedEtag)
+    }
+
+    private fun buildUpdater(
+        repository: CfDomainListRepository,
+        handlers: Map<String, (CfDomainHttpRequest) -> CfDomainHttpResponse>,
+        nowMs: () -> Long = { 1000L },
+        sleeper: suspend (Long) -> Unit = {},
+    ): CfDomainListUpdater {
+        return CfDomainListUpdater(
+            repository = repository,
+            sourceDownloader = CfDomainSourceDownloader(FakeCfDomainHttpClient(handlers)),
+            logger = NoOpCfDomainUpdateLogger,
+            nowMs = nowMs,
+            sleeper = sleeper,
+        )
+    }
+
+    private fun okBody(body: String, etag: String? = null): CfDomainHttpResponse {
+        return CfDomainHttpResponse(
+            statusCode = 200,
+            body = body,
+            etag = etag,
+            lastModified = "Mon, 01 Jan 2024 00:00:00 GMT",
+        )
     }
 
     private class FakePersistence(
@@ -161,9 +415,19 @@ class CfDomainListTest {
         }
     }
 
-    private class FakeDownloader(
-        private val result: CfDomainListDownloadResult,
-    ) : CfDomainListDownloader {
-        override suspend fun download(previous: CfDomainUpstreamState): CfDomainListDownloadResult = result
+    private class FakeCfDomainHttpClient(
+        private val handlers: Map<String, (CfDomainHttpRequest) -> CfDomainHttpResponse>,
+    ) : CfDomainHttpClient {
+        override suspend fun get(request: CfDomainHttpRequest): CfDomainHttpResponse {
+            val handler = handlers[request.url]
+            if (handler != null) {
+                return handler(request)
+            }
+            throw UnknownHostException("no handler for ${request.url}")
+        }
+    }
+
+    private companion object {
+        const val MIRROR_URL = "https://mirror.example/cfproxy-domains.txt"
     }
 }

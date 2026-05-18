@@ -53,7 +53,11 @@ The Android fork can update its Cloudflare proxy domain list from Flowseal upstr
 
 В UI появились `Update CF domain list` и `Auto-update CF domains`. Автообновление ограничено одной попыткой в 24 часа и не блокирует запуск proxy. Пустой, битый или невалидный downloaded list не заменяет прежний cache.
 
-`Fake TLS` и GitHub pinned TLS fallback намеренно не входят в `v1.4.0`.
+`Fake TLS` и GitHub pinned TLS fallback намеренно не входят в `v1.4.x`.
+
+## v1.4.1 mirror / resilient upstream update
+
+CF-domain list updates are best-effort and do not block proxy startup. Primary GitHub is tried first; an optional user HTTPS mirror is used on failure. Failed updates keep the previous cache; the built-in list remains available. See [CF_DOMAIN_POOL.md](CF_DOMAIN_POOL.md) for details.
 
 ## Android UI
 

@@ -239,7 +239,7 @@ private fun ProxyScreen(
     val cfDomainListUpdater = remember {
         CfDomainListUpdater(
             repository = cfDomainListRepository,
-            downloader = HttpCfDomainListDownloader(),
+            sourceDownloader = CfDomainSourceDownloader(HttpURLConnectionCfDomainHttpClient()),
             logger = AndroidCfDomainUpdateLogger,
         )
     }
@@ -273,6 +273,9 @@ private fun ProxyScreen(
     var isDiagRunning by remember { mutableStateOf(false) }
     var cfUpstreamState by remember { mutableStateOf(cfDomainListRepository.state()) }
     var autoUpdateCfDomains by remember { mutableStateOf(cfUpstreamState.autoUpdateEnabled) }
+    var cfMirrorEnabled by remember { mutableStateOf(cfUpstreamState.mirrorEnabled) }
+    var cfMirrorUrlText by remember { mutableStateOf(cfUpstreamState.mirrorUrl) }
+    var cfMirrorValidationError by remember { mutableStateOf<String?>(null) }
     var isCfDomainUpdateRunning by remember { mutableStateOf(false) }
     var cfDomainRows by remember {
         mutableStateOf(CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains))
@@ -378,8 +381,86 @@ private fun ProxyScreen(
     fun applyCfUpstreamState(state: CfDomainUpstreamState) {
         cfUpstreamState = state
         autoUpdateCfDomains = state.autoUpdateEnabled
+        cfMirrorEnabled = state.mirrorEnabled
+        cfMirrorUrlText = state.mirrorUrl
         cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, state.domains)
         NativeProxy.setCachedCfDomains(state.domains)
+    }
+
+    fun applyCfMirrorSettings(enabled: Boolean, url: String) {
+        cfMirrorEnabled = enabled
+        cfMirrorUrlText = url
+        cfMirrorValidationError = when (
+            val validation = CfDomainMirrorUrlValidator.validate(enabled, url)
+        ) {
+            is CfDomainMirrorValidation.Invalid -> validation.message
+            else -> null
+        }
+        applyCfUpstreamState(cfDomainListRepository.setMirrorSettings(enabled, url))
+    }
+
+    fun showCfDomainUpdateResult(result: CfDomainListUpdateResult) {
+        when (result) {
+            is CfDomainListUpdateResult.Success -> {
+                applyCfUpstreamState(result.state)
+                val sourceLabel = context.getString(result.sourceType.labelKey())
+                Toast.makeText(
+                    context,
+                    if (result.dryRun) {
+                        context.getString(R.string.cf_update_test_ok, result.domainCount, sourceLabel)
+                    } else {
+                        context.getString(R.string.cf_domains_update_success, result.domainCount)
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+
+            is CfDomainListUpdateResult.NotModified -> {
+                applyCfUpstreamState(result.state)
+                val sourceLabel = context.getString(result.sourceType.labelKey())
+                Toast.makeText(
+                    context,
+                    if (result.dryRun) {
+                        context.getString(R.string.cf_update_test_not_modified, sourceLabel)
+                    } else {
+                        context.getString(R.string.cf_domains_update_not_modified)
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+
+            is CfDomainListUpdateResult.Failure -> {
+                applyCfUpstreamState(result.state)
+                val stageLabel = context.getString(result.stage.userMessageKey())
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.cf_domains_update_failed, stageLabel, result.message),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+
+            is CfDomainListUpdateResult.MirrorInvalid -> {
+                cfMirrorValidationError = result.message
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.cf_update_mirror_invalid),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+
+            else -> Unit
+        }
+    }
+
+    fun launchCfDomainUpdate(block: suspend () -> CfDomainListUpdateResult) {
+        if (isCfDomainUpdateRunning) {
+            return
+        }
+        isCfDomainUpdateRunning = true
+        coroutineScope.launch {
+            showCfDomainUpdateResult(block())
+            isCfDomainUpdateRunning = false
+        }
     }
 
     fun applyManualCfDomains(raw: String) {
@@ -960,6 +1041,9 @@ private fun ProxyScreen(
                     lastCheckAtMs = cfDomainLastCheckAtMs,
                     upstreamState = cfUpstreamState,
                     autoUpdateEnabled = autoUpdateCfDomains,
+                    mirrorEnabled = cfMirrorEnabled,
+                    mirrorUrl = cfMirrorUrlText,
+                    mirrorValidationError = cfMirrorValidationError,
                     isUpdateRunning = isCfDomainUpdateRunning,
                     expanded = cfDomainsExpanded,
                     onExpandedChange = { cfDomainsExpanded = it },
@@ -969,51 +1053,15 @@ private fun ProxyScreen(
                         autoUpdateCfDomains = it
                         applyCfUpstreamState(cfDomainListRepository.setAutoUpdateEnabled(it))
                     },
-                    onUpdate = {
-                        if (!isCfDomainUpdateRunning) {
-                            isCfDomainUpdateRunning = true
-                            coroutineScope.launch {
-                                when (val result = cfDomainListUpdater.manualUpdate()) {
-                                    is CfDomainListUpdateResult.Success -> {
-                                        applyCfUpstreamState(result.state)
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(
-                                                R.string.cf_domains_update_success,
-                                                result.state.domains.size,
-                                            ),
-                                            Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-
-                                    is CfDomainListUpdateResult.NotModified -> {
-                                        applyCfUpstreamState(result.state)
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(R.string.cf_domains_update_not_modified),
-                                            Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-
-                                    is CfDomainListUpdateResult.Failure -> {
-                                        applyCfUpstreamState(result.state)
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(
-                                                R.string.cf_domains_update_failed,
-                                                result.stage,
-                                                result.message,
-                                            ),
-                                            Toast.LENGTH_LONG,
-                                        ).show()
-                                    }
-
-                                    else -> Unit
-                                }
-                                isCfDomainUpdateRunning = false
-                            }
-                        }
+                    onMirrorEnabledChange = { enabled ->
+                        applyCfMirrorSettings(enabled, cfMirrorUrlText)
                     },
+                    onMirrorUrlChange = { url ->
+                        applyCfMirrorSettings(cfMirrorEnabled, url)
+                    },
+                    onUpdateAll = { launchCfDomainUpdate { cfDomainListUpdater.manualUpdate() } },
+                    onTestPrimary = { launchCfDomainUpdate { cfDomainListUpdater.testPrimarySource() } },
+                    onTestMirror = { launchCfDomainUpdate { cfDomainListUpdater.testMirrorSource() } },
                     onTest = {
                         if (!isDiagRunning) {
                             isDiagRunning = true
@@ -1579,13 +1627,20 @@ private fun CfDomainsPanel(
     lastCheckAtMs: Long?,
     upstreamState: CfDomainUpstreamState,
     autoUpdateEnabled: Boolean,
+    mirrorEnabled: Boolean,
+    mirrorUrl: String,
+    mirrorValidationError: String?,
     isUpdateRunning: Boolean,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     proxyRunning: Boolean,
     isDiagRunning: Boolean,
     onAutoUpdateChange: (Boolean) -> Unit,
-    onUpdate: () -> Unit,
+    onMirrorEnabledChange: (Boolean) -> Unit,
+    onMirrorUrlChange: (String) -> Unit,
+    onUpdateAll: () -> Unit,
+    onTestPrimary: () -> Unit,
+    onTestMirror: () -> Unit,
     onTest: () -> Unit,
     onResetCooldown: () -> Unit,
 ) {
@@ -1603,7 +1658,14 @@ private fun CfDomainsPanel(
     val lastUpdate = upstreamState.lastSuccessfulUpdateAtMs.takeIf { it > 0 }?.let {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
     } ?: stringResource(R.string.cf_domains_unchecked)
+    val lastAttempt = upstreamState.lastAttemptAtMs.takeIf { it > 0 }?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    } ?: stringResource(R.string.cf_domains_unchecked)
+    val lastSuccessfulSource = upstreamState.lastSuccessfulSource?.let {
+        stringResource(it.labelKey())
+    } ?: stringResource(R.string.cf_domains_none)
     val lastUpdateError = upstreamState.lastError ?: stringResource(R.string.cf_domains_none)
+    val primaryHost = safeUrlForLog(CfDomainUpdateConfig.PRIMARY_URL)
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -1665,7 +1727,26 @@ private fun CfDomainsPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
+                        stringResource(R.string.cf_update_sources_title),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_update_source_primary)}: $primaryHost",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
                         "${stringResource(R.string.cf_domains_last_update)}: $lastUpdate",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_update_last_attempt)}: $lastAttempt",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_update_last_success_source)}: $lastSuccessfulSource",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
@@ -1686,8 +1767,64 @@ private fun CfDomainsPanel(
                             onCheckedChange = onAutoUpdateChange,
                         )
                     }
+                    Text(
+                        stringResource(R.string.cf_update_mirror_title),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.cf_update_mirror_enable), style = MaterialTheme.typography.bodySmall)
+                        Switch(
+                            checked = mirrorEnabled,
+                            onCheckedChange = onMirrorEnabledChange,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = mirrorUrl,
+                        onValueChange = onMirrorUrlChange,
+                        enabled = mirrorEnabled,
+                        label = { Text(stringResource(R.string.cf_update_mirror_url)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        singleLine = true,
+                    )
+                    if (mirrorValidationError != null) {
+                        Text(
+                            stringResource(R.string.cf_update_mirror_invalid),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onTestPrimary,
+                            enabled = !isUpdateRunning,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.cf_update_test_primary))
+                        }
+                        OutlinedButton(
+                            onClick = onTestMirror,
+                            enabled = !isUpdateRunning && mirrorEnabled,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.cf_update_test_mirror))
+                        }
+                    }
                     OutlinedButton(
-                        onClick = onUpdate,
+                        onClick = onUpdateAll,
                         enabled = !isUpdateRunning,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1697,7 +1834,7 @@ private fun CfDomainsPanel(
                             if (isUpdateRunning) {
                                 stringResource(R.string.cf_domains_update_running)
                             } else {
-                                stringResource(R.string.cf_domains_update)
+                                stringResource(R.string.cf_domains_update_all)
                             }
                         )
                     }

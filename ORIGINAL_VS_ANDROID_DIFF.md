@@ -89,7 +89,7 @@ Useful log categories:
 - Per-domain health tracks success/failure counts, last reason, cooldown, and latency.
 - `429`, `403`, `5xx`, and transport/setup failures move a bad domain out of the hot path so `Auto`, `CF first`, and fallback modes do not keep retrying the same endpoint forever.
 - The diagnostics UI now exposes manual vs built-in domain status and offers a cooldown reset action.
-- GitHub-backed upstream refresh and Fake TLS are still intentionally deferred to `v1.4.0` and later work.
+- GitHub-backed upstream refresh landed in `v1.4.0`; Fake TLS remains deferred.
 
 ## v1.4.0 CF domain auto-update
 
@@ -97,7 +97,15 @@ Useful log categories:
 - Selector priority is explicit: `manual -> cached_upstream -> built_in`.
 - Upstream refresh is non-critical: failed, empty, or invalid downloads keep the old cache, and the built-in list remains available.
 - Settings now expose cached upstream counts, last update status, a manual refresh action, and a 24-hour auto-update throttle.
-- Fake TLS and GitHub pinned TLS fallback remain intentionally out of scope for this release.
+
+## v1.4.1 GitHub / mirror download resilience
+
+- Primary GitHub source plus optional user HTTPS mirror with URL validation.
+- Multi-source update order: primary, then mirror; cache is replaced only after a valid non-empty list.
+- Staged download diagnostics (DNS/TCP/TLS/HTTP/READ/PARSE/VALIDATION) and per-source status in settings.
+- Retry for manual updates on retryable errors; auto-update backoff (24h success / 1h failure).
+- ETag / Last-Modified supported for conditional requests (`304` keeps cache).
+- Fake TLS and pinned TLS remain out of scope.
 
 ## Practical conclusion
 
