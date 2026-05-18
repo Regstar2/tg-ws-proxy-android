@@ -46,17 +46,29 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - Auto diagnostics UI;
 - route stats reset.
 
-## v1.5.1 next
+## v1.5.1 completed
 
-- polish scoring thresholds from real logs;
-- better mobile operator heuristics;
-- export adaptive routing diagnostics with logs;
-- optional user-visible Auto strategy presets.
+- Auto strategy presets (Balanced, Prefer Direct/Worker/CF, Fast failover);
+- explicit RouteScoreWeights and strategy modifiers;
+- failure classification (neutral CLIENT_EOF / CONTEXT_CANCELLED);
+- route selection explanations in diagnostics UI;
+- adaptive diagnostics export with runtime logs;
+- GitHub issue diagnostics report (copy markdown);
+- domain masking in exports by default;
+- network profile cleanup (max 20 profiles).
 
-## v1.6.0 later
+## v1.6.0 next
 
 - Fake TLS research;
-- external proxy mode design.
+- external proxy mode design;
+- decide whether Android local SOCKS5 needs Fake TLS at all.
+
+## v1.7.0 later
+
+- production release polish;
+- onboarding;
+- support/help screens;
+- release checklist.
 
 ## Cloudflare Worker (new in 1.3.0-worker)
 

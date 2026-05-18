@@ -286,6 +286,15 @@ private fun ProxyScreen(
     var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
     var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
     var adaptiveRoutingExpanded by rememberSaveable { mutableStateOf(false) }
+    var autoStrategy by remember {
+        mutableStateOf(AutoStrategy.fromPref(prefs.getString("auto_strategy", null)))
+    }
+    var maskDomainsInReport by remember {
+        mutableStateOf(prefs.getBoolean("mask_domains_in_export", true))
+    }
+    var includeDomainsInLogExport by remember {
+        mutableStateOf(prefs.getBoolean("include_domains_in_log_export", false))
+    }
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
     var showLogs by rememberSaveable { mutableStateOf(true) }
     var showInfoModal by remember { mutableStateOf(false) }
@@ -314,11 +323,29 @@ private fun ProxyScreen(
         isSavingLogs = true
         val snapshot = logs
         coroutineScope.launch {
+            val profile = NetworkProfileProvider.current(context)
+            val adaptiveSection = if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
+                AdaptiveDiagnosticsReport.buildAdaptiveLogSection(
+                    context = context,
+                    versionName = appVersionName(context),
+                    connectionMode = connectionMode,
+                    strategy = autoStrategy,
+                    profile = profile,
+                    workerDomain = workerDomainText,
+                    cachedUpstreamCount = cfUpstreamState.domains.size,
+                    builtInCount = CfDomain.builtInDomains.size,
+                    stats = adaptiveRouteStatsRepository.snapshotForDisplay(profile.id),
+                    maskDomains = !includeDomainsInLogExport,
+                )
+            } else {
+                null
+            }
             val report = RuntimeLogExport.save(
                 context = context,
                 treeUri = treeUri,
                 logs = snapshot,
-                proxyRunning = isRunning
+                proxyRunning = isRunning,
+                adaptiveDiagnosticsSection = adaptiveSection,
             )
             isSavingLogs = false
             val status = if (report.savedUri != null) {
@@ -515,6 +542,7 @@ private fun ProxyScreen(
             cachedCfDomains = cfUpstreamState.domains,
             networkProfile = NetworkProfileProvider.current(context),
             adaptiveRouteStats = adaptiveRouteStatsRepository.loadEncodedStats(),
+            autoStrategy = autoStrategy,
         )
 
         if (parsedIps.isEmpty()) {
@@ -1113,13 +1141,45 @@ private fun ProxyScreen(
                 )
 
                 if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
+                    val adaptiveProfile = NetworkProfileProvider.current(context)
                     AdaptiveRoutingPanel(
-                        profile = NetworkProfileProvider.current(context),
-                        stats = adaptiveRouteStatsRepository.snapshotForDisplay(
-                            NetworkProfileProvider.current(context).id,
-                        ),
+                        profile = adaptiveProfile,
+                        strategy = autoStrategy,
+                        stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
+                        maskDomainsInReport = maskDomainsInReport,
+                        includeDomainsInLogExport = includeDomainsInLogExport,
                         expanded = adaptiveRoutingExpanded,
                         onExpandedChange = { adaptiveRoutingExpanded = it },
+                        onStrategyChange = { strategy ->
+                            autoStrategy = strategy
+                            prefs.edit().putString("auto_strategy", strategy.prefValue).apply()
+                        },
+                        onMaskDomainsChange = { mask ->
+                            maskDomainsInReport = mask
+                            prefs.edit().putBoolean("mask_domains_in_export", mask).apply()
+                        },
+                        onIncludeDomainsInLogsChange = { include ->
+                            includeDomainsInLogExport = include
+                            prefs.edit().putBoolean("include_domains_in_log_export", include).apply()
+                        },
+                        onCopyReport = {
+                            val markdown = AdaptiveDiagnosticsReport.buildMarkdown(
+                                context = context,
+                                versionName = appVersionName(context),
+                                connectionMode = connectionMode,
+                                strategy = autoStrategy,
+                                profile = adaptiveProfile,
+                                workerDomain = workerDomainText,
+                                manualCfDomains = manualCfDomains,
+                                cachedUpstreamCount = cfUpstreamState.domains.size,
+                                builtInCount = CfDomain.builtInDomains.size,
+                                stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
+                                maskDomains = maskDomainsInReport,
+                            )
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("diagnostics", markdown))
+                            Toast.makeText(context, context.getString(R.string.adaptive_report_copied), Toast.LENGTH_SHORT).show()
+                        },
                         onResetAll = {
                             adaptiveRouteStatsRepository.resetAll()
                             NativeProxy.resetAdaptiveRouteStats(true)
@@ -1966,12 +2026,56 @@ private fun CfDomainHealthRow(row: CfDomainHealth) {
     }
 }
 
+private fun appVersionName(context: Context): String {
+    return try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+    } catch (_: Exception) {
+        "unknown"
+    }
+}
+
+private fun buildAdaptiveSelectionHints(context: Context, stats: List<RouteStatSnapshot>): List<String> {
+    val now = System.currentTimeMillis()
+    val hints = mutableListOf<String>()
+    stats.find { it.routeType == "direct_ws" }?.let { direct ->
+        if (direct.cooldownUntilMs > now) {
+            hints += if (direct.lastFailureReason?.contains("302", ignoreCase = true) == true) {
+                context.getString(R.string.adaptive_explain_direct_302)
+            } else {
+                context.getString(R.string.adaptive_explain_direct_cooldown)
+            }
+        }
+    }
+    stats.find { it.routeType == "cf_proxy_ws" }?.let { cf ->
+        if (cf.cooldownUntilMs > now) {
+            hints += if (cf.lastFailureReason?.contains("429", ignoreCase = true) == true) {
+                context.getString(R.string.adaptive_explain_cf_429)
+            } else {
+                context.getString(R.string.adaptive_explain_cf_cooldown)
+            }
+        }
+    }
+    stats.find { it.routeType == "tcp_fallback" }?.let { tcp ->
+        if (tcp.failureCount >= 2) {
+            hints += context.getString(R.string.adaptive_explain_tcp_timeouts)
+        }
+    }
+    return hints.take(5)
+}
+
 @Composable
 private fun AdaptiveRoutingPanel(
     profile: NetworkProfile,
+    strategy: AutoStrategy,
     stats: List<RouteStatSnapshot>,
+    maskDomainsInReport: Boolean,
+    includeDomainsInLogExport: Boolean,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    onStrategyChange: (AutoStrategy) -> Unit,
+    onMaskDomainsChange: (Boolean) -> Unit,
+    onIncludeDomainsInLogsChange: (Boolean) -> Unit,
+    onCopyReport: () -> Unit,
     onResetAll: () -> Unit,
     onResetNetwork: () -> Unit,
 ) {
@@ -2018,8 +2122,55 @@ private fun AdaptiveRoutingPanel(
                 "${stringResource(R.string.adaptive_network_type)}: $networkTypeLabel",
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text(
+                "${stringResource(R.string.adaptive_strategy_label)}: ${strategyLabel(strategy)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            val hints = buildAdaptiveSelectionHints(LocalContext.current, stats)
+            if (hints.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.adaptive_selection_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                hints.forEach { hint ->
+                    Text(
+                        "• $hint",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
+                    AutoStrategySelector(strategy = strategy, onStrategyChange = onStrategyChange)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.adaptive_mask_domains), style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = maskDomainsInReport, onCheckedChange = onMaskDomainsChange)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.adaptive_include_domains_logs), style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = includeDomainsInLogExport, onCheckedChange = onIncludeDomainsInLogsChange)
+                    }
+                    OutlinedButton(
+                        onClick = onCopyReport,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                    ) {
+                        Text(stringResource(R.string.adaptive_copy_report))
+                    }
                     Text(
                         stringResource(R.string.adaptive_route_stats),
                         style = MaterialTheme.typography.bodySmall,
@@ -2063,6 +2214,7 @@ private fun AdaptiveRoutingPanel(
 
 @Composable
 private fun AdaptiveRouteStatRow(row: RouteStatSnapshot) {
+    val now = System.currentTimeMillis()
     val routeLabel = when (row.routeType) {
         "direct_ws" -> stringResource(R.string.adaptive_route_direct)
         "cf_worker_ws" -> stringResource(R.string.adaptive_route_worker)
@@ -2070,14 +2222,26 @@ private fun AdaptiveRouteStatRow(row: RouteStatSnapshot) {
         "tcp_fallback" -> stringResource(R.string.adaptive_route_tcp)
         else -> row.routeType
     }
-    val cooldown = row.cooldownUntilMs.takeIf { it > System.currentTimeMillis() }?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    val inCooldown = row.cooldownUntilMs > now
+    val statusLabel = if (inCooldown) {
+        stringResource(R.string.adaptive_status_cooldown)
+    } else {
+        stringResource(R.string.adaptive_status_active)
+    }
+    val untilText = row.cooldownUntilMs.takeIf { inCooldown }?.let {
+        DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))
     }
     Text(
-        "$routeLabel: ${stringResource(R.string.adaptive_stat_successes)} ${row.successCount}, " +
+        "$routeLabel: $statusLabel",
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 6.dp),
+    )
+    Text(
+        "${stringResource(R.string.adaptive_stat_successes)} ${row.successCount}, " +
             "${stringResource(R.string.adaptive_stat_failures)} ${row.failureCount}",
         style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.padding(top = 4.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (row.averageLatencyMs > 0) {
         Text(
@@ -2086,19 +2250,70 @@ private fun AdaptiveRouteStatRow(row: RouteStatSnapshot) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    row.lastFailureReason?.let {
+    row.lastFailureReason?.takeIf { it.isNotBlank() }?.let { reason ->
         Text(
-            "${stringResource(R.string.adaptive_stat_last_error)}: $it",
+            "${stringResource(R.string.adaptive_status_reason)}: $reason",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    cooldown?.let {
+    untilText?.let {
         Text(
-            "${stringResource(R.string.adaptive_stat_cooldown)}: $it",
+            "${stringResource(R.string.adaptive_status_until)}: $it",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun strategyLabel(strategy: AutoStrategy): String {
+    return when (strategy) {
+        AutoStrategy.BALANCED -> stringResource(R.string.adaptive_strategy_balanced)
+        AutoStrategy.DIRECT_PREFERRED -> stringResource(R.string.adaptive_strategy_direct)
+        AutoStrategy.WORKER_PREFERRED -> stringResource(R.string.adaptive_strategy_worker)
+        AutoStrategy.CF_PREFERRED -> stringResource(R.string.adaptive_strategy_cf)
+        AutoStrategy.STRICT_FAST_FAILOVER -> stringResource(R.string.adaptive_strategy_fast_failover)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AutoStrategySelector(
+    strategy: AutoStrategy,
+    onStrategyChange: (AutoStrategy) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val options = AutoStrategy.entries
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = strategyLabel(strategy),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(stringResource(R.string.adaptive_strategy_label)) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(strategyLabel(option)) },
+                    onClick = {
+                        onStrategyChange(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 

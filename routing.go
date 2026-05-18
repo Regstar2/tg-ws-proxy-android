@@ -48,6 +48,7 @@ type runtimeSettings struct {
 	NetworkProfileType  string
 	NetworkProfileLabel string
 	AdaptiveRouteStats  string
+	AutoStrategy        string
 }
 
 var (

@@ -100,7 +100,8 @@ class AdaptiveRouteStatsRepository(
     fun loadEncodedStats(): String = prefs.getString(KEY_STATS, "").orEmpty()
 
     fun saveEncodedStats(blob: String) {
-        prefs.edit().putString(KEY_STATS, blob).apply()
+        val cleaned = cleanupOldProfiles(blob, maxProfiles = MAX_PROFILES)
+        prefs.edit().putString(KEY_STATS, cleaned).apply()
     }
 
     fun mergeFromNative(exported: String?) {
@@ -218,7 +219,28 @@ class AdaptiveRouteStatsRepository(
         return parts.joinToString(";")
     }
 
+    private fun cleanupOldProfiles(blob: String, maxProfiles: Int): String {
+        val (stats, lastGoods) = decode(blob)
+        val profileLastSeen = mutableMapOf<String, Long>()
+        stats.forEach { st ->
+            val prev = profileLastSeen[st.profileId] ?: 0L
+            profileLastSeen[st.profileId] = maxOf(prev, st.cooldownUntilMs)
+        }
+        if (profileLastSeen.size <= maxProfiles) {
+            return blob
+        }
+        val keep = profileLastSeen.entries
+            .sortedByDescending { it.value }
+            .take(maxProfiles)
+            .map { it.key }
+            .toSet()
+        val filteredStats = stats.filter { it.profileId in keep }
+        val filteredLG = lastGoods.filter { it.profileId in keep }
+        return encode(filteredStats, filteredLG)
+    }
+
     private companion object {
         const val KEY_STATS = "adaptive_route_stats"
+        const val MAX_PROFILES = 20
     }
 }

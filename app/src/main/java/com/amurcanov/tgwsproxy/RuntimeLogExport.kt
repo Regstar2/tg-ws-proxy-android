@@ -20,6 +20,7 @@ object RuntimeLogExport {
         treeUri: Uri,
         logs: List<String>,
         proxyRunning: Boolean,
+        adaptiveDiagnosticsSection: String? = null,
     ): RuntimeLogSaveReport = withContext(Dispatchers.IO) {
         val exportedAt = Date()
         val fileName = "runtime-log-${fileStamp(exportedAt)}.txt"
@@ -29,6 +30,10 @@ object RuntimeLogExport {
             appendLine("proxy_running=$proxyRunning")
             appendLine("line_count=${logs.size}")
             appendLine()
+            if (!adaptiveDiagnosticsSection.isNullOrBlank()) {
+                appendLine(adaptiveDiagnosticsSection.trim())
+                appendLine()
+            }
             if (logs.isEmpty()) {
                 appendLine("(no logs captured)")
             } else {

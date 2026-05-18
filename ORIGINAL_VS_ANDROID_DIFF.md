@@ -114,6 +114,14 @@ Useful log categories:
 - Route stats persist locally (hashed network profile, no raw SSID).
 - Settings expose adaptive routing diagnostics and reset actions.
 
+## v1.5.1 adaptive polish
+
+- Auto strategy presets with explicit RouteScoreWeights (manual modes unaffected).
+- Failure classification with neutral handling for CLIENT_EOF and CONTEXT_CANCELLED.
+- Human-readable route selection hints and GitHub-ready diagnostics markdown.
+- Adaptive diagnostics section in runtime log export; domains masked by default.
+- Network profile cap (20) with automatic cleanup of old profiles.
+
 ## Practical conclusion
 
 The current Android fork is no longer blocked on "missing CfProxy". The active question is now operational stability:

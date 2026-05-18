@@ -2076,9 +2076,9 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		}
 
 		if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
-			reason := "ws_connect_failure"
+			reason := "WS_TIMEOUT"
 			if wsFailedRedirect {
-				reason = "ws_302"
+				reason = "WS_302"
 			}
 			recordAdaptiveFailure(routeDirectWS, dc, isMedia, reason, 0)
 		}
@@ -2345,6 +2345,8 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.NetworkProfileLabel = val
 			case "adaptive_route_stats":
 				settings.AdaptiveRouteStats = val
+			case "auto_strategy":
+				settings.AutoStrategy = val
 			}
 			continue
 		}

@@ -61,6 +61,12 @@ Auto and **Direct + fallback routes** use adaptive scoring in the Android fork. 
 
 Manual modes (`Worker only`, `CF only`, `Direct only`, `Worker first`, `CF first`) are unchanged.
 
+## v1.5.1 Auto strategy and diagnostics
+
+- **Auto strategy** presets (Balanced, Prefer Direct/Worker/CF, Fast failover) apply only to Auto and Direct + fallback routes.
+- Manual modes ignore Auto strategy.
+- Settings include adaptive diagnostics: selection hints, cooldown visibility, copy diagnostics report, and optional domain masking in log export.
+
 ## v1.4.1 mirror / resilient upstream update
 
 CF-domain list updates are best-effort and do not block proxy startup. Primary GitHub is tried first; an optional user HTTPS mirror is used on failure. Failed updates keep the previous cache; the built-in list remains available. See [CF_DOMAIN_POOL.md](CF_DOMAIN_POOL.md) for details.

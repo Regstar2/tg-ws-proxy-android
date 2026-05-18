@@ -23,6 +23,7 @@ object ConnectionRuntimeConfig {
         cachedCfDomains: List<String> = emptyList(),
         networkProfile: NetworkProfile? = null,
         adaptiveRouteStats: String = "",
+        autoStrategy: AutoStrategy = AutoStrategy.BALANCED,
     ): String {
         val effectiveMode = when {
             mode != ConnectionMode.DirectWithFallback -> mode
@@ -74,6 +75,7 @@ object ConnectionRuntimeConfig {
             if (adaptiveRouteStats.isNotBlank()) {
                 add("@adaptive_route_stats=$adaptiveRouteStats")
             }
+            add("@auto_strategy=${autoStrategy.prefValue}")
         }
         return tokens.joinToString(",")
     }

@@ -66,10 +66,13 @@ type AdaptiveSelection struct {
 }
 
 type AdaptiveStore struct {
-	Profile   NetworkProfile
-	Stats     map[string]*RouteStat // keyed by statKeyString
-	LastGoods map[string]*LastGoodRoute
-	nowFn     func() int64
+	Profile            NetworkProfile
+	Strategy           AutoStrategy
+	Stats              map[string]*RouteStat // keyed by statKeyString
+	LastGoods          map[string]*LastGoodRoute
+	LastExplanation    RouteSelectionExplanation
+	nowFn              func() int64
+	strategyRuntime    StrategyRuntime
 }
 
 func NewAdaptiveStore(nowFn func() int64) *AdaptiveStore {
@@ -81,6 +84,7 @@ func NewAdaptiveStore(nowFn func() int64) *AdaptiveStore {
 			ID:   "unknown",
 			Type: NetworkUnknown,
 		},
+		Strategy:  StrategyBalanced,
 		Stats:     make(map[string]*RouteStat),
 		LastGoods: make(map[string]*LastGoodRoute),
 		nowFn:     nowFn,
@@ -110,6 +114,12 @@ func (s *AdaptiveStore) SetProfile(p NetworkProfile) {
 	}
 	p.LastSeen = now
 	s.Profile = p
+	s.strategyRuntime = StrategyRuntimeFor(s.Strategy, s.Profile.Type)
+}
+
+func (s *AdaptiveStore) SetStrategy(strategy AutoStrategy) {
+	s.Strategy = strategy
+	s.strategyRuntime = StrategyRuntimeFor(s.Strategy, s.Profile.Type)
 }
 
 func statKeyString(k RouteStatKey) string {
@@ -176,18 +186,42 @@ func (s *AdaptiveStore) RecordSuccess(route RouteKind, dc int, media bool, laten
 }
 
 func (s *AdaptiveStore) RecordFailure(route RouteKind, dc int, media bool, reason string, latencyMs int64) {
+	s.RecordFailureClassified(route, dc, media, ClassifyFailureReason(reason), reason, latencyMs)
+}
+
+func (s *AdaptiveStore) RecordFailureClassified(
+	route RouteKind,
+	dc int,
+	media bool,
+	kind RouteFailureKind,
+	reason string,
+	latencyMs int64,
+) {
+	if IsNeutralFailure(kind) {
+		return
+	}
+	if !FailureAppliesToRoute(kind, route) && kind == FailureUnknown {
+		// still record unknown for the attempted route
+	}
 	now := s.Now()
 	st := s.statFor(route, dc, media)
 	st.FailureCount++
-	st.ConsecutiveFailures++
+	st.ConsecutiveFailures += 1 + ExtraConsecutivePenalty(kind, s.Strategy)
 	st.LastFailureAt = now
 	st.LastUsedAt = now
-	st.LastFailureReason = reason
+	st.LastFailureReason = string(kind)
+	if reason != "" && kind == FailureUnknown {
+		st.LastFailureReason = reason
+	}
 	if latencyMs > 0 {
 		st.LastLatencyMs = latencyMs
 	}
-	if st.ConsecutiveFailures >= AdaptiveCooldownAfter {
-		st.CooldownUntil = now + AdaptiveCooldownPeriod.Milliseconds()
+	rt := s.strategyRuntime
+	if rt.CooldownAfter == 0 {
+		rt = StrategyRuntimeFor(s.Strategy, s.Profile.Type)
+	}
+	if st.ConsecutiveFailures >= rt.CooldownAfter {
+		st.CooldownUntil = now + rt.CooldownPeriodMs
 	}
 }
 
@@ -223,7 +257,7 @@ func routeAvailable(route RouteKind, settings RouteSettings) bool {
 func scoreRoute(
 	route RouteKind,
 	st *RouteStat,
-	netType NetworkProfileType,
+	w RouteScoreWeights,
 	lastGood *LastGoodRoute,
 	now int64,
 ) (float64, []string) {
@@ -231,33 +265,15 @@ func scoreRoute(
 		return -1, []string{"cooldown"}
 	}
 	var reasons []string
-	score := 100.0
-
-	switch netType {
-	case NetworkWiFi:
-		if route == RouteDirectWS {
-			score += 30
-			reasons = append(reasons, "wifi_direct_bonus")
-		}
-	case NetworkMobile:
-		switch route {
-		case RouteCFWorkerWS:
-			score += 25
-			reasons = append(reasons, "mobile_worker_bonus")
-		case RouteCFProxyWS:
-			score += 15
-			reasons = append(reasons, "mobile_cf_bonus")
-		}
-	}
-
-	score += float64(st.SuccessCount) * 5
-	score -= float64(st.FailureCount) * 8
-	score -= float64(st.ConsecutiveFailures) * 15
+	score := baseScoreForRoute(route, w)
+	score += float64(st.SuccessCount) * w.SuccessBonus
+	score -= float64(st.FailureCount) * w.FailurePenalty
+	score -= float64(st.ConsecutiveFailures) * w.ConsecutivePenalty
 	if st.AverageLatencyMs > 0 {
-		score -= float64(st.AverageLatencyMs) / 25
+		score -= float64(st.AverageLatencyMs) / w.LatencyPenaltyFactor
 	}
 	if lastGood != nil && lastGood.Route == route {
-		score += 40
+		score += w.LastGoodBonus
 		reasons = append(reasons, "last_good_route")
 	}
 	return score, reasons
@@ -269,10 +285,13 @@ func AdaptiveOrderRoutes(
 	base []RouteKind,
 	store *AdaptiveStore,
 	settings RouteSettings,
+	strategy AutoStrategy,
 	dc int,
 	media bool,
 	skipDirect bool,
 ) AdaptiveSelection {
+	store.SetStrategy(strategy)
+	w := store.strategyRuntime.Weights
 	now := store.Now()
 	candidates := make([]RouteKind, 0, len(base))
 	for _, r := range base {
@@ -303,7 +322,7 @@ func AdaptiveOrderRoutes(
 	scores := make(map[RouteKind]float64)
 	for _, r := range candidates {
 		st := store.statFor(r, dc, media)
-		sc, reasons := scoreRoute(r, st, store.Profile.Type, lgRoute, now)
+		sc, reasons := scoreRoute(r, st, w, lgRoute, now)
 		if sc < 0 {
 			continue
 		}
@@ -331,7 +350,9 @@ func AdaptiveOrderRoutes(
 	for _, item := range scoredList {
 		out = append(out, item.route)
 	}
-	return AdaptiveSelection{Routes: out, Reasons: reasons, Scores: scores}
+	sel := AdaptiveSelection{Routes: out, Reasons: reasons, Scores: scores}
+	store.LastExplanation = BuildRouteSelectionExplanation(sel, store, settings, strategy, dc, media)
+	return sel
 }
 
 func routePriority(r RouteKind) int {

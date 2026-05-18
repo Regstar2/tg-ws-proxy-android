@@ -24,7 +24,7 @@ func TestAdaptiveStore_LastGoodBonus(t *testing.T) {
 		},
 	}
 	base := RoutesForMode(ModeAuto, settings, true)
-	sel := AdaptiveOrderRoutes(base, store, settings, 2, false, true)
+	sel := AdaptiveOrderRoutes(base, store, settings, StrategyBalanced, 2, false, true)
 	if len(sel.Routes) == 0 {
 		t.Fatal("expected routes")
 	}
@@ -49,7 +49,7 @@ func TestAdaptiveStore_CooldownSkipsRoute(t *testing.T) {
 		},
 	}
 	base := RoutesForMode(ModeAuto, settings, true)
-	sel := AdaptiveOrderRoutes(base, store, settings, 1, false, true)
+	sel := AdaptiveOrderRoutes(base, store, settings, StrategyBalanced, 1, false, true)
 	for _, r := range sel.Routes {
 		if r == RouteCFProxyWS {
 			t.Fatalf("cf route should be skipped in cooldown: %v", sel.Routes)
@@ -135,7 +135,7 @@ func TestAdaptiveStore_WifiDirectBonus(t *testing.T) {
 		},
 	}
 	base := RoutesForMode(ModeAuto, settings, true)
-	sel := AdaptiveOrderRoutes(base, store, settings, 4, false, true)
+	sel := AdaptiveOrderRoutes(base, store, settings, StrategyBalanced, 4, false, true)
 	if len(sel.Routes) == 0 {
 		t.Fatal("no routes")
 	}

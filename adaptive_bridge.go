@@ -35,6 +35,7 @@ func applyAdaptiveProfile(settings runtimeSettings) {
 	if settings.AdaptiveRouteStats != "" {
 		adaptiveStore.LoadEncodedStats(settings.AdaptiveRouteStats)
 	}
+	adaptiveStore.SetStrategy(tgwsroute.ParseAutoStrategy(settings.AutoStrategy))
 }
 
 func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool, dc int, isMedia bool) []routeKind {
@@ -46,7 +47,8 @@ func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDi
 	store := adaptiveStore
 	adaptiveStoreMu.RUnlock()
 
-	sel := tgwsroute.AdaptiveOrderRoutes(base, store, toRouteSettings(settings), dc, isMedia, skipDirect)
+	strategy := tgwsroute.ParseAutoStrategy(settings.AutoStrategy)
+	sel := tgwsroute.AdaptiveOrderRoutes(base, store, toRouteSettings(settings), strategy, dc, isMedia, skipDirect)
 	lastAdaptiveMu.Lock()
 	lastAdaptiveSel = sel
 	lastAdaptiveMu.Unlock()
@@ -77,8 +79,9 @@ func recordAdaptiveSuccess(route routeKind, dc int, isMedia bool, latencyMs int6
 func recordAdaptiveFailure(route routeKind, dc int, isMedia bool, reason string, latencyMs int64) {
 	adaptiveStoreMu.Lock()
 	defer adaptiveStoreMu.Unlock()
-	adaptiveStore.RecordFailure(route, dc, isMedia, reason, latencyMs)
-	logInfo.Printf("Auto updated stats route=%s failure reason=%s dc=%d media=%t", route, reason, dc, isMedia)
+	kind := tgwsroute.ClassifyFailureReason(reason)
+	adaptiveStore.RecordFailureClassified(route, dc, isMedia, kind, reason, latencyMs)
+	logInfo.Printf("Auto updated stats route=%s failure kind=%s dc=%d media=%t", route, kind, dc, isMedia)
 }
 
 func shouldSkipDirectWSAdaptive(dcKey [2]int, mode connectionMode) bool {
@@ -122,6 +125,33 @@ func resetAdaptiveRouteStats(all bool, profileID string) {
 		adaptiveStore.ResetCurrentProfile()
 	}
 	logInfo.Printf("Auto route stats reset network=%s", profileID)
+}
+
+func exportAdaptiveDiagnosticsSection() string {
+	adaptiveStoreMu.RLock()
+	defer adaptiveStoreMu.RUnlock()
+	stats, lastGoods := adaptiveStore.Snapshot()
+	ex := adaptiveStore.LastExplanation
+	var b strings.Builder
+	b.WriteString("Adaptive Routing Diagnostics\n")
+	b.WriteString(fmt.Sprintf("strategy=%s\n", adaptiveStore.Strategy))
+	b.WriteString(fmt.Sprintf("network_type=%s\n", adaptiveStore.Profile.Type))
+	b.WriteString(fmt.Sprintf("network_profile_id=%s\n", adaptiveStore.Profile.ID))
+	if ex.SelectedRoute != "" {
+		b.WriteString(fmt.Sprintf("last_selected_route=%s\n", ex.SelectedRoute))
+	}
+	for _, code := range ex.Codes {
+		b.WriteString(fmt.Sprintf("reason_code=%s\n", code))
+	}
+	b.WriteString("route_stats:\n")
+	b.WriteString(tgwsroute.SummarizeRouteStatsForExport(stats, adaptiveStore.Profile.ID))
+	if len(lastGoods) > 0 {
+		b.WriteString("\nlast_good_routes:\n")
+		for _, lg := range lastGoods {
+			b.WriteString(fmt.Sprintf("dc=%d media=%t route=%s\n", lg.DC, lg.Media, lg.Route))
+		}
+	}
+	return b.String()
 }
 
 func lastAdaptiveSelectionSummary() string {
