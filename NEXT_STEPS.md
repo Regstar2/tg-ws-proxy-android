@@ -19,12 +19,27 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - CF diagnostics;
 - cooldown reset.
 
-## v1.4.0 next
+## v1.4.0 completed
 
-- update CF-domain list from Flowseal GitHub;
+- upstream CF-domain list download;
 - cached upstream list;
-- manual update button.
-- validation and fallback to built-in list.
+- manual update button;
+- auto-update with 24h throttle;
+- parser/validation;
+- fallback to built-in list.
+
+## v1.4.1 next
+
+- mirror URL support;
+- better download diagnostics;
+- optional ETag/Last-Modified follow-up if needed;
+- optional pinned TLS research.
+
+## v1.5.0 next
+
+- adaptive Auto routing;
+- per-network route scoring;
+- last-good route persistence.
 
 ## Cloudflare Worker (new in 1.3.0-worker)
 
@@ -32,10 +47,10 @@ Current working candidate: `Worker first` / `CF first` / `CF only` with user Wor
 - Test with in-app **Test Worker** before relying on mobile networks.
 - Do not use shared/public Worker endpoints.
 
-## TODO (not in 1.3.0-worker)
+## TODO
 
 - Fake TLS masking (evaluate desktop Flowseal approach for Android SOCKS5).
-- GitHub-backed CF domain list refresh and pinned TLS fetch fallback.
+- Pinned TLS fetch fallback research.
 
 1. Run a 20-minute mobile usability test
 - Network: mobile only.

@@ -14,6 +14,8 @@ interface ProxyLibrary : Library {
     fun SetPoolSize(size: Int)
     fun GetStats(): Pointer?
     fun ResetCFDomainCooldowns()
+    fun SetManualCFDomains(domains: String)
+    fun SetCachedCFDomains(domains: String)
     fun FreeString(p: Pointer)
 }
 
@@ -35,5 +37,11 @@ object NativeProxy {
     }
     fun resetCfDomainCooldowns() {
         ProxyLibrary.INSTANCE.ResetCFDomainCooldowns()
+    }
+    fun setManualCfDomains(domains: List<String>) {
+        ProxyLibrary.INSTANCE.SetManualCFDomains(domains.joinToString("|"))
+    }
+    fun setCachedCfDomains(domains: List<String>) {
+        ProxyLibrary.INSTANCE.SetCachedCFDomains(domains.joinToString("|"))
     }
 }

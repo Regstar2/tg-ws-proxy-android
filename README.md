@@ -2,7 +2,7 @@
 
 Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Основной практический сценарий текущей ветки - работа через Cloudflare Proxy на сетях, где прямые Telegram endpoint-ы недоступны.
 
-Текущая версия рабочей ветки: `1.3.2` (CF domain pool polishing).
+Текущая версия рабочей ветки: `1.4.0` (CF domain auto-update).
 
 ## Происхождение
 
@@ -50,6 +50,8 @@ Android-форк распространяется под GPLv3. Оригинал
 Домен по умолчанию: `pclead.co.uk`. Он взят из подхода Flowseal и удобен для проверки, но это общий endpoint. Cloudflare ограничивает одновременные WebSocket-подключения, поэтому домен по умолчанию может временно отдавать `429 Too Many Requests` или перестать работать. Для постоянного использования лучше настроить собственный Cloudflare-домен и указать его в настройках приложения.
 
 Начиная с `v1.3.2`, ручной CF-домен больше не является единственной опорой. Android fork сохраняет поле для пользовательского домена, но также включает встроенный CF-domain pool. Если ручной домен возвращает `429`, `403`, `5xx` или повторно падает на timeout/TLS/WebSocket handshake, runtime временно переводит его в cooldown и пробует другой CF-домен либо следующий маршрут, разрешённый выбранным режимом.
+
+Начиная с `v1.4.0`, приложение также умеет обновлять список CF-доменов из Flowseal upstream GitHub. Обновление не является критической зависимостью: если GitHub недоступен, используется последний кэшированный upstream-список; если кэша ещё нет, остаётся встроенный список. Порядок выбора теперь явный: `Manual -> Cached upstream -> Built-in`. Пустой или битый downloaded list не заменяет сохранённый кэш.
 
 Для собственного домена используются хосты вида:
 
@@ -137,7 +139,8 @@ $env:KEY_ALIAS="tgwsproxy"
 - Bridge-логирование фиксирует первичную причину закрытия сессии.
 - Android routing намеренно отличается от Flowseal desktop: Android сохраняет `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto` и `Direct + fallback routes`.
 - `v1.3.2` добавляет built-in CF pool, per-domain health/cooldown, диагностику CF-доменов и ручной сброс cooldown.
-- `Fake TLS` и автообновление CF-доменов из GitHub не входят в v1.3.2. Автообновление списка остаётся задачей для `v1.4.0`.
+- `v1.4.0` добавляет cached upstream list, ручное обновление, автообновление с 24-часовым throttle и fallback `Manual -> Cached upstream -> Built-in`.
+- `Fake TLS` и GitHub pinned TLS fallback не входят в v1.4.0; эти улучшения остаются будущей работой.
 
 Не считается финально закрытым:
 
@@ -150,6 +153,7 @@ $env:KEY_ALIAS="tgwsproxy"
 - [DEBUG_STATE.md](DEBUG_STATE.md) - краткое текущее состояние.
 - [NEXT_STEPS.md](NEXT_STEPS.md) - ближайший roadmap.
 - [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
+- [docs/CF_DOMAIN_POOL.md](docs/CF_DOMAIN_POOL.md) - источники CF-доменов, cache policy и fallback order.
 
 ## Лицензия
 

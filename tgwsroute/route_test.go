@@ -169,6 +169,65 @@ func TestCFDomainPool_ManualCooldownFallsBackToPool(t *testing.T) {
 	assertCandidateSet(t, candidates[1:], []string{"pool-a.example", "pool-b.example"})
 }
 
+func TestCFDomainPool_ManualCachedBuiltInOrder(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetManualDomain("manual.example")
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+
+	selection := pool.SelectionForDC(2)
+	assertCandidates(t, selection.Candidates, []string{"manual.example", "cached.example", "builtin.example"})
+	if selection.Candidates[1].Source != CFDomainSourceCachedUpstream {
+		t.Fatalf("second source = %s, want cached_upstream", selection.Candidates[1].Source)
+	}
+}
+
+func TestCFDomainPool_MultipleManualDomainsLeadInOrder(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetManualDomains([]string{"manual-a.example", "manual-b.example"})
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+
+	assertCandidates(
+		t,
+		pool.SelectionForDC(2).Candidates,
+		[]string{"manual-a.example", "manual-b.example", "cached.example", "builtin.example"},
+	)
+}
+
+func TestCFDomainPool_ManualCooldownFallsBackToNextManualDomain(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetManualDomains([]string{"manual-a.example", "manual-b.example"})
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.MarkFailure("manual-a.example", CFFailureRateLimit, 90)
+
+	assertCandidates(
+		t,
+		pool.SelectionForDC(2).Candidates,
+		[]string{"manual-b.example", "cached.example"},
+	)
+}
+
+func TestCFDomainPool_ManualCooldownFallsBackToCachedUpstream(t *testing.T) {
+	now := 100.0
+	pool := NewCFDomainPool(func() float64 { return now })
+	pool.SetManualDomain("manual.example")
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+
+	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"cached.example", "builtin.example"})
+}
+
+func TestCFDomainPool_CachedCooldownFallsBackToBuiltIn(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+	pool.MarkFailure("cached.example", CFFailureForbidden, 90)
+
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"builtin.example"})
+}
+
 func TestCFDomainPool_AllDomainsUnhealthy(t *testing.T) {
 	now := 100.0
 	pool := NewCFDomainPool(func() float64 { return now })
@@ -178,6 +237,25 @@ func TestCFDomainPool_AllDomainsUnhealthy(t *testing.T) {
 	pool.MarkFailure("pool.example", CFFailureForbidden, 90)
 
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, nil)
+}
+
+func TestCFDomainPool_AllSourcesCooldownUnavailable(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetManualDomain("manual.example")
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
+	pool.MarkFailure("cached.example", CFFailureForbidden, 90)
+	pool.MarkFailure("builtin.example", CFFailureServer, 90)
+
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, nil)
+}
+
+func TestCFDomainPool_NoCachedUpstreamUsesBuiltInFallback(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"builtin.example"})
 }
 
 func TestNormalizeCFDomain(t *testing.T) {
@@ -195,6 +273,8 @@ func TestNormalizeCFDomain(t *testing.T) {
 		{"wss://example.com", "", false},
 		{"https://", "", false},
 		{"/path-only", "", false},
+		{"127.0.0.1", "", false},
+		{"*.example.com", "", false},
 	}
 	for _, tc := range cases {
 		got, ok := NormalizeCFDomain(tc.in)

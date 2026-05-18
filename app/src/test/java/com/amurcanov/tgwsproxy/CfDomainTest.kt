@@ -21,6 +21,9 @@ class CfDomainTest {
         assertNull(CfDomain.normalizeOrNull("example.com:443"))
         assertNull(CfDomain.normalizeOrNull("example.com/apiws"))
         assertNull(CfDomain.normalizeOrNull("wss://example.com"))
+        assertNull(CfDomain.normalizeOrNull("localhost"))
+        assertNull(CfDomain.normalizeOrNull("127.0.0.1"))
+        assertNull(CfDomain.normalizeOrNull("*.example.com"))
     }
 
     @Test
@@ -28,6 +31,21 @@ class CfDomainTest {
         assertTrue(CfDomain.builtInDomains.isNotEmpty())
         assertEquals(CfDomain.builtInDomains.distinct(), CfDomain.builtInDomains)
         assertTrue(CfDomain.builtInDomains.all { CfDomain.normalizeOrNull(it) == it })
+    }
+
+    @Test
+    fun manualList_parsesMultipleDomainsAndKeepsInvalidEntriesVisible() {
+        val parsed = CfManualDomainList.parse(
+            """
+            Manual-A.example
+            https://manual-b.example/apiws
+            invalid domain.example
+            manual-a.example
+            """.trimIndent()
+        )
+
+        assertEquals(listOf("manual-a.example", "manual-b.example"), parsed.domains)
+        assertEquals(listOf("invalid domain.example"), parsed.invalidEntries)
     }
 
     @Test

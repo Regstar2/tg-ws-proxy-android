@@ -81,7 +81,7 @@ val telegramApps = listOf(
     "io.github.nextalone.nagram"
 )
 
-private const val APP_INFO_VERSION = "1.3.2"
+private const val APP_INFO_VERSION = "1.4.0"
 
 private enum class PendingFolderAction {
     SaveRuntimeLogs,
@@ -230,6 +230,19 @@ private fun ProxyScreen(
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
+    val cfDomainListRepository = remember {
+        CfDomainListRepository(SharedPreferencesCfDomainListPersistence(prefs))
+    }
+    val manualCfDomainRepository = remember {
+        SharedPreferencesManualCfDomainRepository(prefs)
+    }
+    val cfDomainListUpdater = remember {
+        CfDomainListUpdater(
+            repository = cfDomainListRepository,
+            downloader = HttpCfDomainListDownloader(),
+            logger = AndroidCfDomainUpdateLogger,
+        )
+    }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
     var dc1Text by remember { mutableStateOf(prefs.getString("dc1", "149.154.167.220") ?: "149.154.167.220") }
@@ -241,7 +254,9 @@ private fun ProxyScreen(
     var cfProxyEnabled by remember { mutableStateOf(prefs.getBoolean("cfproxy_enabled", true)) }
     var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
     var cfProxyOnly by remember { mutableStateOf(prefs.getBoolean("cfproxy_only", false)) }
-    var cfProxyDomainText by remember { mutableStateOf(prefs.getString("cfproxy_domain", "pclead.co.uk") ?: "pclead.co.uk") }
+    var manualCfDomains by remember { mutableStateOf(manualCfDomainRepository.load()) }
+    var manualCfDomainsText by remember { mutableStateOf(manualCfDomains.joinToString("\n")) }
+    var invalidManualCfDomains by remember { mutableStateOf(emptyList<String>()) }
     var connectionMode by remember {
         mutableStateOf(
             prefs.getString("connection_mode", null)?.let { ConnectionMode.fromPref(it) }
@@ -256,7 +271,12 @@ private fun ProxyScreen(
     var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
     var diagStatusText by remember { mutableStateOf(prefs.getString("diag_last_status", "") ?: "") }
     var isDiagRunning by remember { mutableStateOf(false) }
-    var cfDomainRows by remember { mutableStateOf(CfDomainDiagnosticsState.snapshot(cfProxyDomainText)) }
+    var cfUpstreamState by remember { mutableStateOf(cfDomainListRepository.state()) }
+    var autoUpdateCfDomains by remember { mutableStateOf(cfUpstreamState.autoUpdateEnabled) }
+    var isCfDomainUpdateRunning by remember { mutableStateOf(false) }
+    var cfDomainRows by remember {
+        mutableStateOf(CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains))
+    }
     var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
     var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
     var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
@@ -355,6 +375,36 @@ private fun ProxyScreen(
         }
     }
 
+    fun applyCfUpstreamState(state: CfDomainUpstreamState) {
+        cfUpstreamState = state
+        autoUpdateCfDomains = state.autoUpdateEnabled
+        cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, state.domains)
+        NativeProxy.setCachedCfDomains(state.domains)
+    }
+
+    fun applyManualCfDomains(raw: String) {
+        manualCfDomainsText = raw
+        val parsed = CfManualDomainList.parse(raw)
+        invalidManualCfDomains = parsed.invalidEntries
+        manualCfDomains = manualCfDomainRepository.save(parsed.domains)
+        cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains)
+        NativeProxy.setManualCfDomains(manualCfDomains)
+    }
+
+    LaunchedEffect(currentPage, autoUpdateCfDomains) {
+        if (currentPage != ProxyScreenPage.Settings || !autoUpdateCfDomains || isCfDomainUpdateRunning) {
+            return@LaunchedEffect
+        }
+        isCfDomainUpdateRunning = true
+        when (val result = cfDomainListUpdater.maybeAutoUpdate()) {
+            is CfDomainListUpdateResult.Success -> applyCfUpstreamState(result.state)
+            is CfDomainListUpdateResult.NotModified -> applyCfUpstreamState(result.state)
+            is CfDomainListUpdateResult.Failure -> applyCfUpstreamState(result.state)
+            else -> Unit
+        }
+        isCfDomainUpdateRunning = false
+    }
+
     val startProxyAction by rememberUpdatedState {
         val port = portText.toIntOrNull()
         if (port == null) {
@@ -373,9 +423,11 @@ private fun ProxyScreen(
             cfProxyEnabled = cfProxyEnabled,
             cfProxyPriority = cfProxyPriority,
             cfProxyOnly = cfProxyOnly,
-            cfDomain = cfProxyDomainText,
+            cfDomain = "",
+            manualCfDomains = manualCfDomains,
             workerEnabled = workerEnabled,
             workerDomain = workerDomainText,
+            cachedCfDomains = cfUpstreamState.domains,
         )
 
         if (parsedIps.isEmpty()) {
@@ -875,12 +927,8 @@ private fun ProxyScreen(
                 }
 
                 OutlinedTextField(
-                    value = cfProxyDomainText,
-                    onValueChange = {
-                        cfProxyDomainText = it
-                        cfDomainRows = CfDomainDiagnosticsState.snapshot(it)
-                        prefs.edit().putString("cfproxy_domain", it).apply()
-                    },
+                    value = manualCfDomainsText,
+                    onValueChange = ::applyManualCfDomains,
                     enabled = !isRunning,
                     label = { Text(stringResource(R.string.cf_domain_label)) },
                     shape = RoundedCornerShape(24.dp),
@@ -891,11 +939,15 @@ private fun ProxyScreen(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant
                     ),
-                    singleLine = true
+                    minLines = 3,
+                    maxLines = 5,
                 )
-                CfDomain.validationWarning(cfProxyDomainText)?.let { warningRes ->
+                if (invalidManualCfDomains.isNotEmpty()) {
                     Text(
-                        stringResource(warningRes),
+                        stringResource(
+                            R.string.cf_domains_invalid_entries,
+                            invalidManualCfDomains.joinToString(", "),
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -904,18 +956,73 @@ private fun ProxyScreen(
 
                 CfDomainsPanel(
                     rows = cfDomainRows,
-                    manualDomainRaw = cfProxyDomainText,
+                    manualDomains = manualCfDomains,
                     lastCheckAtMs = cfDomainLastCheckAtMs,
+                    upstreamState = cfUpstreamState,
+                    autoUpdateEnabled = autoUpdateCfDomains,
+                    isUpdateRunning = isCfDomainUpdateRunning,
                     expanded = cfDomainsExpanded,
                     onExpandedChange = { cfDomainsExpanded = it },
                     proxyRunning = isRunning,
                     isDiagRunning = isDiagRunning,
+                    onAutoUpdateChange = {
+                        autoUpdateCfDomains = it
+                        applyCfUpstreamState(cfDomainListRepository.setAutoUpdateEnabled(it))
+                    },
+                    onUpdate = {
+                        if (!isCfDomainUpdateRunning) {
+                            isCfDomainUpdateRunning = true
+                            coroutineScope.launch {
+                                when (val result = cfDomainListUpdater.manualUpdate()) {
+                                    is CfDomainListUpdateResult.Success -> {
+                                        applyCfUpstreamState(result.state)
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(
+                                                R.string.cf_domains_update_success,
+                                                result.state.domains.size,
+                                            ),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+
+                                    is CfDomainListUpdateResult.NotModified -> {
+                                        applyCfUpstreamState(result.state)
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.cf_domains_update_not_modified),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+
+                                    is CfDomainListUpdateResult.Failure -> {
+                                        applyCfUpstreamState(result.state)
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(
+                                                R.string.cf_domains_update_failed,
+                                                result.stage,
+                                                result.message,
+                                            ),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+
+                                    else -> Unit
+                                }
+                                isCfDomainUpdateRunning = false
+                            }
+                        }
+                    },
                     onTest = {
                         if (!isDiagRunning) {
                             isDiagRunning = true
                             diagStatusText = context.getString(R.string.diag_running)
                             coroutineScope.launch {
-                                val report = ConnectionDiagnostics.probeCfPool(cfProxyDomainText)
+                                val report = ConnectionDiagnostics.probeCfPool(
+                                    manualCfDomains,
+                                    cfUpstreamState.domains,
+                                )
                                 ConnectionDiagnostics.logReport(report.routeReport)
                                 cfDomainRows = report.domains
                                 cfDomainLastCheckAtMs = report.checkedAtMs
@@ -928,6 +1035,9 @@ private fun ProxyScreen(
                                 val status = context.getString(
                                     R.string.cf_domains_test_summary,
                                     manual,
+                                    report.summary.availableCachedUpstream,
+                                    report.summary.failedCachedUpstream,
+                                    report.summary.uncheckedCachedUpstream,
                                     report.summary.availableBuiltIn,
                                     report.summary.failedBuiltIn,
                                     report.summary.uncheckedBuiltIn,
@@ -943,7 +1053,7 @@ private fun ProxyScreen(
                     onResetCooldown = {
                         CfDomainDiagnosticsState.resetCooldowns()
                         NativeProxy.resetCfDomainCooldowns()
-                        cfDomainRows = CfDomainDiagnosticsState.snapshot(cfProxyDomainText)
+                        cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains)
                         Toast.makeText(context, context.getString(R.string.cf_domains_cooldown_reset_done), Toast.LENGTH_SHORT).show()
                     },
                 )
@@ -1052,14 +1162,16 @@ private fun ProxyScreen(
                     onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeWorker(workerDomainText) }
                 DiagnosticRunButton(diagLabelCf, isRunning, isDiagRunning, coroutineScope, context, prefs,
                     onRunningChange = { isDiagRunning = it },
-                    onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeCfProxy(cfProxyDomainText) }
+                    onStatusChange = { diagStatusText = it }) {
+                    ConnectionDiagnostics.probeCfProxy(manualCfDomains, cfUpstreamState.domains)
+                }
                 DiagnosticRunButton(diagLabelTcp, isRunning, isDiagRunning, coroutineScope, context, prefs,
                     onRunningChange = { isDiagRunning = it },
                     onStatusChange = { diagStatusText = it }) { ConnectionDiagnostics.probeTcpFallback() }
                 DiagnosticRunButton(diagLabelAll, isRunning, isDiagRunning, coroutineScope, context, prefs,
                     onRunningChange = { isDiagRunning = it },
                     onStatusChange = { diagStatusText = it }) {
-                    ConnectionDiagnostics.probeAll(workerDomainText, cfProxyDomainText)
+                    ConnectionDiagnostics.probeAll(workerDomainText, manualCfDomains, cfUpstreamState.domains)
                 }
 
                 SectionTitle(stringResource(R.string.section_appearance))
@@ -1463,23 +1575,35 @@ private fun HintText(text: String) {
 @Composable
 private fun CfDomainsPanel(
     rows: List<CfDomainHealth>,
-    manualDomainRaw: String,
+    manualDomains: List<String>,
     lastCheckAtMs: Long?,
+    upstreamState: CfDomainUpstreamState,
+    autoUpdateEnabled: Boolean,
+    isUpdateRunning: Boolean,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     proxyRunning: Boolean,
     isDiagRunning: Boolean,
+    onAutoUpdateChange: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
     onTest: () -> Unit,
     onResetCooldown: () -> Unit,
 ) {
     val now = System.currentTimeMillis()
-    val manualDomain = CfDomain.normalize(manualDomainRaw).ifBlank { stringResource(R.string.cf_domains_unset) }
-    val builtInCount = rows.count { it.source == CfDomainSource.BUILT_IN }
+    val manualDomainSummary = manualDomains.takeIf { it.isNotEmpty() }
+        ?.joinToString(", ")
+        ?: stringResource(R.string.cf_domains_unset)
+    val cachedCount = upstreamState.domains.size
+    val builtInCount = CfDomain.builtInDomains.size
     val activeCount = rows.count { it.status(now) != CfDomainStatus.COOLDOWN }
     val cooldownCount = rows.count { it.status(now) == CfDomainStatus.COOLDOWN }
     val lastCheck = lastCheckAtMs?.let {
         DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
     } ?: stringResource(R.string.cf_domains_unchecked)
+    val lastUpdate = upstreamState.lastSuccessfulUpdateAtMs.takeIf { it > 0 }?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    } ?: stringResource(R.string.cf_domains_unchecked)
+    val lastUpdateError = upstreamState.lastError ?: stringResource(R.string.cf_domains_none)
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -1504,8 +1628,9 @@ private fun CfDomainsPanel(
                 }
             }
 
-            Text("${stringResource(R.string.cf_domains_manual)}: $manualDomain", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_builtin)}: $builtInCount", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_manual)}: $manualDomainSummary", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_cached_count)}: $cachedCount", style = MaterialTheme.typography.bodySmall)
+            Text("${stringResource(R.string.cf_domains_builtin_count)}: $builtInCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_active)}: $activeCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_cooldown)}: $cooldownCount", style = MaterialTheme.typography.bodySmall)
             Text("${stringResource(R.string.cf_domains_last_check)}: $lastCheck", style = MaterialTheme.typography.bodySmall)
@@ -1530,10 +1655,102 @@ private fun CfDomainsPanel(
 
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
+                    Text(
+                        if (cachedCount > 0) {
+                            stringResource(R.string.cf_domains_cached_used)
+                        } else {
+                            stringResource(R.string.cf_domains_builtin_used)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_domains_last_update)}: $lastUpdate",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "${stringResource(R.string.cf_domains_last_update_error)}: $lastUpdateError",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(stringResource(R.string.cf_domains_auto_update), style = MaterialTheme.typography.bodySmall)
+                        Switch(
+                            checked = autoUpdateEnabled,
+                            onCheckedChange = onAutoUpdateChange,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onUpdate,
+                        enabled = !isUpdateRunning,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp, bottom = 10.dp),
+                    ) {
+                        Text(
+                            if (isUpdateRunning) {
+                                stringResource(R.string.cf_domains_update_running)
+                            } else {
+                                stringResource(R.string.cf_domains_update)
+                            }
+                        )
+                    }
+                    CfDomainGroup(
+                        title = stringResource(R.string.cf_domains_manual),
+                        domains = manualDomains,
+                    )
+                    CfDomainGroup(
+                        title = stringResource(R.string.cf_domains_upstream_list),
+                        domains = upstreamState.domains,
+                    )
+                    CfDomainGroup(
+                        title = stringResource(R.string.cf_domains_builtin_list),
+                        domains = CfDomain.builtInDomains,
+                    )
                     rows.forEach { row ->
                         CfDomainHealthRow(row = row)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CfDomainGroup(
+    title: String,
+    domains: List<String>,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (domains.isEmpty()) {
+            Text(
+                stringResource(R.string.cf_domains_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            domains.forEach { domain ->
+                Text(
+                    domain,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
     }

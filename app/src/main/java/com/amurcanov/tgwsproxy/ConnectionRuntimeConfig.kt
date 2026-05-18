@@ -17,8 +17,10 @@ object ConnectionRuntimeConfig {
         cfProxyPriority: Boolean,
         cfProxyOnly: Boolean,
         cfDomain: String,
+        manualCfDomains: List<String> = emptyList(),
         workerEnabled: Boolean,
         workerDomain: String,
+        cachedCfDomains: List<String> = emptyList(),
     ): String {
         val effectiveMode = when {
             mode != ConnectionMode.DirectWithFallback -> mode
@@ -38,10 +40,19 @@ object ConnectionRuntimeConfig {
             add("@cfproxy=${if (cfEnabled) 1 else 0}")
             add("@cfproxy_priority=${if (cfPriority) 1 else 0}")
             add("@cfproxy_only=${if (cfOnly) 1 else 0}")
-            val domain = CfDomain.normalize(cfDomain)
-            if (domain.isNotBlank()) {
-                add("@cfproxy_domain=$domain")
+            val manualDomains = CfManualDomainList.normalize(
+                if (manualCfDomains.isNotEmpty()) manualCfDomains else listOf(cfDomain)
+            )
+            if (manualDomains.isNotEmpty()) {
+                add("@cf_manual_domains=${manualDomains.joinToString("|")}")
+                add("@cfproxy_domain=${manualDomains.first()}")
                 add("@cf_use_manual_domain=1")
+            }
+            val cachedDomains = cachedCfDomains
+                .mapNotNull(CfDomain::normalizeOrNull)
+                .distinct()
+            if (cachedDomains.isNotEmpty()) {
+                add("@cf_cached_domains=${cachedDomains.joinToString("|")}")
             }
             val normalizedWorker = WorkerDomain.normalize(workerDomain)
             val workerOn = workerEnabled || normalizedWorker.isNotBlank() ||

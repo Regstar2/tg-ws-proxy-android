@@ -2303,13 +2303,22 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				if val != "" {
 					if normalized, ok := tgwsroute.NormalizeCFDomain(val); ok {
 						cfg.Domain = normalized
-						settings.CFManualDomain = normalized
+						settings.CFManualDomains = []string{normalized}
 					}
+				}
+			case "cf_manual_domains":
+				settings.CFManualDomains = parseCFDomains(val)
+				if len(settings.CFManualDomains) > 0 {
+					cfg.Domain = settings.CFManualDomains[0]
 				}
 			case "cf_use_manual_domain":
 				if parseBoolValue(val) && cfg.Domain != "" {
-					settings.CFManualDomain = cfg.Domain
+					if len(settings.CFManualDomains) == 0 {
+						settings.CFManualDomains = []string{cfg.Domain}
+					}
 				}
+			case "cf_cached_domains":
+				settings.CFCachedUpstream = parseCFDomains(val)
 			case "worker_enabled":
 				settings.Worker.Enabled = parseBoolValue(val)
 			case "worker_domain":
@@ -2339,6 +2348,13 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 		settings.Worker.Enabled = true
 	}
 	return dcMap, settings, nil
+}
+
+func parseCFDomains(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return tgwsroute.NormalizeCFDomains(strings.Split(raw, "|"))
 }
 
 // ---------------------------------------------------------------------------
@@ -2437,6 +2453,25 @@ func GetStats() *C.char {
 //export ResetCFDomainCooldowns
 func ResetCFDomainCooldowns() {
 	cfPool.ResetCooldowns()
+}
+
+//export SetCachedCFDomains
+func SetCachedCFDomains(cDomains *C.char) {
+	domains := parseCFDomains(C.GoString(cDomains))
+	settings := getRuntimeSettings()
+	settings.CFCachedUpstream = domains
+	setRuntimeSettings(settings)
+}
+
+//export SetManualCFDomains
+func SetManualCFDomains(cDomains *C.char) {
+	domains := parseCFDomains(C.GoString(cDomains))
+	settings := getRuntimeSettings()
+	settings.CFManualDomains = domains
+	if len(domains) > 0 {
+		settings.CF.Domain = domains[0]
+	}
+	setRuntimeSettings(settings)
 }
 
 //export FreeString

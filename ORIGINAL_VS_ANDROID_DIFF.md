@@ -65,13 +65,12 @@ Useful log categories:
 
 - Cloudflare Worker route: `wss://<domain>/apiws?dst=...&dc=...&media=...`
 - Connection modes: Auto, Direct + fallback routes, Worker first, CF first, Worker only, CF only, Direct only
-- CF domain pool with manual-domain priority and per-domain cooldown (no GitHub refresh yet)
+- CF domain pool with manual-domain priority and per-domain cooldown
 - In-app connectivity tests (Direct / Worker / CF / TCP / all)
 - See [docs/cloudflare-worker.md](docs/cloudflare-worker.md) and [docs/CONNECTION_MODES.md](docs/CONNECTION_MODES.md)
 
 ## Remaining differences from Flowseal runtime
 
-- No automatic GitHub fetch for CF domain list (pool is built-in + manual domain).
 - No Fake TLS masking (TODO in docs).
 - Android has foreground service, Compose UI, log export, theme/language settings, and mobile-specific UX that the desktop/runtime project does not need.
 - Direct path remains available, but it is not the primary working route for tested mobile networks.
@@ -91,6 +90,14 @@ Useful log categories:
 - `429`, `403`, `5xx`, and transport/setup failures move a bad domain out of the hot path so `Auto`, `CF first`, and fallback modes do not keep retrying the same endpoint forever.
 - The diagnostics UI now exposes manual vs built-in domain status and offers a cooldown reset action.
 - GitHub-backed upstream refresh and Fake TLS are still intentionally deferred to `v1.4.0` and later work.
+
+## v1.4.0 CF domain auto-update
+
+- The Android fork now downloads the Flowseal upstream CF-domain list into a persistent cache.
+- Selector priority is explicit: `manual -> cached_upstream -> built_in`.
+- Upstream refresh is non-critical: failed, empty, or invalid downloads keep the old cache, and the built-in list remains available.
+- Settings now expose cached upstream counts, last update status, a manual refresh action, and a 24-hour auto-update throttle.
+- Fake TLS and GitHub pinned TLS fallback remain intentionally out of scope for this release.
 
 ## Practical conclusion
 

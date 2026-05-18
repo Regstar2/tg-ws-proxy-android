@@ -1,4 +1,4 @@
-# Режимы подключения (v1.3.2)
+# Режимы подключения (v1.4.0)
 
 Документация к ветке `feature/cf-worker-v1.7`.
 
@@ -38,6 +38,22 @@ Android fork keeps a manual CF domain for advanced users, but also includes a bu
 Android routing intentionally differs from Flowseal desktop. Flowseal desktop v1.7.0 убрал отдельный CF priority, но Android сохраняет мобильные режимы: `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto`, `Direct + fallback routes`.
 
 `Fake TLS` не реализован в v1.3.2. GitHub CF domain auto-update не реализован в v1.3.2.
+
+## v1.4.0 CF domain auto-update
+
+The Android fork can update its Cloudflare proxy domain list from Flowseal upstream. The update is non-critical: if GitHub is unavailable, the app keeps using the last cached list. If no cached list exists, the built-in list remains available. Manual user domain always has priority unless it is temporarily placed into cooldown by health checks.
+
+Источники CF-доменов:
+
+1. `manual`
+2. `cached_upstream`
+3. `built_in`
+
+Порядок выбора: `Manual -> Cached upstream -> Built-in`. Health/cooldown применяется ко всем источникам одинаково: плохой manual domain может уступить cached upstream, а исчерпанный cached upstream — встроенному списку.
+
+В UI появились `Update CF domain list` и `Auto-update CF domains`. Автообновление ограничено одной попыткой в 24 часа и не блокирует запуск proxy. Пустой, битый или невалидный downloaded list не заменяет прежний cache.
+
+`Fake TLS` и GitHub pinned TLS fallback намеренно не входят в `v1.4.0`.
 
 ## Android UI
 

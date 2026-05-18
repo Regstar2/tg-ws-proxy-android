@@ -59,8 +59,20 @@ object ConnectionDiagnostics {
         ConnectionProbeReport(results)
     }
 
-    suspend fun probeCfProxy(cfDomain: String): ConnectionProbeReport = withContext(Dispatchers.IO) {
-        val domain = CfDomain.normalizeOrNull(cfDomain) ?: CfDomain.builtInDomains.first()
+    suspend fun probeCfProxy(
+        cfDomain: String,
+        cachedUpstreamDomains: List<String> = emptyList(),
+    ): ConnectionProbeReport {
+        return probeCfProxy(listOf(cfDomain), cachedUpstreamDomains)
+    }
+
+    suspend fun probeCfProxy(
+        manualDomainsRaw: List<String>,
+        cachedUpstreamDomains: List<String> = emptyList(),
+    ): ConnectionProbeReport = withContext(Dispatchers.IO) {
+        val domain = CfManualDomainList.normalize(manualDomainsRaw).firstOrNull()
+            ?: cachedUpstreamDomains.mapNotNull(CfDomain::normalizeOrNull).firstOrNull()
+            ?: CfDomain.builtInDomains.first()
         val results = testDcs.map { dc ->
             val host = "kws$dc.$domain"
             probeWss(host, host, "/apiws", "cf_proxy", dc)
@@ -68,14 +80,31 @@ object ConnectionDiagnostics {
         ConnectionProbeReport(results)
     }
 
-    suspend fun probeCfPool(manualDomainRaw: String): CfDomainProbeReport = withContext(Dispatchers.IO) {
+    suspend fun probeCfPool(
+        manualDomainRaw: String,
+        cachedUpstreamDomains: List<String> = emptyList(),
+    ): CfDomainProbeReport {
+        return probeCfPool(listOf(manualDomainRaw), cachedUpstreamDomains)
+    }
+
+    suspend fun probeCfPool(
+        manualDomainsRaw: List<String>,
+        cachedUpstreamDomains: List<String> = emptyList(),
+    ): CfDomainProbeReport = withContext(Dispatchers.IO) {
         val checkedAt = System.currentTimeMillis()
-        val manual = CfDomain.normalizeOrNull(manualDomainRaw)
+        val manual = CfManualDomainList.normalize(manualDomainsRaw)
         val domainsToCheck = buildList {
-            if (manual != null) add(manual to CfDomainSource.MANUAL)
+            manual
+                .take(2)
+                .forEach { add(it to CfDomainSource.MANUAL) }
+            cachedUpstreamDomains
+                .mapNotNull(CfDomain::normalizeOrNull)
+                .filterNot { it in manual }
+                .take(2)
+                .forEach { add(it to CfDomainSource.CACHED_UPSTREAM) }
             CfDomain.builtInDomains
-                .filterNot { it == manual }
-                .take(3)
+                .filterNot { it in manual || it in cachedUpstreamDomains }
+                .take(2)
                 .forEach { add(it to CfDomainSource.BUILT_IN) }
         }
         val results = domainsToCheck.map { (domain, source) ->
@@ -84,11 +113,11 @@ object ConnectionDiagnostics {
                 CfDomainDiagnosticsState.markProbe(domain, source, it, checkedAt)
             }
         }
-        val rows = CfDomainDiagnosticsState.snapshot(manualDomainRaw)
+        val rows = CfDomainDiagnosticsState.snapshot(manualDomainsRaw, cachedUpstreamDomains)
         CfDomainProbeReport(
             routeReport = ConnectionProbeReport(results),
             domains = rows,
-            summary = CfDomainDiagnosticsState.buildSummary(manualDomainRaw),
+            summary = CfDomainDiagnosticsState.buildSummary(manualDomainsRaw, cachedUpstreamDomains),
             checkedAtMs = checkedAt,
         )
     }
@@ -114,11 +143,20 @@ object ConnectionDiagnostics {
     suspend fun probeAll(
         workerDomain: String,
         cfDomain: String,
+        cachedUpstreamDomains: List<String> = emptyList(),
+    ): ConnectionProbeReport {
+        return probeAll(workerDomain, listOf(cfDomain), cachedUpstreamDomains)
+    }
+
+    suspend fun probeAll(
+        workerDomain: String,
+        manualDomainsRaw: List<String>,
+        cachedUpstreamDomains: List<String> = emptyList(),
     ): ConnectionProbeReport = withContext(Dispatchers.IO) {
         val merged = buildList {
             addAll(probeDirectWs().results)
             addAll(probeWorker(workerDomain).results)
-            addAll(probeCfProxy(cfDomain).results)
+            addAll(probeCfProxy(manualDomainsRaw, cachedUpstreamDomains).results)
             addAll(probeTcpFallback().results)
         }
         ConnectionProbeReport(merged)

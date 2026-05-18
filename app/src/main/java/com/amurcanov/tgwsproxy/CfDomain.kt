@@ -5,8 +5,8 @@ import kotlin.math.max
 
 enum class CfDomainSource {
     MANUAL,
-    BUILT_IN,
     CACHED_UPSTREAM,
+    BUILT_IN,
 }
 
 enum class CfDomainStatus {
@@ -40,6 +40,9 @@ data class CfDomainHealth(
 
 data class CfDomainProbeSummary(
     val manualResult: CfDomainHealth?,
+    val availableCachedUpstream: Int,
+    val failedCachedUpstream: Int,
+    val uncheckedCachedUpstream: Int,
     val availableBuiltIn: Int,
     val failedBuiltIn: Int,
     val uncheckedBuiltIn: Int,
@@ -88,8 +91,12 @@ object CfDomain {
                 }.getOrNull()
             }
             "://" in lower -> null
-            trimmed.any { it == ' ' || it == '/' || it == '?' || it == '#' || it == ':' } -> null
-            else -> trimmed.lowercase()
+            trimmed.any { it == ' ' || it == '?' || it == '#' || it == ':' } -> null
+            else -> {
+                val withoutTrailingSlash = trimmed.trimEnd('/')
+                if ('/' in withoutTrailingSlash) return null
+                withoutTrailingSlash.lowercase()
+            }
         } ?: return null
 
         return host.takeIf(::isValidHostname)
@@ -120,12 +127,57 @@ object CfDomain {
 
     private fun isValidHostname(host: String): Boolean {
         if (host.length !in 1..253 || "." !in host || ".." in host) return false
+        if (host == "localhost" || isIpLiteral(host)) return false
         return host.split('.').all { label ->
             label.length in 1..63 &&
                 label.first() != '-' &&
                 label.last() != '-' &&
                 label.all { it.isLowerCase() || it.isDigit() || it == '-' }
         }
+    }
+
+    private fun isIpLiteral(host: String): Boolean {
+        if (':' in host) return true
+        val parts = host.split('.')
+        return parts.size == 4 && parts.all { part ->
+            part.isNotEmpty() &&
+                part.all(Char::isDigit) &&
+                part.toIntOrNull()?.let { it in 0..255 } == true
+        }
+    }
+}
+
+data class CfManualDomainListParseResult(
+    val domains: List<String>,
+    val invalidEntries: List<String>,
+)
+
+object CfManualDomainList {
+    fun parse(raw: String): CfManualDomainListParseResult {
+        val domains = mutableListOf<String>()
+        val seen = linkedSetOf<String>()
+        val invalid = mutableListOf<String>()
+
+        raw.lineSequence().forEach { rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) {
+                return@forEach
+            }
+            val normalized = CfDomain.normalizeOrNull(line)
+            if (normalized == null) {
+                invalid += line
+            } else if (seen.add(normalized)) {
+                domains += normalized
+            }
+        }
+
+        return CfManualDomainListParseResult(domains = domains, invalidEntries = invalid)
+    }
+
+    fun normalize(domains: List<String>): List<String> {
+        return domains
+            .mapNotNull(CfDomain::normalizeOrNull)
+            .distinct()
     }
 }
 
@@ -134,10 +186,15 @@ object CfDomainDiagnosticsState {
     var lastCheckAtMs: Long? = null
         private set
 
-    fun snapshot(manualDomainRaw: String): List<CfDomainHealth> {
-        ensureKnownDomains(manualDomainRaw)
+    fun snapshot(manualDomainRaw: String, cachedUpstreamDomains: List<String> = emptyList()): List<CfDomainHealth> {
+        return snapshot(listOf(manualDomainRaw), cachedUpstreamDomains)
+    }
+
+    fun snapshot(manualDomainsRaw: List<String>, cachedUpstreamDomains: List<String> = emptyList()): List<CfDomainHealth> {
+        ensureKnownDomains(manualDomainsRaw, cachedUpstreamDomains)
         val activeDomains = buildList {
-            CfDomain.normalizeOrNull(manualDomainRaw)?.let(::add)
+            addAll(CfManualDomainList.normalize(manualDomainsRaw))
+            addAll(cachedUpstreamDomains.mapNotNull(CfDomain::normalizeOrNull))
             addAll(CfDomain.builtInDomains)
         }.distinct()
         return activeDomains
@@ -182,13 +239,23 @@ object CfDomainDiagnosticsState {
         }
     }
 
-    fun buildSummary(manualDomainRaw: String): CfDomainProbeSummary {
-        val rows = snapshot(manualDomainRaw)
+    fun buildSummary(manualDomainRaw: String, cachedUpstreamDomains: List<String> = emptyList()): CfDomainProbeSummary {
+        return buildSummary(listOf(manualDomainRaw), cachedUpstreamDomains)
+    }
+
+    fun buildSummary(manualDomainsRaw: List<String>, cachedUpstreamDomains: List<String> = emptyList()): CfDomainProbeSummary {
+        val rows = snapshot(manualDomainsRaw, cachedUpstreamDomains)
         val now = System.currentTimeMillis()
         val manual = rows.firstOrNull { it.source == CfDomainSource.MANUAL }
+        val cached = rows.filter { it.source == CfDomainSource.CACHED_UPSTREAM }
         val builtIns = rows.filter { it.source == CfDomainSource.BUILT_IN }
         return CfDomainProbeSummary(
             manualResult = manual,
+            availableCachedUpstream = cached.count { it.status(now) == CfDomainStatus.OK },
+            failedCachedUpstream = cached.count {
+                it.status(now) == CfDomainStatus.FAILED || it.status(now) == CfDomainStatus.COOLDOWN
+            },
+            uncheckedCachedUpstream = cached.count { it.status(now) == CfDomainStatus.UNCHECKED },
             availableBuiltIn = builtIns.count { it.status(now) == CfDomainStatus.OK },
             failedBuiltIn = builtIns.count { it.status(now) == CfDomainStatus.FAILED || it.status(now) == CfDomainStatus.COOLDOWN },
             uncheckedBuiltIn = builtIns.count { it.status(now) == CfDomainStatus.UNCHECKED },
@@ -198,15 +265,26 @@ object CfDomainDiagnosticsState {
         )
     }
 
-    private fun ensureKnownDomains(manualDomainRaw: String) {
-        val manual = CfDomain.normalizeOrNull(manualDomainRaw)
-        manual?.let { ensureKnownDomain(it, CfDomainSource.MANUAL) }
+    private fun ensureKnownDomains(manualDomainsRaw: List<String>, cachedUpstreamDomains: List<String>) {
+        val manual = CfManualDomainList.normalize(manualDomainsRaw).toSet()
+        val cached = cachedUpstreamDomains
+            .mapNotNull(CfDomain::normalizeOrNull)
+            .toSet()
+        manual.forEach { ensureKnownDomain(it, CfDomainSource.MANUAL) }
+        cached
+            .forEach { domain ->
+                ensureKnownDomain(domain, CfDomainSource.CACHED_UPSTREAM)
+            }
         CfDomain.builtInDomains.forEach { domain ->
             ensureKnownDomain(domain, CfDomainSource.BUILT_IN)
-            if (domain != manual) {
-                health[domain]?.takeIf { it.source == CfDomainSource.MANUAL }?.let {
-                    health[domain] = it.copy(source = CfDomainSource.BUILT_IN)
-                }
+        }
+        val builtIns = CfDomain.builtInDomains.toSet()
+        health.replaceAll { domain, current ->
+            when {
+                domain in manual -> current.copy(source = CfDomainSource.MANUAL)
+                domain in cached -> current.copy(source = CfDomainSource.CACHED_UPSTREAM)
+                domain in builtIns -> current.copy(source = CfDomainSource.BUILT_IN)
+                else -> current
             }
         }
     }
@@ -215,8 +293,8 @@ object CfDomainDiagnosticsState {
         val current = health[domain]
         if (current == null) {
             health[domain] = CfDomainHealth(domain = domain, source = source)
-        } else if (current.source != CfDomainSource.MANUAL && source == CfDomainSource.MANUAL) {
-            health[domain] = current.copy(source = CfDomainSource.MANUAL)
+        } else if (source.ordinal < current.source.ordinal) {
+            health[domain] = current.copy(source = source)
         }
     }
 

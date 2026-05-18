@@ -44,13 +44,15 @@ type CFDomainSelection struct {
 }
 
 type CFDomainPool struct {
-	mu          sync.Mutex
-	manual      string
-	builtin     []string
-	health      map[string]*CFDomainHealth
-	dcPreferred map[int]string
-	roundRobin  int
-	now         func() float64
+	mu             sync.Mutex
+	manual         []string
+	cachedUpstream []string
+	builtin        []string
+	health         map[string]*CFDomainHealth
+	dcPreferred    map[int]string
+	cachedCursor   int
+	builtinCursor  int
+	now            func() float64
 }
 
 func NewCFDomainPool(now func() float64) *CFDomainPool {
@@ -73,29 +75,39 @@ func (p *CFDomainPool) SetBuiltinDomains(domains []string) {
 	for _, domain := range normalized {
 		p.ensureHealthLocked(domain, CFDomainSourceBuiltIn)
 	}
+	p.reclassifyRemovedDomainsLocked()
+	p.mu.Unlock()
+}
+
+func (p *CFDomainPool) SetCachedUpstreamDomains(domains []string) {
+	normalized := NormalizeCFDomains(domains)
+	p.mu.Lock()
+	p.cachedUpstream = normalized
+	for _, domain := range normalized {
+		p.ensureHealthLocked(domain, CFDomainSourceCachedUpstream)
+	}
+	p.reclassifyRemovedDomainsLocked()
 	p.mu.Unlock()
 }
 
 func (p *CFDomainPool) SetManualDomain(domain string) bool {
-	normalized, ok := NormalizeCFDomain(domain)
-	if !ok {
-		return false
-	}
+	return len(p.SetManualDomains([]string{domain})) > 0
+}
+
+func (p *CFDomainPool) SetManualDomains(domains []string) []string {
+	normalized := NormalizeCFDomains(domains)
 	p.mu.Lock()
-	oldManual := p.manual
 	p.manual = normalized
-	p.dropOrReclassifyManualLocked(oldManual)
-	p.ensureHealthLocked(normalized, CFDomainSourceManual)
+	for _, domain := range normalized {
+		p.ensureHealthLocked(domain, CFDomainSourceManual)
+	}
+	p.reclassifyRemovedDomainsLocked()
 	p.mu.Unlock()
-	return true
+	return normalized
 }
 
 func (p *CFDomainPool) ClearManualDomain() {
-	p.mu.Lock()
-	oldManual := p.manual
-	p.manual = ""
-	p.dropOrReclassifyManualLocked(oldManual)
-	p.mu.Unlock()
+	p.SetManualDomains(nil)
 }
 
 func (p *CFDomainPool) MarkFailure(domain string, kind CFFailureKind, latencyMs int64) CFDomainHealth {
@@ -192,11 +204,22 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		})
 	}
 
-	addCandidate(p.manual, CFDomainSourceManual)
+	for _, domain := range p.manual {
+		addCandidate(domain, CFDomainSourceManual)
+	}
 
+	cached := p.rotatedCachedUpstreamLocked()
 	builtins := p.rotatedBuiltinsLocked()
 	if preferred, ok := p.dcPreferred[dc]; ok {
-		builtins = append([]string{preferred}, builtins...)
+		switch p.sourceForLocked(preferred) {
+		case CFDomainSourceCachedUpstream:
+			cached = append([]string{preferred}, cached...)
+		case CFDomainSourceBuiltIn:
+			builtins = append([]string{preferred}, builtins...)
+		}
+	}
+	for _, domain := range cached {
+		addCandidate(domain, CFDomainSourceCachedUpstream)
 	}
 	for _, domain := range builtins {
 		addCandidate(domain, CFDomainSourceBuiltIn)
@@ -206,7 +229,7 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		left := selection.Candidates[i]
 		right := selection.Candidates[j]
 		if left.Source != right.Source {
-			return left.Source == CFDomainSourceManual
+			return sourcePriority(left.Source) < sourcePriority(right.Source)
 		}
 		return left.Score > right.Score
 	})
@@ -224,7 +247,7 @@ func (p *CFDomainPool) Snapshot() []CFDomainHealth {
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Source != out[j].Source {
-			return out[i].Source < out[j].Source
+			return sourcePriority(out[i].Source) < sourcePriority(out[j].Source)
 		}
 		return out[i].Domain < out[j].Domain
 	})
@@ -233,7 +256,7 @@ func (p *CFDomainPool) Snapshot() []CFDomainHealth {
 
 func (p *CFDomainPool) ensureHealthLocked(domain string, source CFDomainSource) *CFDomainHealth {
 	if health, ok := p.health[domain]; ok {
-		if health.Source != CFDomainSourceManual && source == CFDomainSourceManual {
+		if sourcePriority(source) < sourcePriority(health.Source) {
 			health.Source = source
 		}
 		return health
@@ -247,38 +270,50 @@ func (p *CFDomainPool) ensureHealthLocked(domain string, source CFDomainSource) 
 }
 
 func (p *CFDomainPool) sourceForLocked(domain string) CFDomainSource {
-	if domain == p.manual {
+	if containsDomain(p.manual, domain) {
 		return CFDomainSourceManual
 	}
+	if containsDomain(p.cachedUpstream, domain) {
+		return CFDomainSourceCachedUpstream
+	}
 	return CFDomainSourceBuiltIn
+}
+
+func (p *CFDomainPool) rotatedCachedUpstreamLocked() []string {
+	if len(p.cachedUpstream) == 0 {
+		return nil
+	}
+	start := p.cachedCursor % len(p.cachedUpstream)
+	p.cachedCursor = (p.cachedCursor + 1) % len(p.cachedUpstream)
+	out := append([]string(nil), p.cachedUpstream[start:]...)
+	out = append(out, p.cachedUpstream[:start]...)
+	return out
 }
 
 func (p *CFDomainPool) rotatedBuiltinsLocked() []string {
 	if len(p.builtin) == 0 {
 		return nil
 	}
-	start := p.roundRobin % len(p.builtin)
-	p.roundRobin = (p.roundRobin + 1) % len(p.builtin)
+	start := p.builtinCursor % len(p.builtin)
+	p.builtinCursor = (p.builtinCursor + 1) % len(p.builtin)
 	out := append([]string(nil), p.builtin[start:]...)
 	out = append(out, p.builtin[:start]...)
 	return out
 }
 
-func (p *CFDomainPool) dropOrReclassifyManualLocked(domain string) {
-	if domain == "" || domain == p.manual {
-		return
-	}
-	health, ok := p.health[domain]
-	if !ok {
-		return
-	}
-	for _, builtIn := range p.builtin {
-		if builtIn == domain {
+func (p *CFDomainPool) reclassifyRemovedDomainsLocked() {
+	for domain, health := range p.health {
+		switch {
+		case containsDomain(p.manual, domain):
+			health.Source = CFDomainSourceManual
+		case containsDomain(p.cachedUpstream, domain):
+			health.Source = CFDomainSourceCachedUpstream
+		case containsDomain(p.builtin, domain):
 			health.Source = CFDomainSourceBuiltIn
-			return
+		default:
+			delete(p.health, domain)
 		}
 	}
-	delete(p.health, domain)
 }
 
 func cooldownSeconds(kind CFFailureKind, consecutive int) float64 {
@@ -314,6 +349,26 @@ func scoreHealth(health CFDomainHealth) int {
 		score += 1000
 	}
 	return score
+}
+
+func sourcePriority(source CFDomainSource) int {
+	switch source {
+	case CFDomainSourceManual:
+		return 0
+	case CFDomainSourceCachedUpstream:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func containsDomain(domains []string, target string) bool {
+	for _, domain := range domains {
+		if domain == target {
+			return true
+		}
+	}
+	return false
 }
 
 func maxFloat(a, b float64) float64 {

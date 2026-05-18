@@ -39,10 +39,11 @@ type workerConfig struct {
 }
 
 type runtimeSettings struct {
-	Mode           connectionMode
-	CF             cfProxyConfig
-	Worker         workerConfig
-	CFManualDomain string // non-empty => user CF domain overrides pool
+	Mode             connectionMode
+	CF               cfProxyConfig
+	Worker           workerConfig
+	CFManualDomains  []string // user CF domains override cached and built-in pool entries
+	CFCachedUpstream []string // cached Flowseal upstream domains
 }
 
 var (
@@ -58,16 +59,12 @@ func init() {
 func setRuntimeSettings(cfg runtimeSettings) {
 	cfg.CF = normalizeCfProxyConfig(cfg.CF)
 	cfg.Worker.Domain = NormalizeWorkerDomain(cfg.Worker.Domain)
+	cfg.CFManualDomains = tgwsroute.NormalizeCFDomains(cfg.CFManualDomains)
 	runtimeCfgMu.Lock()
 	runtimeCfg = cfg
 	runtimeCfgMu.Unlock()
-	if cfg.CFManualDomain != "" {
-		if !cfPool.SetManualDomain(cfg.CFManualDomain) {
-			cfPool.ClearManualDomain()
-		}
-	} else {
-		cfPool.ClearManualDomain()
-	}
+	cfPool.SetManualDomains(cfg.CFManualDomains)
+	cfPool.SetCachedUpstreamDomains(cfg.CFCachedUpstream)
 }
 
 func getRuntimeSettings() runtimeSettings {
@@ -259,8 +256,8 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		baseDomain := candidate.Domain
 		host := cfProxyHost(wsDC, baseDomain)
 		url := fmt.Sprintf("wss://%s/apiws", host)
-		logInfo.Printf("[%s] DC%d%s CF domain selected domain=%s source=%s score=%d",
-			label, dc, mTag, baseDomain, candidate.Source, candidate.Score)
+		logInfo.Printf("[%s] DC%d%s CF domain selector source=%s domain=%s score=%d",
+			label, dc, mTag, candidate.Source, baseDomain, candidate.Score)
 		logDebug.Printf("[%s] DC%d%s -> CF proxy %s (pool domain=%s)", label, dc, mTag, url, baseDomain)
 
 		ok, reason, failureKind, latencyMs := cfProxyDialHost(ctx, client, init, label, dc, isMedia, splitter, host, baseDomain)
@@ -475,8 +472,11 @@ func logRuntimeRouteConfig() {
 			mode = "cf_first"
 		}
 		poolNote := "builtin pool"
-		if settings.CFManualDomain != "" {
-			poolNote = "manual domain=" + settings.CFManualDomain
+		switch {
+		case len(settings.CFManualDomains) > 0:
+			poolNote = fmt.Sprintf("manual_domains=%d", len(settings.CFManualDomains))
+		case len(settings.CFCachedUpstream) > 0:
+			poolNote = fmt.Sprintf("cached_upstream=%d builtin_fallback", len(settings.CFCachedUpstream))
 		}
 		logInfo.Printf("  CF proxy:     enabled %s legacy_mode=%s", poolNote, mode)
 	} else {

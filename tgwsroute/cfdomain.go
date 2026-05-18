@@ -1,6 +1,7 @@
 package tgwsroute
 
 import (
+	"net"
 	"net/url"
 	"sort"
 	"strings"
@@ -107,7 +108,11 @@ func NormalizeCFDomain(raw string) (string, bool) {
 	}
 
 	if strings.ContainsAny(s, " /?#:") {
-		return "", false
+		trimmed := strings.TrimRight(s, "/")
+		if trimmed == "" || strings.ContainsAny(trimmed, " /?#:") {
+			return "", false
+		}
+		s = trimmed
 	}
 
 	host := strings.ToLower(s)
@@ -141,6 +146,9 @@ func IsValidCFDomain(raw string) bool {
 
 func validHostname(host string) bool {
 	if len(host) == 0 || len(host) > 253 || strings.Contains(host, "..") || !strings.Contains(host, ".") {
+		return false
+	}
+	if host == "localhost" || net.ParseIP(host) != nil {
 		return false
 	}
 
