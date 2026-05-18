@@ -51,8 +51,9 @@ data class NotificationPreferences(
         fun openSystemNotificationSettings(context: Context) {
             val intent = Intent().apply {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                    action = Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
                     putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    putExtra(Settings.EXTRA_CHANNEL_ID, ProxyService.CHANNEL_STATUS_ID)
                 } else {
                     action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
                     data = Uri.fromParts("package", context.packageName, null)

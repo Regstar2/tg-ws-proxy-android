@@ -19,8 +19,17 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
 }
 
+val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
+    val script = rootProject.file("scripts/generate-icons.py")
+    inputs.file(script)
+    inputs.file(rootProject.file("icon.png"))
+    outputs.dir(project.file("src/main/res"))
+    workingDir = rootProject.projectDir
+    commandLine("python", script.absolutePath)
+}
+
 tasks.named("preBuild") {
-    dependsOn(buildNativeAndroid)
+    dependsOn(buildNativeAndroid, generateAppIcons)
 }
 
 android {
@@ -31,7 +40,7 @@ android {
         applicationId = "com.amurcanov.tgwsproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
+        versionCode = 20
         versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

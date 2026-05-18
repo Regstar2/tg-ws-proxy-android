@@ -37,11 +37,20 @@ class ProxyService : Service() {
         const val EXTRA_IPS = "EXTRA_IPS"
         const val EXTRA_POOL_SIZE = "EXTRA_POOL_SIZE"
 
-        const val NOTIFICATION_ID = 1
-        const val CHANNEL_STATUS_ID = "proxy_status"
-        const val CHANNEL_ALERTS_ID = "proxy_alerts"
+        const val NOTIFICATION_ID = 3
+        const val CHANNEL_STATUS_ID = "tgwsproxy_service_status_v3"
+        const val CHANNEL_ALERTS_ID = "tgwsproxy_alerts_v3"
+
+        private val LEGACY_CHANNEL_IDS = listOf(
+            "proxy_status",
+            "proxy_alerts",
+            "tgwsproxy_service_status_v2",
+            "tgwsproxy_alerts_v2",
+        )
+        private val LEGACY_NOTIFICATION_IDS = listOf(1, 2)
 
         private const val PREFS = "ProxyPrefs"
+        private const val KEY_NOTIFICATION_CHANNELS_MIGRATED = "notification_channels_v3_migrated"
         private const val KEY_LAST_PORT = "last_proxy_port"
         private const val KEY_LAST_IPS = "last_runtime_ips"
         private const val KEY_LAST_POOL = "last_proxy_pool"
@@ -381,6 +390,7 @@ class ProxyService : Service() {
             return
         }
         val manager = getSystemService(NotificationManager::class.java) ?: return
+        migrateLegacyNotificationChannels(manager)
         val status = NotificationChannel(
             CHANNEL_STATUS_ID,
             getString(R.string.notification_channel_status),
@@ -401,6 +411,21 @@ class ProxyService : Service() {
         }
         manager.createNotificationChannel(status)
         manager.createNotificationChannel(alerts)
+    }
+
+    private fun migrateLegacyNotificationChannels(manager: NotificationManager) {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_NOTIFICATION_CHANNELS_MIGRATED, false)) {
+            return
+        }
+        LEGACY_CHANNEL_IDS.forEach { manager.deleteNotificationChannel(it) }
+        LEGACY_NOTIFICATION_IDS.forEach { manager.cancel(it) }
+        manager.cancelAll()
+        prefs.edit().putBoolean(KEY_NOTIFICATION_CHANNELS_MIGRATED, true).apply()
+        Log.i(
+            "TgWsProxy",
+            "Migrated notification channels to $CHANNEL_STATUS_ID (removed legacy MIUI cache)",
+        )
     }
 
     private fun acquireWakeLock() {

@@ -19,6 +19,32 @@ When stopped:
 
 Tap the notification body to open the app (single-top, no duplicate stack).
 
+## Icons
+
+All icons are generated from project root `icon.png` via `scripts/generate-icons.py` (runs on `preBuild`).
+
+| Role | Resource (v2) | Notes |
+|------|----------------|--------|
+| Launcher | `@mipmap/ic_launcher_tgwsproxy_v2` | Adaptive only — no legacy `ic_launcher.png` |
+| Round launcher | `@mipmap/ic_launcher_tgwsproxy_round_v2` | Same foreground as launcher |
+| Notification small | `@drawable/ic_notification_small_v2` | Vector monochrome — status bar / MIUI badge |
+| Notification large | `@drawable/notification_app_icon_v2` | Full-color from `icon.png` via `BitmapFactory` |
+
+Channel: `tgwsproxy_service_status_v3`. Notification id: `3`.
+
+Do **not** use `PackageManager.getApplicationIcon()` for notification large icon.
+
+### MIUI cache
+
+If the old icon remains after updating:
+
+1. Uninstall the app completely.
+2. Reboot the device (recommended on MIUI).
+3. Install the new APK (`adb uninstall` then `adb install`, not only `-r` while testing).
+4. Start the proxy and confirm channel `tgwsproxy_service_status_v3` in system notification settings.
+
+Audit APK: `powershell -File scripts/audit-apk-icons.ps1`
+
 ## Metrics
 
 When enabled in Settings → Notifications:
@@ -37,8 +63,10 @@ When enabled in Settings → Notifications:
 
 ## Channels
 
-- `proxy_status` — low importance, no sound (ongoing status)
-- `proxy_alerts` — optional future important errors
+- `tgwsproxy_service_status_v2` — low importance, no sound (ongoing status)
+- `tgwsproxy_alerts_v2` — optional important errors
+
+Legacy channels `proxy_status` / `proxy_alerts` are deleted on first launch after update (MIUI caches notification artwork per channel id).
 
 ## Planned
 

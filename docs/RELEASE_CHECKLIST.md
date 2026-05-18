@@ -18,8 +18,16 @@
 ## Notification
 
 - [ ] Foreground notification visible while running
+- [ ] Application icon resource: `ic_launcher_tgwsproxy_v2` (manifest)
+- [ ] Round icon: `ic_launcher_tgwsproxy_round_v2`
+- [ ] Notification small: `ic_notification_small_v2` (vector)
+- [ ] Notification large: `notification_app_icon_v2` (not PackageManager)
+- [ ] Channel: `tgwsproxy_service_status_v3`
+- [ ] `scripts/audit-apk-icons.ps1` reports no legacy filenames in APK
+- [ ] `adb dumpsys package` shows expected `versionCode` after install
+- [ ] MIUI: uninstall + reinstall (+ reboot if icon still cached)
 - [ ] Tap notification opens app
-- [ ] Stop / Start / Reconnect actions work
+- [ ] Stop / Start / Reconnect / Open actions work
 - [ ] Speed and latency when metrics enabled
 - [ ] Minimal mode hides metrics
 - [ ] Open Android notification settings

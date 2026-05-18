@@ -3,7 +3,6 @@ package com.amurcanov.tgwsproxy
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import androidx.core.app.NotificationCompat
 
 object ProxyNotificationBuilder {
@@ -19,12 +18,16 @@ object ProxyNotificationBuilder {
         val builder = NotificationCompat.Builder(context, ProxyService.CHANNEL_STATUS_ID)
             .setContentTitle(title)
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_notification)
+            .setSmallIcon(NotificationIconHelper.smallIconRes)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        NotificationIconHelper.largeIcon(context)?.let { builder.setLargeIcon(it) }
 
         if (!expandedText.isNullOrBlank() && prefs.displayMode == NotificationDisplayMode.NORMAL) {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(expandedText))
