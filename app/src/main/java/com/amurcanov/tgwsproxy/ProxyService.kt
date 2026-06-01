@@ -33,6 +33,7 @@ class ProxyService : Service() {
         const val ACTION_START = "com.amurcanov.tgwsproxy.START"
         const val ACTION_STOP = "com.amurcanov.tgwsproxy.STOP"
         const val ACTION_RECONNECT = "com.amurcanov.tgwsproxy.RECONNECT"
+        const val ACTION_RECONFIGURE = "com.amurcanov.tgwsproxy.RECONFIGURE"
         const val EXTRA_PORT = "EXTRA_PORT"
         const val EXTRA_IPS = "EXTRA_IPS"
         const val EXTRA_POOL_SIZE = "EXTRA_POOL_SIZE"
@@ -91,6 +92,17 @@ class ProxyService : Service() {
                 logAction("reconnect")
                 reconnectProxy()
             }
+            ACTION_RECONFIGURE -> {
+                loadLastConfig()
+                logAction("reconfigure")
+                val port = intent.getIntExtra(EXTRA_PORT, lastPort)
+                val ips = intent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
+                val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
+                if (ips.isBlank()) {
+                    return START_STICKY
+                }
+                reconfigureProxy(port, ips, poolSize)
+            }
         }
         return START_STICKY
     }
@@ -114,7 +126,7 @@ class ProxyService : Service() {
     }
 
     private fun startProxy(port: Int, ips: String, poolSize: Int) {
-        if (_isRunning.value && ips == lastIps && port == lastPort) {
+        if (_isRunning.value && ips == lastIps && port == lastPort && poolSize == lastPoolSize) {
             updateNotification()
             return
         }
@@ -172,6 +184,36 @@ class ProxyService : Service() {
                 it.copy(serviceStatus = ProxyServiceStatus.RUNNING)
             }
             updateNotification()
+        }
+    }
+
+    private fun reconfigureProxy(port: Int, ips: String, poolSize: Int) {
+        if (!_isRunning.value) {
+            saveLastConfig(port, ips, poolSize)
+            startProxy(port, ips, poolSize)
+            return
+        }
+        if (port == lastPort && ips == lastIps && poolSize == lastPoolSize) {
+            updateNotification()
+            return
+        }
+        ProxyRuntimeState.update {
+            it.copy(serviceStatus = ProxyServiceStatus.RECONNECTING)
+        }
+        updateNotification()
+        serviceScope.launch(Dispatchers.IO) {
+            stopNativeOnly()
+            delay(400)
+            saveLastConfig(port, ips, poolSize)
+            NativeProxy.setPoolSize(poolSize)
+            NativeProxy.startProxy("127.0.0.1", port, ips, 1)
+            speedSampler.reset()
+            ProxyRuntimeState.update {
+                it.copy(serviceStatus = ProxyServiceStatus.RUNNING)
+            }
+            launch(Dispatchers.Main) {
+                updateNotification()
+            }
         }
     }
 
@@ -268,8 +310,8 @@ class ProxyService : Service() {
             ProxyServiceStatus.ERROR -> getString(R.string.notification_status_error)
             ProxyServiceStatus.RUNNING -> getString(
                 R.string.notification_status_connected,
-                ui.runtime.modeLabel(),
-                ui.runtime.routeLabel().ifBlank { "—" },
+                ui.runtime.modeLabel(this),
+                ui.runtime.routeLabel(this).ifBlank { "—" },
             )
         }
         if (!prefs.showMetricsInNotification || prefs.displayMode == NotificationDisplayMode.MINIMAL) {
@@ -306,8 +348,8 @@ class ProxyService : Service() {
             return null
         }
         val lines = mutableListOf<String>()
-        lines += getString(R.string.notification_line_mode, ui.runtime.modeLabel())
-        lines += getString(R.string.notification_line_route, ui.runtime.routeLabel())
+        lines += getString(R.string.notification_line_mode, ui.runtime.modeLabel(this))
+        lines += getString(R.string.notification_line_route, ui.runtime.routeLabel(this))
         val speed = ConnectionMetricsFormatter.formatSpeedPair(
             ui.downloadBps,
             ui.uploadBps,

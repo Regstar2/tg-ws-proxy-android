@@ -2,7 +2,7 @@
 
 Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Текущая версия умеет выбирать между Direct, Cloudflare Worker и Cloudflare Proxy маршрутами и рассчитана на сети, где прямые Telegram endpoint-ы недоступны или нестабильны.
 
-Текущая версия рабочей ветки: `1.6.0` (production polish: notifications, metrics, onboarding).
+Текущая версия рабочей ветки: `1.7.4` (Worker pool, pool metrics, Worker setup refresh).
 
 Репозиторий: https://github.com/Regstar2/TgWsProxy_Android
 
@@ -27,6 +27,12 @@ Android-форк распространяется под GPLv3. Оригинал
 - Jetpack Compose UI с системной, светлой и тёмной темой.
 - Выбор языка интерфейса: системный, русский, английский.
 - Настройки Worker domain, CF-domain pool и режимов маршрутизации.
+- Separate Wi-Fi and Mobile route policy settings.
+- Automatic runtime reconfigure when switching between Wi-Fi and Mobile networks.
+- Effective route policy diagnostics and export.
+- Active route diagnostics for the effective Wi-Fi/Mobile policy.
+- Worker route pool and pool metrics.
+- Updated Cloudflare Worker setup guide.
 - Runtime-логи в приложении и экспорт логов в выбранную папку.
 - Диагностическое логирование стадий `DNS -> TCP -> TLS -> WS`.
 
@@ -168,9 +174,17 @@ $env:KEY_ALIAS="tgwsproxy"
 
 ## Документация
 
+- [RELEASE_NOTES_v1.7.4.md](RELEASE_NOTES_v1.7.4.md) - notes for Worker pool, pool metrics, and Worker setup refresh.
+- [RELEASE_NOTES_v1.7.3.md](RELEASE_NOTES_v1.7.3.md) - notes for active route connection diagnostics.
+- [RELEASE_NOTES_v1.7.2.md](RELEASE_NOTES_v1.7.2.md) - notes for effective route policy diagnostics and export.
+- [RELEASE_NOTES_v1.7.1.md](RELEASE_NOTES_v1.7.1.md) - notes for automatic reconfigure on network switch.
+- [RELEASE_NOTES_v1.7.0.md](RELEASE_NOTES_v1.7.0.md) - notes for Wi-Fi/Mobile route policy UI.
+- [RELEASE_NOTES_v1.6.2.md](RELEASE_NOTES_v1.6.2.md) - notes for route policy resolver and runtime token foundation.
+- [RELEASE_NOTES_v1.6.1.md](RELEASE_NOTES_v1.6.1.md) - release notes for v1.6.1.
 - [RELEASE_NOTES_v1.6.0.md](RELEASE_NOTES_v1.6.0.md) - заметки к текущему релизу.
 - [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
 - [docs/CF_DOMAIN_POOL.md](docs/CF_DOMAIN_POOL.md) - источники CF-доменов, cache policy и fallback order.
+- [docs/cloudflare-worker.md](docs/cloudflare-worker.md) - Cloudflare Worker route setup, current Worker code, and Worker pool metrics.
 - [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) - foreground notification, метрики и действия.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) - чеклист перед релизом.
 

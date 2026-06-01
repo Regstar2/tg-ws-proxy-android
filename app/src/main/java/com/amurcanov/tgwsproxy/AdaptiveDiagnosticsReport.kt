@@ -47,6 +47,7 @@ object AdaptiveDiagnosticsReport {
         builtInCount: Int,
         stats: List<RouteStatSnapshot>,
         maskDomains: Boolean,
+        effectiveRoutePolicyMarkdown: String? = null,
     ): String {
         val workerLine = if (workerDomain.isBlank()) {
             "no"
@@ -92,6 +93,10 @@ object AdaptiveDiagnosticsReport {
             appendLine("Notes:")
             appendLine("- Route statistics are stored locally on device.")
             appendLine("- Network profile is a hash; raw SSID is not stored.")
+            if (!effectiveRoutePolicyMarkdown.isNullOrBlank()) {
+                appendLine()
+                appendLine(effectiveRoutePolicyMarkdown.trim())
+            }
         }
     }
 
@@ -106,9 +111,10 @@ object AdaptiveDiagnosticsReport {
         builtInCount: Int,
         stats: List<RouteStatSnapshot>,
         maskDomains: Boolean,
+        effectiveRoutePolicyMarkdown: String? = null,
     ): String = buildString {
         appendLine("--- Adaptive Routing Diagnostics ---")
-        appendLine(buildMarkdown(context, versionName, connectionMode, strategy, profile, workerDomain, emptyList(), cachedUpstreamCount, builtInCount, stats, maskDomains))
+        appendLine(buildMarkdown(context, versionName, connectionMode, strategy, profile, workerDomain, emptyList(), cachedUpstreamCount, builtInCount, stats, maskDomains, effectiveRoutePolicyMarkdown))
     }
 
     private fun strategyLabel(context: Context, strategy: AutoStrategy): String {

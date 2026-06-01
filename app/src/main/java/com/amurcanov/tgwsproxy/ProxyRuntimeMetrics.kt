@@ -10,11 +10,19 @@ data class ProxyRuntimeMetrics(
     val bytesDown: Long = 0,
     val lastLatencyMs: Long = 0,
     val lastError: String = "",
+    val workerPoolHits: Int = 0,
+    val workerPoolMisses: Int = 0,
+    val workerPoolIdle: Int = 0,
+    val workerPoolErrors: Int = 0,
+    val cfPoolHits: Int = 0,
+    val cfPoolMisses: Int = 0,
+    val cfPoolIdle: Int = 0,
+    val cfPoolErrors: Int = 0,
     val updatedAtMs: Long = System.currentTimeMillis(),
 ) {
-    fun routeLabel(): String = routeDisplayLabel(route)
+    fun routeLabel(context: android.content.Context): String = RouteDisplayNames.routeLabel(context, route)
 
-    fun modeLabel(): String = modeDisplayLabel(mode)
+    fun modeLabel(context: android.content.Context): String = RouteDisplayNames.modeLabel(context, mode)
 
     companion object {
         fun parseStatus(raw: String?): ProxyRuntimeMetrics? {
@@ -37,32 +45,33 @@ data class ProxyRuntimeMetrics(
                 bytesDown = map["bytes_down"]?.toLongOrNull() ?: 0,
                 lastLatencyMs = map["latency_ms"]?.toLongOrNull() ?: 0,
                 lastError = map["last_error"].orEmpty(),
+                workerPoolHits = map.safeInt("worker_pool_hits"),
+                workerPoolMisses = map.safeInt("worker_pool_misses"),
+                workerPoolIdle = map.safeInt("worker_pool_idle"),
+                workerPoolErrors = map.safeInt("worker_pool_refill_errors", "worker_pool_err"),
+                cfPoolHits = map.safeInt("cf_pool_hits"),
+                cfPoolMisses = map.safeInt("cf_pool_misses"),
+                cfPoolIdle = map.safeInt("cf_pool_idle"),
+                cfPoolErrors = map.safeInt("cf_pool_refill_errors", "cf_pool_err"),
             )
         }
 
-        fun routeDisplayLabel(route: String): String {
-            return when (route) {
-                "direct_ws", "direct" -> "Direct"
-                "cf_worker_ws", "worker" -> "Worker"
-                "cf_proxy_ws", "cf" -> "CF proxy"
-                "tcp_fallback", "tcp" -> "TCP fallback"
-                else -> route.ifBlank { "—" }
-            }
-        }
+        /** @deprecated Use [RouteDisplayNames.routeLabelRes] in UI code. */
+        fun routeDisplayLabel(route: String): String = route
 
-        fun modeDisplayLabel(mode: String): String {
-            return when (mode) {
-                "auto" -> "Auto"
-                "direct_with_fallback" -> "Direct + fallback"
-                "worker_first" -> "Worker first"
-                "cf_first" -> "CF first"
-                "worker_only" -> "Worker only"
-                "cf_only" -> "CF only"
-                "direct_only" -> "Direct only"
-                else -> mode.ifBlank { "—" }
-            }
+        /** @deprecated Use [RouteDisplayNames.modeLabelRes] in UI code. */
+        fun modeDisplayLabel(mode: String): String = mode
+    }
+}
+
+private fun Map<String, String>.safeInt(vararg keys: String): Int {
+    for (key in keys) {
+        val parsed = this[key]?.toIntOrNull()
+        if (parsed != null) {
+            return parsed
         }
     }
+    return 0
 }
 
 class SpeedSampler(private val windowMs: Long = 4000) {

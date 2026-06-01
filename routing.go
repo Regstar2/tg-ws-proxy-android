@@ -39,16 +39,28 @@ type workerConfig struct {
 }
 
 type runtimeSettings struct {
-	Mode             connectionMode
-	CF               cfProxyConfig
-	Worker           workerConfig
-	CFManualDomains  []string // user CF domains override cached and built-in pool entries
-	CFCachedUpstream []string // cached Flowseal upstream domains
+	Mode                connectionMode
+	CF                  cfProxyConfig
+	Worker              workerConfig
+	CFManualDomains     []string // user CF domains override cached and built-in pool entries
+	CFCachedUpstream    []string // cached Flowseal upstream domains
 	NetworkProfileID    string
 	NetworkProfileType  string
 	NetworkProfileLabel string
 	AdaptiveRouteStats  string
 	AutoStrategy        string
+}
+
+func (s runtimeSettings) workerRouteAvailable() bool {
+	if !s.Worker.Enabled || s.Worker.Domain == "" {
+		return false
+	}
+	for _, route := range routesForMode(s.Mode, s, false) {
+		if route == routeCFWorkerWS {
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -202,19 +214,25 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 	prefix := fmt.Sprintf("[%s] DC%d%s cfworker", label, dc, mTag)
 	var ws *RawWebSocket
 	var lastErr error
+	poolKey := WorkerPoolKey{DC: dc, WorkerDomain: domain, Dst: dstIP, Media: isMedia}
 
-	logDebug.Printf("[%s] DC%d%s cfworker hostname dial start host=%s", label, dc, mTag, domain)
-	ws, lastErr = wsConnect(domain, domain, path, 10)
-	if lastErr != nil {
-		logDomainConnectFailure(prefix, domain, domain, lastErr)
-		resolved, err := resolvePreferredIPs(domain, 10)
-		if err == nil {
-			for _, ip := range resolved.Preferred() {
-				ws, lastErr = wsConnect(ip, domain, path, 10)
-				if lastErr == nil {
-					break
+	ws = workerPool.Get(poolKey)
+	if ws != nil {
+		logDebug.Printf("[%s] DC%d%s Worker pool hit", label, dc, mTag)
+	} else {
+		logDebug.Printf("[%s] DC%d%s cfworker hostname dial start host=%s", label, dc, mTag, domain)
+		ws, lastErr = wsConnect(domain, domain, path, 10)
+		if lastErr != nil {
+			logDomainConnectFailure(prefix, domain, domain, lastErr)
+			resolved, err := resolvePreferredIPs(domain, 10)
+			if err == nil {
+				for _, ip := range resolved.Preferred() {
+					ws, lastErr = wsConnect(ip, domain, path, 10)
+					if lastErr == nil {
+						break
+					}
+					logDomainConnectFailure(prefix, domain, ip, lastErr)
 				}
-				logDomainConnectFailure(prefix, domain, ip, lastErr)
 			}
 		}
 	}
@@ -260,9 +278,11 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 			label, dc, mTag, skipped.Domain, formatCooldownUntil(skipped.CooldownUntil))
 	}
 	if len(selection.Candidates) == 0 {
+		stats.cfPoolMisses.Add(1)
 		logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
 		return false, "cfproxy_unavailable"
 	}
+	stats.cfPoolHits.Add(1)
 
 	for _, candidate := range selection.Candidates {
 		baseDomain := candidate.Domain
@@ -289,6 +309,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 	}
 
 	logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
+	stats.cfPoolRefillErrors.Add(1)
 	return false, "cfproxy_all_domains_failed"
 }
 

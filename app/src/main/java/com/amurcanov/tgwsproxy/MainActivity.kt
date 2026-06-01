@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.LocaleList
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import android.util.Log
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.res.Configuration
@@ -90,6 +91,8 @@ private enum class ProxyScreenPage {
     Main,
     Settings,
 }
+
+private const val MIN_RECONFIGURE_INTERVAL_MS = 3000L
 
 private enum class ThemeMode {
     System,
@@ -247,6 +250,9 @@ private fun ProxyScreen(
     val adaptiveRouteStatsRepository = remember {
         AdaptiveRouteStatsRepository(prefs)
     }
+    val routePolicyRepository = remember {
+        NetworkRoutePolicyRepository(prefs)
+    }
     val cfDomainListUpdater = remember {
         CfDomainListUpdater(
             repository = cfDomainListRepository,
@@ -285,6 +291,18 @@ private fun ProxyScreen(
                 )
         )
     }
+    var wifiRoutePolicy by remember {
+        mutableStateOf(routePolicyRepository.load(NetworkProfileType.WIFI))
+    }
+    var mobileRoutePolicy by remember {
+        mutableStateOf(routePolicyRepository.load(NetworkProfileType.MOBILE))
+    }
+    var hasSavedWifiRoutePolicy by remember {
+        mutableStateOf(routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI))
+    }
+    var hasSavedMobileRoutePolicy by remember {
+        mutableStateOf(routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE))
+    }
     var workerEnabled by remember { mutableStateOf(prefs.getBoolean("worker_enabled", false)) }
     var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
     var diagStatusText by remember { mutableStateOf(prefs.getString("diag_last_status", "") ?: "") }
@@ -300,7 +318,8 @@ private fun ProxyScreen(
     }
     var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
     var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
-    var adaptiveRoutingExpanded by rememberSaveable { mutableStateOf(false) }
+    var adaptiveDetailsExpanded by rememberSaveable { mutableStateOf(false) }
+    var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.CONNECTION) }
     var autoStrategy by remember {
         mutableStateOf(AutoStrategy.fromPref(prefs.getString("auto_strategy", null)))
     }
@@ -325,9 +344,62 @@ private fun ProxyScreen(
     val logs by LogManager.logs.collectAsStateWithLifecycle()
     val screenScroll = rememberScrollState()
     val hasOpenModal = showInfoModal || showTipsModal || showIpSetupModal || showExitConfirm || showOnboarding || showRuntimeLogsDialog
+    val currentNetworkProfile = NetworkProfileProvider.current(context)
+    var routePolicySnapshot by remember {
+        mutableStateOf(
+            RoutePolicyDiagnostics.buildSnapshot(
+                context = context,
+                prefs = prefs,
+                repository = routePolicyRepository,
+            ),
+        )
+    }
+    var reconfigureStatus by remember {
+        mutableStateOf(ReconfigureStatusStore.load(prefs))
+    }
+    var routeProbeReport by remember { mutableStateOf<EffectiveRouteProbeReport?>(null) }
+    var isRouteProbeRunning by remember { mutableStateOf(false) }
+    var lastRuntimeConfigKey by remember { mutableStateOf("") }
+    var lastReconfigureAtMs by remember { mutableStateOf(0L) }
+    var pendingReconfigureJob by remember { mutableStateOf<Job?>(null) }
+
+    fun refreshRoutePolicySnapshot() {
+        routePolicySnapshot = RoutePolicyDiagnostics.buildSnapshot(
+            context = context,
+            prefs = prefs,
+            repository = routePolicyRepository,
+        )
+    }
+
+    fun saveReconfigureStatus(status: ReconfigureStatus) {
+        ReconfigureStatusStore.save(prefs, status)
+        reconfigureStatus = status
+    }
+
+    fun currentDcEntries(): List<String> = buildList {
+        if (dc1Text.isNotBlank()) add("1:${dc1Text.trim()}")
+        if (dc2Text.isNotBlank()) add("2:${dc2Text.trim()}")
+        if (dc4Text.isNotBlank()) add("4:${dc4Text.trim()}")
+        if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
+    }
+
+    fun runtimeConfigFactory(): ProxyRuntimeConfigFactory {
+        return ProxyRuntimeConfigFactory(
+            prefs = prefs,
+            routePolicyRepository = routePolicyRepository,
+            adaptiveRouteStatsRepository = adaptiveRouteStatsRepository,
+            cfUpstreamDomainsProvider = { cfUpstreamState.domains },
+            manualCfDomainsProvider = { manualCfDomains },
+            workerDomainProvider = { workerDomainText },
+            dcEntriesProvider = { currentDcEntries() },
+            poolSizeProvider = { selectedPoolSize },
+            portProvider = { portText.toIntOrNull() },
+        )
+    }
 
     BackHandler(enabled = currentPage == ProxyScreenPage.Settings && !hasOpenModal) {
         currentPage = ProxyScreenPage.Main
+        coroutineScope.launch { screenScroll.scrollTo(0) }
     }
 
     BackHandler(enabled = currentPage == ProxyScreenPage.Main && !hasOpenModal) {
@@ -340,6 +412,21 @@ private fun ProxyScreen(
         val snapshot = logs
         coroutineScope.launch {
             val profile = NetworkProfileProvider.current(context)
+            val policySnapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository)
+            val effectivePolicyMarkdown = RoutePolicyDiagnostics.formatMarkdown(
+                context = context,
+                snapshot = policySnapshot,
+                maskSensitive = !includeDomainsInLogExport,
+            )
+            val routeProbeMarkdown = routeProbeReport?.let {
+                RouteLevelDiagnosticsFormatter.formatMarkdown(
+                    context,
+                    it,
+                    maskSensitive = true,
+                    poolMetrics = uiMetrics.runtime,
+                )
+            }
+            val poolMetricsMarkdown = PoolMetricsFormatter.formatMarkdown(uiMetrics.runtime)
             val adaptiveSection = if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
                 AdaptiveDiagnosticsReport.buildAdaptiveLogSection(
                     context = context,
@@ -352,6 +439,7 @@ private fun ProxyScreen(
                     builtInCount = CfDomain.builtInDomains.size,
                     stats = adaptiveRouteStatsRepository.snapshotForDisplay(profile.id),
                     maskDomains = !includeDomainsInLogExport,
+                    effectiveRoutePolicyMarkdown = effectivePolicyMarkdown,
                 )
             } else {
                 null
@@ -362,6 +450,9 @@ private fun ProxyScreen(
                 logs = snapshot,
                 proxyRunning = isRunning,
                 adaptiveDiagnosticsSection = adaptiveSection,
+                effectiveRoutePolicySection = if (adaptiveSection == null) effectivePolicyMarkdown else null,
+                routeProbeReportSection = routeProbeMarkdown,
+                poolMetricsSection = poolMetricsMarkdown,
             )
             isSavingLogs = false
             val status = if (report.savedUri != null) {
@@ -423,6 +514,14 @@ private fun ProxyScreen(
         if (activity?.intent?.getBooleanExtra(MainActivity.EXTRA_OPEN_STATUS, false) == true) {
             currentPage = ProxyScreenPage.Main
             activity.intent?.removeExtra(MainActivity.EXTRA_OPEN_STATUS)
+        }
+    }
+
+    LaunchedEffect(currentPage) {
+        screenScroll.scrollTo(0)
+        if (currentPage == ProxyScreenPage.Settings) {
+            refreshRoutePolicySnapshot()
+            reconfigureStatus = ReconfigureStatusStore.load(prefs)
         }
     }
 
@@ -535,45 +634,156 @@ private fun ProxyScreen(
     }
 
     val startProxyAction by rememberUpdatedState {
-        val port = portText.toIntOrNull()
-        if (port == null) {
+        if (portText.toIntOrNull() == null) {
             Toast.makeText(context, context.getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
-        val dcEntries = buildList {
-            if (dc1Text.isNotBlank()) add("1:${dc1Text.trim()}")
-            if (dc2Text.isNotBlank()) add("2:${dc2Text.trim()}")
-            if (dc4Text.isNotBlank()) add("4:${dc4Text.trim()}")
-            if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
-        }
-        val parsedIps = ConnectionRuntimeConfig.buildRuntimeTokens(
-            dcEntries = dcEntries,
-            mode = connectionMode,
-            cfProxyEnabled = cfProxyEnabled,
-            cfProxyPriority = cfProxyPriority,
-            cfProxyOnly = cfProxyOnly,
-            cfDomain = "",
-            manualCfDomains = manualCfDomains,
-            workerEnabled = workerEnabled,
-            workerDomain = WorkerDomain.normalize(workerDomainText),
-            cachedCfDomains = cfUpstreamState.domains,
-            networkProfile = NetworkProfileProvider.current(context),
-            adaptiveRouteStats = adaptiveRouteStatsRepository.loadEncodedStats(),
-            autoStrategy = autoStrategy,
-        )
+        val config = runtimeConfigFactory().build(context)
 
-        if (parsedIps.isEmpty()) {
+        if (config == null || config.ips.isEmpty()) {
             Toast.makeText(context, context.getString(R.string.dc_ip_required), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
+        Log.i("TgWsProxy", effectiveRoutePolicyLog("effective route policy start", config))
+        val startSnapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository)
+        routePolicySnapshot = startSnapshot
+        lastRuntimeConfigKey = runtimeConfigKey(config)
+        Log.i("TgWsProxy", RoutePolicyDiagnostics.formatLogLine(startSnapshot))
         
         val startIntent = Intent(context, ProxyService::class.java).apply {
             action = ProxyService.ACTION_START
-            putExtra(ProxyService.EXTRA_PORT, port)
-            putExtra(ProxyService.EXTRA_IPS, parsedIps)
-            putExtra(ProxyService.EXTRA_POOL_SIZE, selectedPoolSize)
+            putExtra(ProxyService.EXTRA_PORT, config.port)
+            putExtra(ProxyService.EXTRA_IPS, config.ips)
+            putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
         }
         ContextCompat.startForegroundService(context, startIntent)
+    }
+
+    val runEffectiveRouteProbe by rememberUpdatedState {
+        if (isDiagRunning || isRouteProbeRunning) return@rememberUpdatedState
+        isDiagRunning = true
+        isRouteProbeRunning = true
+        diagStatusText = context.getString(R.string.route_probe_running)
+        coroutineScope.launch {
+            try {
+                val report = EffectiveRouteConnectionDiagnostics.probeEffectivePolicy(
+                    context = context,
+                    prefs = prefs,
+                    routePolicyRepository = routePolicyRepository,
+                    workerDomain = workerDomainText,
+                    manualCfDomains = manualCfDomains,
+                    cachedUpstreamDomains = cfUpstreamState.domains,
+                )
+                routeProbeReport = report
+                val status = RouteLevelDiagnosticsFormatter.formatShort(context, report)
+                diagStatusText = status
+                prefs.edit().putString("diag_last_status", status).apply()
+                RouteLevelDiagnosticsFormatter.formatLogLines(report).forEach { line ->
+                    Log.i("TgWsProxy", line)
+                }
+            } finally {
+                isRouteProbeRunning = false
+                isDiagRunning = false
+            }
+        }
+    }
+
+    fun runNetworkReconfigure(profile: NetworkProfile) {
+        if (!isRunning) {
+            return
+        }
+        val config = runtimeConfigFactory().build(context)
+        if (config == null || config.ips.isBlank()) {
+            Log.w("TgWsProxy", "network reconfigure failed: config rebuild returned empty networkType=${profile.type.prefValue}")
+            saveReconfigureStatus(
+                ReconfigureStatus(
+                    type = ReconfigureStatusType.FAILED,
+                    networkType = profile.type,
+                    message = "config_build_failed",
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+            return
+        }
+        val configKey = runtimeConfigKey(config)
+        if (configKey == lastRuntimeConfigKey) {
+            saveReconfigureStatus(
+                ReconfigureStatus(
+                    type = ReconfigureStatusType.SKIPPED,
+                    networkType = config.profile.type,
+                    message = "same_runtime_config",
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+            Log.i("TgWsProxy", "network reconfigure skipped: same runtime config networkType=${config.profile.type.prefValue}")
+            refreshRoutePolicySnapshot()
+            return
+        }
+        lastReconfigureAtMs = System.currentTimeMillis()
+        Log.i("TgWsProxy", effectiveRoutePolicyLog("effective route policy reconfigure", config))
+        val snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository)
+        routePolicySnapshot = snapshot
+        Log.i("TgWsProxy", RoutePolicyDiagnostics.formatLogLine(snapshot))
+        saveReconfigureStatus(
+            ReconfigureStatus(
+                type = ReconfigureStatusType.SUCCESS,
+                networkType = config.profile.type,
+                message = "action_reconfigure_sent",
+                updatedAtMs = System.currentTimeMillis(),
+            ),
+        )
+        lastRuntimeConfigKey = configKey
+        val intent = Intent(context, ProxyService::class.java).apply {
+            action = ProxyService.ACTION_RECONFIGURE
+            putExtra(ProxyService.EXTRA_PORT, config.port)
+            putExtra(ProxyService.EXTRA_IPS, config.ips)
+            putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    val latestReconfigureAction by rememberUpdatedState<(NetworkProfile) -> Unit> { profile ->
+        val now = System.currentTimeMillis()
+        val remainingDelay = MIN_RECONFIGURE_INTERVAL_MS - (now - lastReconfigureAtMs)
+        pendingReconfigureJob?.cancel()
+        if (remainingDelay > 0) {
+            Log.i("TgWsProxy", "network reconfigure delayed: debounce guard networkType=${profile.type.prefValue}")
+            saveReconfigureStatus(
+                ReconfigureStatus(
+                    type = ReconfigureStatusType.SKIPPED,
+                    networkType = profile.type,
+                    message = "throttled",
+                    updatedAtMs = now,
+                ),
+            )
+            pendingReconfigureJob = coroutineScope.launch {
+                delay(remainingDelay)
+                runNetworkReconfigure(profile)
+            }
+        } else {
+            pendingReconfigureJob = null
+            runNetworkReconfigure(profile)
+        }
+    }
+
+    DisposableEffect(isRunning) {
+        if (!isRunning) {
+            pendingReconfigureJob?.cancel()
+            pendingReconfigureJob = null
+            onDispose { }
+        } else {
+            val monitor = NetworkChangeMonitor(
+                context = context.applicationContext,
+                coroutineScope = coroutineScope,
+                onNetworkChanged = { latestReconfigureAction(it) },
+            )
+            monitor.start()
+            onDispose {
+                monitor.stop()
+                pendingReconfigureJob?.cancel()
+                pendingReconfigureJob = null
+            }
+        }
     }
 
     val stopProxyAction by rememberUpdatedState {
@@ -589,7 +799,11 @@ private fun ProxyScreen(
         openTelegram(context, proxyUrl)
     }
     val proxyAddress = "127.0.0.1:${portText.ifBlank { "1081" }}"
-    val proxyModeText = stringResource(connectionMode.displayLabelRes())
+    val activePolicyChipText = if (isRunning && uiMetrics.runtime.route.isNotBlank()) {
+        RouteDisplayNames.routeLabel(context, uiMetrics.runtime.route)
+    } else {
+        stringResource(connectionMode.displayLabelRes())
+    }
     val openUrl = { url: String ->
         try {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -623,7 +837,10 @@ private fun ProxyScreen(
                 },
                 navigationIcon = {
                     if (currentPage == ProxyScreenPage.Settings) {
-                        IconButton(onClick = { currentPage = ProxyScreenPage.Main }) {
+                        IconButton(onClick = {
+                            currentPage = ProxyScreenPage.Main
+                            coroutineScope.launch { screenScroll.scrollTo(0) }
+                        }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(R.string.action_back),
@@ -683,81 +900,12 @@ private fun ProxyScreen(
                 verticalArrangement = Arrangement.Top // Push top fields higher
             ) {
                 if (currentPage == ProxyScreenPage.Main) {
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(20.dp),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.proxy_address_label),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = if (isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-                                ) {
-                                    Text(
-                                        text = if (isRunning) stringResource(R.string.status_running) else stringResource(R.string.status_stopped),
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (isRunning) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = proxyAddress,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = copyProxyAddressAction) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = stringResource(R.string.copy_proxy_address),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = stringResource(R.string.active_mode_label),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.padding(top = 4.dp)
-                            ) {
-                                Text(
-                                    text = proxyModeText,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
+                    ProxyAddressCard(
+                        proxyAddress = proxyAddress,
+                        isRunning = isRunning,
+                        activeModeLabel = activePolicyChipText,
+                        onCopyAddress = copyProxyAddressAction,
+                    )
 
                     if (notificationPrefs.showMetricsInApp) {
                         Spacer(modifier = Modifier.height(12.dp))
@@ -831,11 +979,22 @@ private fun ProxyScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                 } else {
-                SectionTitle(stringResource(R.string.section_connection))
+                if (isRunning) {
+                    RunningProxySettingsBanner()
+                }
+                SettingsTabsBar(
+                    selectedTab = settingsTab,
+                    onTabSelected = { settingsTab = it },
+                )
+
+                if (settingsTab == SettingsTab.CONNECTION) {
+                SettingsSectionCard(titleRes = R.string.section_connection) {
                 if (cfProxyOnly) {
                     HintText(stringResource(R.string.cf_only_hint))
                 }
-
+                if (isRunning) {
+                    SettingsSectionLockedSummary(R.string.settings_connection_locked)
+                } else {
                 // Proxy Port Input
                 OutlinedTextField(
                     value = portText,
@@ -914,10 +1073,19 @@ private fun ProxyScreen(
                             )
                         }
                     }
+                    }
+                }
+                }
                 }
 
-                SectionTitle(stringResource(R.string.section_cloudflare))
-
+                if (settingsTab == SettingsTab.ROUTES) {
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_routes,
+                    initiallyExpanded = true,
+                ) {
+                if (isRunning) {
+                    SettingsSectionLockedSummary(R.string.settings_routes_locked)
+                } else {
                 Text(
                     stringResource(R.string.connection_mode_label),
                     style = MaterialTheme.typography.bodyLarge,
@@ -979,6 +1147,7 @@ private fun ProxyScreen(
                                         .putBoolean("cfproxy_enabled", cfProxyEnabled)
                                         .putBoolean("worker_enabled", workerEnabled)
                                         .apply()
+                                    refreshRoutePolicySnapshot()
                                 }
                             )
                         }
@@ -993,8 +1162,96 @@ private fun ProxyScreen(
                     )
                 }
 
-                SectionTitle(stringResource(R.string.cf_worker_title))
+                RoutePolicySettingsSection(
+                    currentProfile = currentNetworkProfile,
+                    wifiPolicy = wifiRoutePolicy,
+                    mobilePolicy = mobileRoutePolicy,
+                    hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
+                    hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
+                    isProxyRunning = isRunning,
+                    onWifiPolicyChange = { policy ->
+                        val normalized = NetworkRoutePolicyEditor.normalize(
+                            policy.copy(networkType = NetworkProfileType.WIFI),
+                        )
+                        routePolicyRepository.save(normalized)
+                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                        refreshRoutePolicySnapshot()
+                        Toast.makeText(context, context.getString(R.string.route_policy_saved), Toast.LENGTH_SHORT).show()
+                    },
+                    onMobilePolicyChange = { policy ->
+                        val normalized = NetworkRoutePolicyEditor.normalize(
+                            policy.copy(networkType = NetworkProfileType.MOBILE),
+                        )
+                        routePolicyRepository.save(normalized)
+                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                        refreshRoutePolicySnapshot()
+                        Toast.makeText(context, context.getString(R.string.route_policy_saved), Toast.LENGTH_SHORT).show()
+                    },
+                    onResetWifiPolicy = {
+                        routePolicyRepository.reset(NetworkProfileType.WIFI)
+                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                        refreshRoutePolicySnapshot()
+                        Toast.makeText(context, context.getString(R.string.route_policy_reset_done), Toast.LENGTH_SHORT).show()
+                    },
+                    onResetMobilePolicy = {
+                        routePolicyRepository.reset(NetworkProfileType.MOBILE)
+                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                        refreshRoutePolicySnapshot()
+                        Toast.makeText(context, context.getString(R.string.route_policy_reset_done), Toast.LENGTH_SHORT).show()
+                    },
+                )
+                }
 
+                RoutePolicyDiagnosticsCard(
+                    snapshot = routePolicySnapshot,
+                    reconfigureStatus = reconfigureStatus,
+                    onCopyDiagnostics = {
+                        val markdown = RoutePolicyDiagnostics.formatMarkdown(
+                            context = context,
+                            snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository),
+                            maskSensitive = maskDomainsInReport,
+                        )
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("route-policy-diagnostics", markdown))
+                        Toast.makeText(context, context.getString(R.string.route_policy_diagnostics_copied), Toast.LENGTH_SHORT).show()
+                    },
+                )
+                }
+
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_route_probe,
+                    initiallyExpanded = false,
+                ) {
+                    RouteLevelDiagnosticsCard(
+                        report = routeProbeReport,
+                        isRunning = isRouteProbeRunning,
+                        onRunProbe = runEffectiveRouteProbe,
+                        onCopyReport = {
+                            routeProbeReport?.let { report ->
+                                val markdown = RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                    context,
+                                    report,
+                                    maskSensitive = true,
+                                    poolMetrics = uiMetrics.runtime,
+                                )
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("route-probe-report", markdown))
+                                Toast.makeText(context, context.getString(R.string.route_probe_report_copied), Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    )
+                }
+                }
+
+                if (settingsTab == SettingsTab.CLOUDFLARE) {
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_cf_worker,
+                    initiallyExpanded = true,
+                ) {
                 OutlinedTextField(
                     value = workerDomainText,
                     onValueChange = {
@@ -1103,7 +1360,12 @@ private fun ProxyScreen(
                         Text(stringResource(R.string.cf_worker_help_link))
                     }
                 }
+                }
 
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_cf_proxy_domains,
+                    initiallyExpanded = false,
+                ) {
                 OutlinedTextField(
                     value = manualCfDomainsText,
                     onValueChange = ::applyManualCfDomains,
@@ -1202,8 +1464,13 @@ private fun ProxyScreen(
                         Toast.makeText(context, context.getString(R.string.cf_domains_cooldown_reset_done), Toast.LENGTH_SHORT).show()
                     },
                 )
+                }
 
                 if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_auto_route,
+                    initiallyExpanded = false,
+                ) {
                     val adaptiveProfile = NetworkProfileProvider.current(context)
                     AdaptiveRoutingPanel(
                         profile = adaptiveProfile,
@@ -1211,11 +1478,12 @@ private fun ProxyScreen(
                         stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
                         maskDomainsInReport = maskDomainsInReport,
                         includeDomainsInLogExport = includeDomainsInLogExport,
-                        expanded = adaptiveRoutingExpanded,
-                        onExpandedChange = { adaptiveRoutingExpanded = it },
+                        detailsExpanded = adaptiveDetailsExpanded,
+                        onDetailsExpandedChange = { adaptiveDetailsExpanded = it },
                         onStrategyChange = { strategy ->
                             autoStrategy = strategy
                             prefs.edit().putString("auto_strategy", strategy.prefValue).apply()
+                            refreshRoutePolicySnapshot()
                         },
                         onMaskDomainsChange = { mask ->
                             maskDomainsInReport = mask
@@ -1226,6 +1494,11 @@ private fun ProxyScreen(
                             prefs.edit().putBoolean("include_domains_in_log_export", include).apply()
                         },
                         onCopyReport = {
+                            val effectivePolicyMarkdown = RoutePolicyDiagnostics.formatMarkdown(
+                                context = context,
+                                snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository),
+                                maskSensitive = maskDomainsInReport,
+                            )
                             val markdown = AdaptiveDiagnosticsReport.buildMarkdown(
                                 context = context,
                                 versionName = appVersionName(context),
@@ -1238,7 +1511,15 @@ private fun ProxyScreen(
                                 builtInCount = CfDomain.builtInDomains.size,
                                 stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
                                 maskDomains = maskDomainsInReport,
-                            )
+                                effectiveRoutePolicyMarkdown = effectivePolicyMarkdown,
+                            ) + routeProbeReport?.let { report ->
+                                "\n\n" + RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                    context,
+                                    report,
+                                    maskSensitive = true,
+                                    poolMetrics = uiMetrics.runtime,
+                                )
+                            }.orEmpty()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("diagnostics", markdown))
                             Toast.makeText(context, context.getString(R.string.adaptive_report_copied), Toast.LENGTH_SHORT).show()
@@ -1264,95 +1545,14 @@ private fun ProxyScreen(
                         },
                     )
                 }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.cf_proxy_title), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.cf_proxy_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = cfProxyEnabled,
-                        enabled = !isRunning,
-                        onCheckedChange = {
-                            cfProxyEnabled = it
-                            if (!it) {
-                                cfProxyOnly = false
-                                prefs.edit().putBoolean("cfproxy_only", false).apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
-                        }
-                    )
+                }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                if (settingsTab == SettingsTab.APP) {
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_diagnostics,
+                    initiallyExpanded = true,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.cf_first_title), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.cf_first_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = cfProxyPriority,
-                        enabled = !isRunning && cfProxyEnabled,
-                        onCheckedChange = {
-                            cfProxyPriority = it
-                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
-                        }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.cf_only_title), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.cf_only_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = cfProxyOnly,
-                        enabled = !isRunning,
-                        onCheckedChange = {
-                            cfProxyOnly = it
-                            if (it) {
-                                cfProxyEnabled = true
-                                cfProxyPriority = true
-                                prefs.edit()
-                                    .putBoolean("cfproxy_enabled", true)
-                                    .putBoolean("cfproxy_priority", true)
-                                    .apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_only", it).apply()
-                        }
-                    )
-                }
-
-                SectionTitle(stringResource(R.string.section_diagnostics))
                 val runDiag: (String, suspend () -> ConnectionProbeReport) -> Unit = { label, block ->
                     if (!isDiagRunning) {
                         isDiagRunning = true
@@ -1390,7 +1590,48 @@ private fun ProxyScreen(
                     },
                     onProbeTcp = { runDiag(diagLabelTcp) { ConnectionDiagnostics.probeTcpFallback() } },
                 )
+                }
 
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_legacy_connection,
+                    initiallyExpanded = false,
+                ) {
+                    LegacyConnectionModeSection(
+                        cfProxyEnabled = cfProxyEnabled,
+                        cfProxyPriority = cfProxyPriority,
+                        cfProxyOnly = cfProxyOnly,
+                        controlsEnabled = !isRunning,
+                        onCfProxyEnabledChange = {
+                            cfProxyEnabled = it
+                            if (!it) {
+                                cfProxyOnly = false
+                                prefs.edit().putBoolean("cfproxy_only", false).apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
+                        },
+                        onCfProxyPriorityChange = {
+                            cfProxyPriority = it
+                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
+                        },
+                        onCfProxyOnlyChange = {
+                            cfProxyOnly = it
+                            if (it) {
+                                cfProxyEnabled = true
+                                cfProxyPriority = true
+                                prefs.edit()
+                                    .putBoolean("cfproxy_enabled", true)
+                                    .putBoolean("cfproxy_priority", true)
+                                    .apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_only", it).apply()
+                        },
+                    )
+                }
+
+                SettingsSectionCard(
+                    titleRes = R.string.section_notifications,
+                    subtitle = stringResource(R.string.section_notifications_hint),
+                ) {
                 NotificationSettingsSection(
                     prefs = notificationPrefs,
                     onChange = { updated ->
@@ -1398,8 +1639,9 @@ private fun ProxyScreen(
                         NotificationPreferences.save(context, updated)
                     },
                 )
+                }
 
-                SectionTitle(stringResource(R.string.section_appearance))
+                SettingsSectionCard(titleRes = R.string.section_appearance) {
                 Text(
                     stringResource(R.string.theme_mode_label),
                     style = MaterialTheme.typography.bodyLarge,
@@ -1485,11 +1727,11 @@ private fun ProxyScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 8.dp)
                 )
+                }
 
-                SectionTitle(stringResource(R.string.section_logs))
-
+                SettingsSectionCard(titleRes = R.string.section_logs) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1585,6 +1827,8 @@ private fun ProxyScreen(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
+                }
+                }
                 }
                 }
             }
@@ -1719,6 +1963,20 @@ private fun HintText(text: String) {
     }
 }
 
+private fun effectiveRoutePolicyLog(prefix: String, config: ProxyRuntimeStartConfig): String {
+    val policy = config.effectivePolicy.policy
+    return "$prefix: networkType=${config.profile.type.prefValue} " +
+        "source=${config.effectivePolicy.source} " +
+        "legacyMode=${config.effectivePolicy.legacyMode.prefValue} " +
+        "routes=${policy.enabledRoutes.joinToString("|") { it.prefValue }} " +
+        "preferred=${policy.preferredRoute?.prefValue.orEmpty()} " +
+        "fallback=${policy.allowFallback}"
+}
+
+private fun runtimeConfigKey(config: ProxyRuntimeStartConfig): String {
+    return "${config.port}|${config.poolSize}|${config.ips}"
+}
+
 @Composable
 private fun CfDomainsPanel(
     rows: List<CfDomainHealth>,
@@ -1784,12 +2042,10 @@ private fun CfDomainsPanel(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
-                TextButton(onClick = { onExpandedChange(!expanded) }) {
-                    Text(
-                        if (expanded) stringResource(R.string.cf_hide_details)
-                        else stringResource(R.string.cf_show_details),
-                    )
-                }
+                DetailsExpandButton(
+                    expanded = expanded,
+                    onExpandedChange = onExpandedChange,
+                )
             }
 
             Text("${stringResource(R.string.cf_domains_active)}: $activeCount", style = MaterialTheme.typography.bodySmall)
@@ -2045,292 +2301,6 @@ private fun appVersionName(context: Context): String {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
     } catch (_: Exception) {
         "unknown"
-    }
-}
-
-private fun buildAdaptiveSelectionHints(context: Context, stats: List<RouteStatSnapshot>): List<String> {
-    val now = System.currentTimeMillis()
-    val hints = mutableListOf<String>()
-    stats.find { it.routeType == "direct_ws" }?.let { direct ->
-        if (direct.cooldownUntilMs > now) {
-            hints += if (direct.lastFailureReason?.contains("302", ignoreCase = true) == true) {
-                context.getString(R.string.adaptive_explain_direct_302)
-            } else {
-                context.getString(R.string.adaptive_explain_direct_cooldown)
-            }
-        }
-    }
-    stats.find { it.routeType == "cf_proxy_ws" }?.let { cf ->
-        if (cf.cooldownUntilMs > now) {
-            hints += if (cf.lastFailureReason?.contains("429", ignoreCase = true) == true) {
-                context.getString(R.string.adaptive_explain_cf_429)
-            } else {
-                context.getString(R.string.adaptive_explain_cf_cooldown)
-            }
-        }
-    }
-    stats.find { it.routeType == "tcp_fallback" }?.let { tcp ->
-        if (tcp.failureCount >= 2) {
-            hints += context.getString(R.string.adaptive_explain_tcp_timeouts)
-        }
-    }
-    return hints.take(5)
-}
-
-@Composable
-private fun AdaptiveRoutingPanel(
-    profile: NetworkProfile,
-    strategy: AutoStrategy,
-    stats: List<RouteStatSnapshot>,
-    maskDomainsInReport: Boolean,
-    includeDomainsInLogExport: Boolean,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onStrategyChange: (AutoStrategy) -> Unit,
-    onMaskDomainsChange: (Boolean) -> Unit,
-    onIncludeDomainsInLogsChange: (Boolean) -> Unit,
-    onCopyReport: () -> Unit,
-    onResetAll: () -> Unit,
-    onResetNetwork: () -> Unit,
-) {
-    val networkTypeLabel = when (profile.type) {
-        NetworkProfileType.WIFI -> stringResource(R.string.adaptive_network_wifi)
-        NetworkProfileType.MOBILE -> stringResource(R.string.adaptive_network_mobile)
-        NetworkProfileType.UNKNOWN -> stringResource(R.string.adaptive_network_unknown)
-    }
-    val networkLabel = profile.label.ifBlank { networkTypeLabel }
-
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.adaptive_routing_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                TextButton(onClick = { onExpandedChange(!expanded) }) {
-                    Text(
-                        if (expanded) stringResource(R.string.cf_hide_details)
-                        else stringResource(R.string.adaptive_open_stats),
-                    )
-                }
-            }
-            Text(
-                stringResource(R.string.adaptive_auto_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "${stringResource(R.string.adaptive_network_label)}: $networkLabel",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "${stringResource(R.string.adaptive_network_type)}: $networkTypeLabel",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "${stringResource(R.string.adaptive_strategy_label)}: ${strategyLabel(strategy)}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            val hints = buildAdaptiveSelectionHints(LocalContext.current, stats)
-            if (hints.isNotEmpty()) {
-                Text(
-                    stringResource(R.string.adaptive_selection_summary),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                hints.forEach { hint ->
-                    Text(
-                        "• $hint",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(top = 8.dp)) {
-                    AutoStrategySelector(strategy = strategy, onStrategyChange = onStrategyChange)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(stringResource(R.string.adaptive_mask_domains), style = MaterialTheme.typography.bodySmall)
-                        Switch(checked = maskDomainsInReport, onCheckedChange = onMaskDomainsChange)
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(stringResource(R.string.adaptive_include_domains_logs), style = MaterialTheme.typography.bodySmall)
-                        Switch(checked = includeDomainsInLogExport, onCheckedChange = onIncludeDomainsInLogsChange)
-                    }
-                    OutlinedButton(
-                        onClick = onCopyReport,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp),
-                    ) {
-                        Text(stringResource(R.string.adaptive_copy_report))
-                    }
-                    Text(
-                        stringResource(R.string.adaptive_route_stats),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    if (stats.isEmpty()) {
-                        Text(
-                            stringResource(R.string.adaptive_stats_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        stats.forEach { row ->
-                            AdaptiveRouteStatRow(row)
-                        }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onResetNetwork,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.adaptive_reset_network_short))
-                        }
-                        OutlinedButton(
-                            onClick = onResetAll,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.adaptive_reset_all_short))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdaptiveRouteStatRow(row: RouteStatSnapshot) {
-    val now = System.currentTimeMillis()
-    val routeLabel = when (row.routeType) {
-        "direct_ws" -> stringResource(R.string.adaptive_route_direct)
-        "cf_worker_ws" -> stringResource(R.string.adaptive_route_worker)
-        "cf_proxy_ws" -> stringResource(R.string.adaptive_route_cf)
-        "tcp_fallback" -> stringResource(R.string.adaptive_route_tcp)
-        else -> row.routeType
-    }
-    val inCooldown = row.cooldownUntilMs > now
-    val statusLabel = if (inCooldown) {
-        stringResource(R.string.adaptive_status_cooldown)
-    } else {
-        stringResource(R.string.adaptive_status_active)
-    }
-    val untilText = row.cooldownUntilMs.takeIf { inCooldown }?.let {
-        DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))
-    }
-    Text(
-        "$routeLabel: $statusLabel",
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(top = 6.dp),
-    )
-    Text(
-        "${stringResource(R.string.adaptive_stat_successes)} ${row.successCount}, " +
-            "${stringResource(R.string.adaptive_stat_failures)} ${row.failureCount}",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    if (row.averageLatencyMs > 0) {
-        Text(
-            "${stringResource(R.string.adaptive_stat_avg_latency)}: ${row.averageLatencyMs} ms",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    row.lastFailureReason?.takeIf { it.isNotBlank() }?.let { reason ->
-        Text(
-            "${stringResource(R.string.adaptive_status_reason)}: $reason",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    untilText?.let {
-        Text(
-            "${stringResource(R.string.adaptive_status_until)}: $it",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun strategyLabel(strategy: AutoStrategy): String {
-    return when (strategy) {
-        AutoStrategy.BALANCED -> stringResource(R.string.adaptive_strategy_balanced)
-        AutoStrategy.DIRECT_PREFERRED -> stringResource(R.string.adaptive_strategy_direct)
-        AutoStrategy.WORKER_PREFERRED -> stringResource(R.string.adaptive_strategy_worker)
-        AutoStrategy.CF_PREFERRED -> stringResource(R.string.adaptive_strategy_cf)
-        AutoStrategy.STRICT_FAST_FAILOVER -> stringResource(R.string.adaptive_strategy_fast_failover)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AutoStrategySelector(
-    strategy: AutoStrategy,
-    onStrategyChange: (AutoStrategy) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val options = AutoStrategy.entries
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        OutlinedTextField(
-            value = strategyLabel(strategy),
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(stringResource(R.string.adaptive_strategy_label)) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth(),
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(strategyLabel(option)) },
-                    onClick = {
-                        onStrategyChange(option)
-                        expanded = false
-                    },
-                )
-            }
-        }
     }
 }
 

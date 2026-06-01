@@ -161,6 +161,12 @@ type Stats struct {
 	bytesDown              atomic.Int64
 	poolHits               atomic.Int64
 	poolMisses             atomic.Int64
+	workerPoolHits         atomic.Int64
+	workerPoolMisses       atomic.Int64
+	workerPoolRefillErrors atomic.Int64
+	cfPoolHits             atomic.Int64
+	cfPoolMisses           atomic.Int64
+	cfPoolRefillErrors     atomic.Int64
 }
 
 func (s *Stats) Summary() string {
@@ -195,6 +201,12 @@ func (s *Stats) Reset() {
 	s.bytesDown.Store(0)
 	s.poolHits.Store(0)
 	s.poolMisses.Store(0)
+	s.workerPoolHits.Store(0)
+	s.workerPoolMisses.Store(0)
+	s.workerPoolRefillErrors.Store(0)
+	s.cfPoolHits.Store(0)
+	s.cfPoolMisses.Store(0)
+	s.cfPoolRefillErrors.Store(0)
 }
 
 var stats Stats
@@ -232,8 +244,8 @@ func setSockOpts(conn net.Conn) {
 		return
 	}
 	_ = raw.Control(func(fd uintptr) {
-		_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, recvBuf)
-		_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_SNDBUF, sendBuf)
+		_ = setSockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, recvBuf)
+		_ = setSockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, sendBuf)
 	})
 }
 
@@ -1173,6 +1185,9 @@ func (p *WsPool) Get(dc int, isMedia bool, targetIP string, domains []string) *R
 
 // scheduleRefillLocked must be called with p.mu held
 func (p *WsPool) scheduleRefillLocked(key [2]int, targetIP string, domains []string) {
+	if poolSize <= 0 {
+		return
+	}
 	if p.refilling[key] {
 		return
 	}
@@ -1345,6 +1360,211 @@ func (p *WsPool) CloseAll() {
 }
 
 var wsPool = newWsPool()
+
+// ---------------------------------------------------------------------------
+// WorkerWsPool
+// ---------------------------------------------------------------------------
+
+type WorkerPoolKey struct {
+	DC           int
+	WorkerDomain string
+	Dst          string
+	Media        bool
+}
+
+type workerPoolDialer interface {
+	DialWorker(key WorkerPoolKey) (*RawWebSocket, error)
+}
+
+type defaultWorkerPoolDialer struct{}
+
+func (defaultWorkerPoolDialer) DialWorker(key WorkerPoolKey) (*RawWebSocket, error) {
+	path := buildWorkerWSPath(key.DC, key.Dst, key.Media)
+	ws, err := wsConnect(key.WorkerDomain, key.WorkerDomain, path, 10)
+	if err == nil {
+		return ws, nil
+	}
+
+	resolved, resolveErr := resolvePreferredIPs(key.WorkerDomain, 10)
+	if resolveErr != nil {
+		return nil, err
+	}
+	lastErr := err
+	for _, ip := range resolved.Preferred() {
+		ws, lastErr = wsConnect(ip, key.WorkerDomain, path, 10)
+		if lastErr == nil {
+			return ws, nil
+		}
+	}
+	return nil, lastErr
+}
+
+type WorkerWsPool struct {
+	mu        sync.Mutex
+	idle      map[WorkerPoolKey][]poolEntry
+	refilling map[WorkerPoolKey]bool
+	dialer    workerPoolDialer
+	now       func() float64
+	maxAge    float64
+}
+
+func newWorkerWsPool(dialer workerPoolDialer) *WorkerWsPool {
+	if dialer == nil {
+		dialer = defaultWorkerPoolDialer{}
+	}
+	return &WorkerWsPool{
+		idle:      make(map[WorkerPoolKey][]poolEntry),
+		refilling: make(map[WorkerPoolKey]bool),
+		dialer:    dialer,
+		now:       monoNow,
+		maxAge:    120.0,
+	}
+}
+
+func (p *WorkerWsPool) Get(key WorkerPoolKey) *RawWebSocket {
+	if poolSize <= 0 || key.WorkerDomain == "" || key.Dst == "" {
+		return nil
+	}
+
+	now := p.now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	bucket := p.idle[key]
+	for len(bucket) > 0 {
+		entry := bucket[0]
+		bucket = bucket[1:]
+		p.idle[key] = bucket
+
+		age := now - entry.created
+		if age > p.maxAge || entry.ws.closed.Load() {
+			go entry.ws.Close()
+			continue
+		}
+
+		stats.workerPoolHits.Add(1)
+		p.scheduleRefillLocked(key)
+		return entry.ws
+	}
+
+	stats.workerPoolMisses.Add(1)
+	p.scheduleRefillLocked(key)
+	return nil
+}
+
+func (p *WorkerWsPool) scheduleRefillLocked(key WorkerPoolKey) {
+	if poolSize <= 0 || p.refilling[key] {
+		return
+	}
+	p.refilling[key] = true
+	go p.refill(key)
+}
+
+func (p *WorkerWsPool) refill(key WorkerPoolKey) {
+	defer func() {
+		p.mu.Lock()
+		delete(p.refilling, key)
+		p.mu.Unlock()
+	}()
+
+	p.mu.Lock()
+	needed := poolSize - len(p.idle[key])
+	p.mu.Unlock()
+	if needed <= 0 {
+		return
+	}
+
+	for i := 0; i < needed; i++ {
+		ws, err := p.dialer.DialWorker(key)
+		if err != nil || ws == nil {
+			stats.workerPoolRefillErrors.Add(1)
+			continue
+		}
+		p.mu.Lock()
+		p.idle[key] = append(p.idle[key], poolEntry{ws: ws, created: p.now()})
+		p.mu.Unlock()
+	}
+}
+
+func (p *WorkerWsPool) Warmup(dcOptMap map[int]string, workerDomain string) {
+	if poolSize <= 0 || workerDomain == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	started := 0
+	for _, dc := range []int{2, 4} {
+		dst := telegramDCTargetIP(dc, dcOptMap[dc])
+		if dst == "" {
+			continue
+		}
+		for _, media := range []bool{false, true} {
+			key := WorkerPoolKey{DC: dc, WorkerDomain: workerDomain, Dst: dst, Media: media}
+			p.scheduleRefillLocked(key)
+			started++
+		}
+	}
+	if started > 0 {
+		logInfo.Printf("Worker pool warmup scheduled for %d target(s)", started)
+	}
+}
+
+func (p *WorkerWsPool) Maintain(ctx context.Context, dcOptMap map[int]string, workerDomain string) {
+	ticker := time.NewTicker(poolMaintainInterval * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.maintainOnce(dcOptMap, workerDomain)
+		}
+	}
+}
+
+func (p *WorkerWsPool) maintainOnce(dcOptMap map[int]string, workerDomain string) {
+	now := p.now()
+	p.mu.Lock()
+	for key, bucket := range p.idle {
+		var fresh []poolEntry
+		for _, entry := range bucket {
+			if now-entry.created > p.maxAge || entry.ws.closed.Load() {
+				go entry.ws.Close()
+				continue
+			}
+			fresh = append(fresh, entry)
+		}
+		p.idle[key] = fresh
+	}
+	p.mu.Unlock()
+	p.Warmup(dcOptMap, workerDomain)
+}
+
+func (p *WorkerWsPool) IdleCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count := 0
+	for _, bucket := range p.idle {
+		count += len(bucket)
+	}
+	return count
+}
+
+func (p *WorkerWsPool) CloseAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, bucket := range p.idle {
+		for _, entry := range bucket {
+			go entry.ws.Close()
+		}
+		delete(p.idle, key)
+	}
+	for key := range p.refilling {
+		delete(p.refilling, key)
+	}
+}
+
+var workerPool = newWorkerWsPool(nil)
 
 // ---------------------------------------------------------------------------
 // Helper tags
@@ -2134,7 +2354,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		raw, err := tcpL.SyscallConn()
 		if err == nil {
 			_ = raw.Control(func(fd uintptr) {
-				_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
+				_ = setSockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
 			})
 		}
 	}
@@ -2197,6 +2417,12 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		// Periodic pool maintenance
 		go wsPool.Maintain(srvCtx, dcOptMap)
 	}
+	if settings.workerRouteAvailable() && poolSize > 0 {
+		workerPool.Warmup(dcOptMap, settings.Worker.Domain)
+		go workerPool.Maintain(srvCtx, dcOptMap, settings.Worker.Domain)
+	} else {
+		logInfo.Printf("  Worker pool warmup skipped (mode=%s)", settings.Mode)
+	}
 
 	// Track active connections for graceful shutdown
 	var activeConns sync.WaitGroup
@@ -2246,6 +2472,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 
 	// Close pool connections
 	wsPool.CloseAll()
+	workerPool.CloseAll()
 
 	logInfo.Printf("Final stats: %s", stats.Summary())
 	return nil
@@ -2447,14 +2674,17 @@ func StopProxy() C.int {
 	dcFailUntil = make(map[[2]int]float64)
 	dcFailMu.Unlock()
 
+	wsPool.CloseAll()
+	workerPool.CloseAll()
+
 	return 0
 }
 
 //export SetPoolSize
 func SetPoolSize(size C.int) {
 	n := int(size)
-	if n < 2 {
-		n = 2
+	if n < 0 {
+		n = 0
 	}
 	if n > 16 {
 		n = 16

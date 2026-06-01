@@ -59,7 +59,7 @@ func exportProxyStatus() string {
 	}
 
 	return fmt.Sprintf(
-		"running=%d;mode=%s;route=%s;active=%d;bytes_up=%d;bytes_down=%d;latency_ms=%d;last_error=%s",
+		"running=%d;mode=%s;route=%s;active=%d;bytes_up=%d;bytes_down=%d;latency_ms=%d;last_error=%s;worker_pool_hits=%d;worker_pool_misses=%d;worker_pool_idle=%d;worker_pool_refill_errors=%d;worker_pool_err=%d;cf_pool_hits=%d;cf_pool_misses=%d;cf_pool_idle=%d;cf_pool_refill_errors=%d;cf_pool_err=%d",
 		running,
 		settings.Mode,
 		route,
@@ -68,6 +68,16 @@ func exportProxyStatus() string {
 		stats.bytesDown.Load(),
 		lastMetricsLatency.Load(),
 		escapeStatusField(lastErr),
+		stats.workerPoolHits.Load(),
+		stats.workerPoolMisses.Load(),
+		workerPool.IdleCount(),
+		stats.workerPoolRefillErrors.Load(),
+		stats.workerPoolRefillErrors.Load(),
+		stats.cfPoolHits.Load(),
+		stats.cfPoolMisses.Load(),
+		0,
+		stats.cfPoolRefillErrors.Load(),
+		stats.cfPoolRefillErrors.Load(),
 	)
 }
 

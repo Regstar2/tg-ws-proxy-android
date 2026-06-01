@@ -70,14 +70,44 @@ object ConnectionDiagnostics {
         manualDomainsRaw: List<String>,
         cachedUpstreamDomains: List<String> = emptyList(),
     ): ConnectionProbeReport = withContext(Dispatchers.IO) {
-        val domain = CfManualDomainList.normalize(manualDomainsRaw).firstOrNull()
-            ?: cachedUpstreamDomains.mapNotNull(CfDomain::normalizeOrNull).firstOrNull()
-            ?: CfDomain.builtInDomains.first()
-        val results = testDcs.map { dc ->
-            val host = "kws$dc.$domain"
-            probeWss(host, host, "/apiws", "cf_proxy", dc)
+        val domains = cfProxyProbeDomains(manualDomainsRaw, cachedUpstreamDomains)
+        if (domains.isEmpty()) {
+            return@withContext ConnectionProbeReport(emptyList())
         }
-        ConnectionProbeReport(results)
+        var lastReport: ConnectionProbeReport? = null
+        for (domain in domains) {
+            val results = testDcs.map { dc ->
+                val wsDc = ConnectionRuntimeConfig.effectiveWsHostDc(dc)
+                val host = "kws$wsDc.$domain"
+                probeWss(host, host, "/apiws", "cf_proxy", dc)
+            }
+            val report = ConnectionProbeReport(results)
+            lastReport = report
+            if (report.successCount > 0) {
+                return@withContext report
+            }
+        }
+        lastReport ?: ConnectionProbeReport(emptyList())
+    }
+
+    private fun cfProxyProbeDomains(
+        manualDomainsRaw: List<String>,
+        cachedUpstreamDomains: List<String>,
+    ): List<String> {
+        val manual = CfManualDomainList.normalize(manualDomainsRaw)
+        return buildList {
+            manual.take(2).forEach { add(it) }
+            cachedUpstreamDomains
+                .mapNotNull(CfDomain::normalizeOrNull)
+                .filterNot { it in manual }
+                .take(2)
+                .forEach { add(it) }
+            val cached = cachedUpstreamDomains.mapNotNull(CfDomain::normalizeOrNull).toSet()
+            CfDomain.builtInDomains
+                .filter { it !in manual && it !in cached }
+                .take(2)
+                .forEach { add(it) }
+        }.distinct()
     }
 
     suspend fun probeCfPool(
@@ -175,6 +205,37 @@ object ConnectionDiagnostics {
         route: String,
         dc: Int,
     ): RouteProbeResult {
+        val hostnameResult = probeWssOnce(sniHost, dialHost, path, route, dc, via = "hostname")
+        if (hostnameResult.success) {
+            return hostnameResult
+        }
+        val resolvedIpv4 = resolveIpv4Addresses(sniHost)
+        var lastResult = hostnameResult
+        for (address in resolvedIpv4) {
+            val ip = address.hostAddress ?: continue
+            if (ip.equals(dialHost, ignoreCase = true)) {
+                continue
+            }
+            val ipResult = probeWssOnce(sniHost, ip, path, route, dc, via = "resolved_ip")
+            if (ipResult.success) {
+                return ipResult
+            }
+            lastResult = ipResult
+            if (ipResult.stage.startsWith("ws_30")) {
+                break
+            }
+        }
+        return lastResult
+    }
+
+    private fun probeWssOnce(
+        sniHost: String,
+        dialHost: String,
+        path: String,
+        route: String,
+        dc: Int,
+        via: String,
+    ): RouteProbeResult {
         val start = System.nanoTime()
         return try {
             Socket().use { raw ->
@@ -195,7 +256,7 @@ object ConnectionDiagnostics {
                         success = upgraded.success,
                         stage = upgraded.stage,
                         elapsedMs = elapsedMs(start),
-                        detail = upgraded.detail,
+                        detail = "$via:${upgraded.detail}",
                     )
                 }
             }
@@ -206,8 +267,18 @@ object ConnectionDiagnostics {
                 success = false,
                 stage = "failure",
                 elapsedMs = elapsedMs(start),
-                detail = e.message ?: e.javaClass.simpleName,
+                detail = "$via:${e.message ?: e.javaClass.simpleName}",
             )
+        }
+    }
+
+    private fun resolveIpv4Addresses(host: String): List<java.net.InetAddress> {
+        return try {
+            java.net.InetAddress.getAllByName(host)
+                .filter { it.address.size == 4 }
+                .distinctBy { it.hostAddress }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -238,6 +309,10 @@ object ConnectionDiagnostics {
                 append("Sec-WebSocket-Version: 13\r\n")
                 append("Sec-WebSocket-Protocol: binary\r\n")
                 append("Origin: https://web.telegram.org\r\n")
+                append(
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\r\n",
+                )
                 append("\r\n")
             }
         )

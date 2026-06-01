@@ -21,6 +21,9 @@ object RuntimeLogExport {
         logs: List<String>,
         proxyRunning: Boolean,
         adaptiveDiagnosticsSection: String? = null,
+        effectiveRoutePolicySection: String? = null,
+        routeProbeReportSection: String? = null,
+        poolMetricsSection: String? = null,
     ): RuntimeLogSaveReport = withContext(Dispatchers.IO) {
         val exportedAt = Date()
         val fileName = "runtime-log-${fileStamp(exportedAt)}.txt"
@@ -32,6 +35,18 @@ object RuntimeLogExport {
             appendLine()
             if (!adaptiveDiagnosticsSection.isNullOrBlank()) {
                 appendLine(adaptiveDiagnosticsSection.trim())
+                appendLine()
+            }
+            if (!effectiveRoutePolicySection.isNullOrBlank()) {
+                appendLine(effectiveRoutePolicySection.trim())
+                appendLine()
+            }
+            if (!routeProbeReportSection.isNullOrBlank()) {
+                appendLine(routeProbeReportSection.trim())
+                appendLine()
+            }
+            if (!poolMetricsSection.isNullOrBlank()) {
+                appendLine(poolMetricsSection.trim())
                 appendLine()
             }
             if (logs.isEmpty()) {

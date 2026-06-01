@@ -24,18 +24,35 @@ object ConnectionRuntimeConfig {
         networkProfile: NetworkProfile? = null,
         adaptiveRouteStats: String = "",
         autoStrategy: AutoStrategy = AutoStrategy.BALANCED,
+        routePolicy: NetworkRoutePolicy? = null,
     ): String {
-        val effectiveMode = when {
-            mode != ConnectionMode.DirectWithFallback -> mode
-            else -> ConnectionMode.fromLegacy(cfProxyEnabled, cfProxyPriority, cfProxyOnly)
+        val effectiveMode = if (routePolicy != null) {
+            NetworkRoutePolicyMapper.toLegacyConnectionMode(routePolicy)
+        } else {
+            when {
+                mode != ConnectionMode.DirectWithFallback -> mode
+                else -> ConnectionMode.fromLegacy(cfProxyEnabled, cfProxyPriority, cfProxyOnly)
+            }
         }
 
-        val cfEnabled = when (effectiveMode) {
-            ConnectionMode.DirectOnly -> false
-            else -> true
+        val cfEnabled = if (routePolicy != null) {
+            RouteKind.CF_PROXY_WS in routePolicy.enabledRoutes
+        } else {
+            when (effectiveMode) {
+                ConnectionMode.DirectOnly -> false
+                else -> true
+            }
         }
-        val cfPriority = effectiveMode == ConnectionMode.CFFirst
-        val cfOnly = effectiveMode == ConnectionMode.CFOnly
+        val cfPriority = if (routePolicy != null) {
+            routePolicy.preferredRoute == RouteKind.CF_PROXY_WS && routePolicy.allowFallback
+        } else {
+            effectiveMode == ConnectionMode.CFFirst
+        }
+        val cfOnly = if (routePolicy != null) {
+            routePolicy.enabledRoutes == setOf(RouteKind.CF_PROXY_WS) && !routePolicy.allowFallback
+        } else {
+            effectiveMode == ConnectionMode.CFOnly
+        }
 
         val tokens = buildList {
             addAll(dcEntries)
@@ -43,6 +60,14 @@ object ConnectionRuntimeConfig {
             add("@cfproxy=${if (cfEnabled) 1 else 0}")
             add("@cfproxy_priority=${if (cfPriority) 1 else 0}")
             add("@cfproxy_only=${if (cfOnly) 1 else 0}")
+            routePolicy?.let { policy ->
+                add("@route_direct_ws=${if (RouteKind.DIRECT_WS in policy.enabledRoutes) 1 else 0}")
+                add("@route_worker_ws=${if (RouteKind.WORKER_WS in policy.enabledRoutes) 1 else 0}")
+                add("@route_cf_proxy_ws=${if (RouteKind.CF_PROXY_WS in policy.enabledRoutes) 1 else 0}")
+                add("@route_tcp_fallback=${if (RouteKind.TCP_FALLBACK in policy.enabledRoutes) 1 else 0}")
+                add("@preferred_route=${policy.preferredRoute?.prefValue.orEmpty()}")
+                add("@route_fallback=${if (policy.allowFallback) 1 else 0}")
+            }
             val manualDomains = CfManualDomainList.normalize(
                 if (manualCfDomains.isNotEmpty()) manualCfDomains else listOf(cfDomain)
             )
@@ -58,9 +83,13 @@ object ConnectionRuntimeConfig {
                 add("@cf_cached_domains=${cachedDomains.joinToString("|")}")
             }
             val normalizedWorker = WorkerDomain.normalize(workerDomain)
-            val workerOn = workerEnabled || normalizedWorker.isNotBlank() ||
-                effectiveMode == ConnectionMode.WorkerFirst ||
-                effectiveMode == ConnectionMode.WorkerOnly
+            val workerOn = if (routePolicy != null) {
+                RouteKind.WORKER_WS in routePolicy.enabledRoutes
+            } else {
+                workerEnabled || normalizedWorker.isNotBlank() ||
+                    effectiveMode == ConnectionMode.WorkerFirst ||
+                    effectiveMode == ConnectionMode.WorkerOnly
+            }
             add("@worker_enabled=${if (workerOn) 1 else 0}")
             if (normalizedWorker.isNotBlank()) {
                 add("@worker_domain=$normalizedWorker")
@@ -75,10 +104,16 @@ object ConnectionRuntimeConfig {
             if (adaptiveRouteStats.isNotBlank()) {
                 add("@adaptive_route_stats=$adaptiveRouteStats")
             }
-            add("@auto_strategy=${autoStrategy.prefValue}")
+            add("@auto_strategy=${(routePolicy?.autoStrategy ?: autoStrategy).prefValue}")
         }
         return tokens.joinToString(",")
     }
 
     fun dcIpForTest(dc: Int): String = defaultDcIps[dc] ?: defaultDcIps[2]!!
+
+    /** Matches Go [effectiveWSHostDC]: DC203 probes use kws2.* hostnames. */
+    fun effectiveWsHostDc(dc: Int): Int = when (dc) {
+        203 -> 2
+        else -> dc
+    }
 }

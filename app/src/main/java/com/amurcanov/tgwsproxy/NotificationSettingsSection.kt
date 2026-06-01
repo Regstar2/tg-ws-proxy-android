@@ -15,17 +15,6 @@ fun NotificationSettingsSection(
     onChange: (NotificationPreferences) -> Unit,
 ) {
     val context = LocalContext.current
-    Text(
-        stringResource(R.string.section_notifications),
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-    )
-    Text(
-        stringResource(R.string.section_notifications_hint),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
     var modeExpanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
         expanded = modeExpanded,
