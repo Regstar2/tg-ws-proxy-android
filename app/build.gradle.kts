@@ -60,7 +60,7 @@ android {
     }
 
     signingConfigs {
-        val keystoreFile = rootProject.file(System.getenv("KEYSTORE_FILE") ?: "app/tgwsproxy-release.jks")
+        val keystoreFile = rootProject.file(System.getenv("KEYSTORE_FILE") ?: "tgwsproxy-release.jks")
         val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
         val keyPasswordValue = System.getenv("KEY_PASSWORD")
         val keyAliasValue = System.getenv("KEY_ALIAS") ?: "tgwsproxy"

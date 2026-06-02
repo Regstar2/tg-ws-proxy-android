@@ -114,15 +114,16 @@ APK: `app\build\outputs\apk\debug\app-debug.apk`
 .\scripts\build-apk.ps1 -Configuration Debug
 ```
 
-Release (локальная подпись, секреты только в env):
+Release (локальная подпись, не в git):
+
+1. Скопируйте `release-signing.env.example` → `release-signing.env` и укажите путь к `tgwsproxy-release.jks` и пароли.
+2. Сборка (скрипт сам подхватит `release-signing.env`):
 
 ```powershell
-$env:KEYSTORE_FILE = "tgwsproxy-release.jks"
-$env:KEYSTORE_PASSWORD = "..."
-$env:KEY_PASSWORD = "..."
-$env:KEY_ALIAS = "tgwsproxy"
 .\scripts\build-apk.ps1 -Configuration Release
 ```
+
+Или задайте переменные вручную: `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`.
 
 Go-тесты (из каталога runtime):
 

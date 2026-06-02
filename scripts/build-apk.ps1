@@ -9,6 +9,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+if ($Configuration -eq "Release") {
+    & (Join-Path $PSScriptRoot "load-release-signing.ps1") | Out-Null
+}
 $artifactRoot = Join-Path $repoRoot "artifacts\apk"
 $configLower = $Configuration.ToLowerInvariant()
 $apkOutDir = Join-Path $artifactRoot $configLower
@@ -56,9 +60,13 @@ $sdkDirEscaped = $env:ANDROID_SDK_ROOT.Replace("\", "\\")
 Set-Content -Path $localProperties -Value "sdk.dir=$sdkDirEscaped"
 
 $task = if ($Configuration -eq "Release") { ":app:assembleRelease" } else { ":app:assembleDebug" }
-& $gradleWrapper "--no-daemon" $task
-if ($LASTEXITCODE -ne 0) {
-    throw "Gradle task $task failed with exit code $LASTEXITCODE"
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $gradleWrapper "--no-daemon" $task 2>&1 | ForEach-Object { Write-Host $_ }
+$gradleExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($gradleExit -ne 0) {
+    throw "Gradle task $task failed with exit code $gradleExit"
 }
 
 $sourceApk = if ($Configuration -eq "Release") {
