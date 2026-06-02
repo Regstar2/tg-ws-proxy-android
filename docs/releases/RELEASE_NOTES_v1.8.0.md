@@ -1,47 +1,41 @@
 # Release notes v1.8.0
 
-**Maintenance / repository release.** No intentional routing or runtime behavior changes specific to this tag.
+**Релиз обслуживания репозитория.** Намеренных изменений маршрутизации/runtime для этого тега нет.
 
 `versionName` **1.8.0** · `versionCode` **36**
 
-## Since v1.6.0 (included in this build line)
+## С v1.6.0 (уже в этой линейке сборок)
 
-- Per-network Wi‑Fi / Mobile route policies (`NetworkRoutePolicy`)
-- Route toggles: `direct_ws`, `cf_worker_ws`, `cf_proxy_ws`, `tcp_fallback`
-- Preferred route and fallback per network type
-- Automatic reconfigure on Wi‑Fi ↔ Mobile switch
-- Effective route policy diagnostics and route-level probes
-- Worker / CF pool metrics in UI and export
-- Persistent runtime logs and privacy-safe export
-- Route policy tokens enforced in native runtime (1.7.9.2)
-- Route kind separated from WebSocket transport in UI (1.7.9.3)
-- Stale Direct/Worker events no longer override current route display
-- Safer default policies and Recommended preset (1.7.9.1)
-- Removed shared default CF domain `pclead.co.uk` — use your domain or built-in/cached pool
+- Политики маршрутов отдельно для Wi‑Fi / Mobile (`NetworkRoutePolicy`)
+- Переключатели: `direct_ws`, `cf_worker_ws`, `cf_proxy_ws`, `tcp_fallback`
+- Предпочитаемый маршрут и fallback для типа сети
+- Автоматический reconfigure при Wi‑Fi ↔ Mobile
+- Диагностика эффективной политики и route probe
+- Метрики пулов Worker / CF в UI и экспорте
+- Постоянные runtime-логи и безопасный экспорт
+- Токены политики маршрутов в native runtime (1.7.9.2)
+- Route kind отделён от транспорта WebSocket в UI (1.7.9.3)
+- Устаревшие события Direct/Worker не перезаписывают текущий маршрут
+- Более безопасные дефолты и пресет «Рекомендуемый» (1.7.9.1)
+- Убран общий домен CF `pclead.co.uk` — свой домен или встроенный/кэшированный пул
 
-## What changed in v1.8.0 (repository only)
+## Что изменилось в v1.8.0 (только репозиторий)
 
-- Go runtime moved to `native/tgwsproxy/`
-- Documentation layout:
-  - `docs/architecture/`
-  - `docs/development/`
-  - `docs/testing/`
-  - `docs/releases/`
-  - `docs/assets/screenshots/`
-- README updated (structure, routes, build, screenshots)
-- `CHANGELOG.md`, release checklist, manual checklist for 1.8
-- `.gitignore` hardened: `artifacts/`, `runtime-logs/`, logs, secrets, keystores
+- Go runtime в `native/tgwsproxy/`
+- Структура документации: `docs/architecture/`, `docs/development/`, `docs/testing/`, `docs/releases/`, `docs/assets/screenshots/`
+- Обновлены README, `CHANGELOG.md`, release checklist, ручной чеклист 1.8
+- Усилен `.gitignore`: `artifacts/`, `runtime-logs/`, логи, секреты, keystores
 
-## Runtime behavior (v1.8.0)
+## Поведение runtime (v1.8.0)
 
-No new features or routing changes were added for the v1.8.0 tag itself. Behavior matches the 1.7.9.x line already on `main`.
+Новых фич и изменений маршрутизации для тега v1.8.0 не добавлялось. Поведение соответствует линейке 1.7.9.x на `main`.
 
-## Install
+## Установка
 
-Install over the previous APK. If Android reports a signature mismatch, uninstall the old APK and install again.
+Установка поверх предыдущего APK. При несовпадении подписи — удалите старый APK и установите снова.
 
-## Build verification
+## Проверка сборки
 
-- `cd native/tgwsproxy && go test ./tgwsroute/...` (main package tests may fail on Windows host; use Linux/CI or device build)
+- `cd native/tgwsproxy && go test ./tgwsroute/...` (тесты main на Windows могут падать; используйте Linux/CI)
 - `.\gradlew.bat assembleDebug`
-- Release APK: `.\scripts\build-apk.ps1 -Configuration Release` with local keystore env (not in git)
+- Release APK: `.\scripts\build-apk.ps1 -Configuration Release` с локальным `release-signing.env` (не в git)

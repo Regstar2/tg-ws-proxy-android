@@ -1,70 +1,70 @@
 # TGWSProxyAndroid v1.8.0
 
-## Summary
+## Кратко
 
-Maintenance/release cleanup build after the 1.6–1.7 routing work.
+Релиз обслуживания и приведения репозитория в порядок после крупной работы по маршрутизации в ветках 1.6–1.7.
 
-This release finalizes repository structure, documentation, release notes, screenshots, build paths, and test/release checklists. It does not intentionally change runtime or routing behavior compared with the already implemented 1.7.9.x fixes.
+В этом выпуске зафиксированы структура репозитория, документация, release notes, скриншоты, пути сборки и чеклисты тестирования/релиза. Намеренных изменений runtime и маршрутизации по сравнению с уже внедрёнными исправлениями 1.7.9.x нет.
 
-## Since v1.6.0
+## С v1.6.0 (уже в этой сборке)
 
-- Added per-network Wi-Fi/Mobile route policies.
-- Added route toggles for Direct WebSocket, Cloudflare Worker, Cloudflare Proxy, and TCP fallback.
-- Added preferred route and fallback controls per network type.
-- Added automatic reconfigure when switching Wi-Fi ↔ Mobile.
-- Added effective route policy diagnostics.
-- Added route-level probe reports.
-- Added Worker/CF pool metrics.
-- Added persistent runtime logs and safer export.
-- Fixed route policy token handling in native runtime.
-- Fixed route display: route kind is now separated from transport type.
-- Prevented stale Direct/Worker events from overriding current UI route state.
-- Removed `pclead.co.uk` as the default Cloudflare proxy domain (use your own domain or built-in/cached pool).
+- Отдельные политики маршрутов для Wi‑Fi и мобильной сети.
+- Переключатели маршрутов: Direct WebSocket, Cloudflare Worker, Cloudflare Proxy, TCP fallback.
+- Предпочитаемый маршрут и fallback для каждого типа сети.
+- Автоматический reconfigure при переключении Wi‑Fi ↔ Mobile.
+- Диагностика эффективной политики маршрутов.
+- Отчёты проверки (route probe) по маршрутам.
+- Метрики пулов Worker / CF.
+- Постоянные runtime-логи и более безопасный экспорт.
+- Исправлена обработка токенов политики маршрутов в нативном runtime.
+- Исправлено отображение маршрута: **route kind** отделён от типа транспорта.
+- Устаревшие события Direct/Worker больше не перезаписывают текущий маршрут в UI.
+- Убран `pclead.co.uk` как домен Cloudflare proxy по умолчанию (укажите свой домен или используйте встроенный/кэшированный пул).
 
-## What changed in v1.8.0
+## Что изменилось в v1.8.0
 
-- Moved Go runtime to `native/tgwsproxy/`.
-- Reorganized documentation:
+- Go runtime перенесён в `native/tgwsproxy/`.
+- Документация разложена по каталогам:
   - `docs/architecture/`
   - `docs/development/`
   - `docs/testing/`
   - `docs/releases/`
   - `docs/assets/screenshots/`
-- Updated README with current structure, screenshots, route terminology, and build commands.
-- Added/updated release checklist and manual testing checklist.
-- Hardened `.gitignore` for artifacts, runtime logs, secrets, and keystores.
-- Confirmed `versionName 1.8.0`, `versionCode 36`.
+- Обновлён README: структура, скриншоты, терминология маршрутов, команды сборки.
+- Добавлены/обновлены release checklist и ручной чеклист тестирования.
+- Усилен `.gitignore` (артефакты, runtime-логи, секреты, keystores).
+- Подтверждены `versionName 1.8.0`, `versionCode 36`.
 
-## Runtime behavior
+## Поведение runtime
 
-No intentional routing/runtime behavior changes were made specifically for v1.8.0.
+Для тега v1.8.0 **намеренных** изменений маршрутизации и runtime не вносилось.
 
-The important route/runtime fixes from the late 1.7.x line are included:
+В сборку входят важные исправления конца линейки 1.7.x:
 
-- disabled route policy entries should not be selected;
-- `routeKind` is separated from WebSocket transport;
-- stale route events should not override the active route for the current policy generation.
+- отключённые маршруты в политике не должны выбираться;
+- `routeKind` отделён от транспорта WebSocket;
+- устаревшие события маршрута не должны перекрывать активный маршрут для текущего поколения политики.
 
-## Recommended update path
+## Как обновиться
 
-Install over the previous build.  
-If Android rejects installation because of signature mismatch, uninstall the previous APK and install again.
+Установите поверх предыдущей сборки.  
+Если Android отказывает из‑за несовпадения подписи — удалите старый APK и установите заново.
 
 ## APK
 
-Attach **`tgwsproxy-release.apk`** (signed release build).  
-Local signing: copy `release-signing.env.example` → `release-signing.env` (gitignored), then `.\scripts\build-apk.ps1 -Configuration Release`.
+К релизу прикреплён **`tgwsproxy-release.apk`** (подписанный release).  
+Локальная сборка: скопируйте `release-signing.env.example` → `release-signing.env` (в git не попадает), затем `.\scripts\build-apk.ps1 -Configuration Release`.
 
-## Verification checklist
+## Проверка перед публикацией
 
-- Go `tgwsroute` tests: passed (`native/tgwsproxy`).
-- Android `assembleDebug` and `lint`: passed.
-- Android `testDebugUnitTest`: failed on this Windows host (Gradle test worker `ClassNotFoundException` — environment issue, not an app assertion failure). Re-run on Linux/CI or Android Studio if needed.
-- Signed release APK built with local `tgwsproxy-release.jks` via `release-signing.env`.
+- Go-тесты `tgwsroute`: пройдены (`native/tgwsproxy`).
+- Android `assembleDebug` и `lint`: пройдены.
+- Android `testDebugUnitTest`: на этом Windows-хосте не прошли (Gradle test worker, `ClassNotFoundException` — проблема среды, не падение тестов приложения). При необходимости перезапустите на Linux/CI или в Android Studio.
+- Подписанный release APK собран с локальным `tgwsproxy-release.jks` через `release-signing.env`.
 
-## Known limitations
+## Известные ограничения
 
-- This app is not a VPN.
-- It only proxies Telegram traffic configured through SOCKS5.
-- Worker route requires a configured Cloudflare Worker.
-- Shared or rate-limited Cloudflare proxy domains may fail depending on network conditions.
+- Приложение **не является VPN**.
+- Проксируется только трафик Telegram, настроенный на SOCKS5.
+- Маршрут Worker требует настроенный Cloudflare Worker.
+- Общие или ограниченные по rate limit домены Cloudflare proxy могут не работать в зависимости от сети.
