@@ -63,7 +63,7 @@
     <string name="cf_first_title">Prefer Cloudflare Proxy</string>
     <string name="cf_first_hint">Uses Cloudflare Proxy first, then falls back to other enabled routes when allowed by policy.</string>
     <string name="cf_only_title">Cloudflare Proxy only</string>
-    <string name="cf_only_hint">Routes supported Telegram traffic through kws*.pclead.co.uk, or through your configured Cloudflare domain, and does not use direct Telegram upstreams or direct TCP passthrough.</string>
+    <string name="cf_only_hint">Routes supported Telegram traffic through kws*.domain (your Cloudflare domain or built-in pool), and does not use direct Telegram upstreams or direct TCP passthrough.</string>
     <string name="connection_mode_label">Connection mode</string>
     <string name="connection_mode_auto">Auto</string>
     <string name="connection_mode_direct_cf_fallback">Direct + fallback routes</string>

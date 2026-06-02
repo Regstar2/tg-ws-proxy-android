@@ -55,7 +55,7 @@ const (
 	defaultRecvBuf       = 256 * 1024
 	defaultSendBuf       = 256 * 1024
 	defaultPoolSz        = 4
-	defaultCfProxyDomain = "pclead.co.uk"
+	defaultCfProxyDomain = ""
 	wsPoolMaxAge         = 60.0
 	wsBridgeIdle         = 120.0
 

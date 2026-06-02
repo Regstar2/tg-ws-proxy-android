@@ -468,7 +468,7 @@ class SharedPreferencesManualCfDomainRepository(
     }
 
     private companion object {
-        const val DEFAULT_MANUAL_DOMAIN = "pclead.co.uk"
+        const val DEFAULT_MANUAL_DOMAIN = ""
         const val KEY_MANUAL_DOMAINS = "cf_manual_domains"
         const val KEY_LEGACY_MANUAL_DOMAIN = "cfproxy_domain"
     }

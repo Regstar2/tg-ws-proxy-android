@@ -13,7 +13,7 @@ class ConnectionRuntimeConfigTest {
             cfProxyEnabled = true,
             cfProxyPriority = false,
             cfProxyOnly = false,
-            cfDomain = "pclead.co.uk",
+            cfDomain = "example.test",
             workerEnabled = true,
             workerDomain = "example.username.workers.dev",
         )

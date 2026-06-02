@@ -63,7 +63,7 @@
     <string name="cf_first_title">Предпочитать Cloudflare Proxy</string>
     <string name="cf_first_hint">Сначала Cloudflare Proxy, затем другие разрешённые маршруты по политике.</string>
     <string name="cf_only_title">Только Cloudflare Proxy</string>
-    <string name="cf_only_hint">Направляет поддерживаемый Telegram-трафик через kws*.pclead.co.uk или через указанный Cloudflare-домен и не использует прямые Telegram upstream или direct TCP passthrough.</string>
+    <string name="cf_only_hint">Направляет поддерживаемый Telegram-трафик через kws*.domain (ваш Cloudflare-домен или встроенный пул) и не использует прямые Telegram upstream или direct TCP passthrough.</string>
     <string name="connection_mode_label">Режим подключения</string>
     <string name="connection_mode_auto">Авто</string>
     <string name="connection_mode_direct_cf_fallback">Direct + резервные маршруты</string>
