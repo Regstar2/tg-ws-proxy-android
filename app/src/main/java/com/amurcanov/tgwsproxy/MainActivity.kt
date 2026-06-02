@@ -156,6 +156,8 @@ class MainActivity : ComponentActivity() {
 
         val activityPrefs = getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
         applyLanguageMode(parseLanguageMode(activityPrefs.getString("language_mode", LanguageMode.System.name)))
+
+        PersistentLogStore.initIfNeeded(this)
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -252,6 +254,13 @@ private fun ProxyScreen(
     }
     val routePolicyRepository = remember {
         NetworkRoutePolicyRepository(prefs)
+    }
+
+    LaunchedEffect(Unit) {
+        RouteDefaultsMigration.applyIfNeeded(
+            prefs = prefs,
+            repository = routePolicyRepository,
+        )
     }
     val cfDomainListUpdater = remember {
         CfDomainListUpdater(
@@ -498,7 +507,7 @@ private fun ProxyScreen(
 
     DisposableEffect(logsEnabled) {
         if (logsEnabled) {
-            LogManager.startListening()
+            LogManager.startListening(context)
         } else {
             LogManager.stopListening(clear = false)
         }
@@ -799,8 +808,8 @@ private fun ProxyScreen(
         openTelegram(context, proxyUrl)
     }
     val proxyAddress = "127.0.0.1:${portText.ifBlank { "1081" }}"
-    val activePolicyChipText = if (isRunning && uiMetrics.runtime.route.isNotBlank()) {
-        RouteDisplayNames.routeLabel(context, uiMetrics.runtime.route)
+    val activePolicyChipText = if (isRunning) {
+        uiMetrics.runtime.routeLabel(context)
     } else {
         stringResource(connectionMode.displayLabelRes())
     }
@@ -1169,11 +1178,24 @@ private fun ProxyScreen(
                     hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
                     hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
                     isProxyRunning = isRunning,
+                    onApplyRecommendedPreset = {
+                        RouteDefaultsMigration.applyRecommendedPreset1791(
+                            prefs = prefs,
+                            repository = routePolicyRepository,
+                        )
+                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                        refreshRoutePolicySnapshot()
+                        Toast.makeText(context, context.getString(R.string.route_policy_recommended_applied), Toast.LENGTH_SHORT).show()
+                    },
                     onWifiPolicyChange = { policy ->
                         val normalized = NetworkRoutePolicyEditor.normalize(
                             policy.copy(networkType = NetworkProfileType.WIFI),
                         )
                         routePolicyRepository.save(normalized)
+                        RouteDefaultsMigration.markUserModified(prefs)
                         wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                         hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                         refreshRoutePolicySnapshot()
@@ -1184,6 +1206,7 @@ private fun ProxyScreen(
                             policy.copy(networkType = NetworkProfileType.MOBILE),
                         )
                         routePolicyRepository.save(normalized)
+                        RouteDefaultsMigration.markUserModified(prefs)
                         mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                         hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                         refreshRoutePolicySnapshot()
@@ -1191,6 +1214,7 @@ private fun ProxyScreen(
                     },
                     onResetWifiPolicy = {
                         routePolicyRepository.reset(NetworkProfileType.WIFI)
+                        RouteDefaultsMigration.markUserModified(prefs)
                         wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                         hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                         refreshRoutePolicySnapshot()
@@ -1198,6 +1222,7 @@ private fun ProxyScreen(
                     },
                     onResetMobilePolicy = {
                         routePolicyRepository.reset(NetworkProfileType.MOBILE)
+                        RouteDefaultsMigration.markUserModified(prefs)
                         mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                         hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                         refreshRoutePolicySnapshot()
@@ -1826,6 +1851,274 @@ private fun ProxyScreen(
                         if (isSavingLogs) stringResource(R.string.saving_logs) else stringResource(R.string.save_logs),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Persistent file logging (optional)
+                var persistentEnabled by rememberSaveable {
+                    mutableStateOf(prefs.getBoolean("persistent_logs_enabled", false))
+                }
+                var persistentLevelName by rememberSaveable {
+                    mutableStateOf(
+                        prefs.getString("persistent_logs_level", PersistentLogVerbosity.IMPORTANT.name)
+                            ?: PersistentLogVerbosity.IMPORTANT.name
+                    )
+                }
+                var retentionDays by rememberSaveable {
+                    mutableStateOf(prefs.getInt("persistent_logs_retention_days", 7).coerceAtLeast(1))
+                }
+                var maxSizeMb by rememberSaveable {
+                    mutableStateOf(prefs.getInt("persistent_logs_max_size_mb", 50).coerceAtLeast(10))
+                }
+                var levelMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                var retentionMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                var sizeMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                var showClearPersistentConfirm by remember { mutableStateOf(false) }
+                var persistentActionStatus by rememberSaveable { mutableStateOf("") }
+                var persistentSizeText by rememberSaveable { mutableStateOf("") }
+
+                LaunchedEffect(persistentEnabled, retentionDays, maxSizeMb) {
+                    // Periodic size refresh; keep it lightweight.
+                    val bytes = PersistentLogStore.totalSizeBytes(context)
+                    persistentSizeText = ConnectionMetricsFormatter.formatBytes(bytes)
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.persistent_logs_title), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(
+                                if (persistentEnabled) R.string.persistent_logs_enabled_hint else R.string.persistent_logs_disabled_hint
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = persistentEnabled,
+                        onCheckedChange = {
+                            persistentEnabled = it
+                            PersistentLoggingPrefsStore.saveEnabled(prefs, it)
+                            if (it) {
+                                PersistentLogStore.initIfNeeded(context)
+                            } else {
+                                PersistentLogStore.flushAsync()
+                            }
+                        },
+                    )
+                }
+
+                Text(
+                    text = stringResource(R.string.persistent_logs_size, persistentSizeText.ifBlank { "—" }),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+                val writeErr = PersistentLogStore.getLastWriteError()
+                if (!writeErr.isNullOrBlank()) {
+                    Text(
+                        text = stringResource(R.string.persistent_logs_write_error, writeErr),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                }
+
+                // Level selector
+                Text(stringResource(R.string.persistent_logs_level_title), style = MaterialTheme.typography.bodySmall)
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp)) {
+                    OutlinedButton(
+                        onClick = { levelMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            text = when (runCatching { PersistentLogVerbosity.valueOf(persistentLevelName) }.getOrDefault(PersistentLogVerbosity.IMPORTANT)) {
+                                PersistentLogVerbosity.ERRORS_ONLY -> stringResource(R.string.persistent_logs_level_errors)
+                                PersistentLogVerbosity.IMPORTANT -> stringResource(R.string.persistent_logs_level_important)
+                                PersistentLogVerbosity.VERBOSE -> stringResource(R.string.persistent_logs_level_verbose)
+                                PersistentLogVerbosity.DEBUG -> stringResource(R.string.persistent_logs_level_debug)
+                            },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = levelMenuExpanded,
+                        onDismissRequest = { levelMenuExpanded = false },
+                    ) {
+                        fun pick(v: PersistentLogVerbosity) {
+                            persistentLevelName = v.name
+                            PersistentLoggingPrefsStore.saveVerbosity(prefs, v)
+                            levelMenuExpanded = false
+                        }
+                        DropdownMenuItem(text = { Text(stringResource(R.string.persistent_logs_level_errors)) }, onClick = { pick(PersistentLogVerbosity.ERRORS_ONLY) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.persistent_logs_level_important)) }, onClick = { pick(PersistentLogVerbosity.IMPORTANT) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.persistent_logs_level_verbose)) }, onClick = { pick(PersistentLogVerbosity.VERBOSE) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.persistent_logs_level_debug)) }, onClick = { pick(PersistentLogVerbosity.DEBUG) })
+                    }
+                }
+
+                // Retention selector
+                Text(stringResource(R.string.persistent_logs_retention_title), style = MaterialTheme.typography.bodySmall)
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp)) {
+                    val retentionOptions = listOf(1, 3, 7, 30)
+                    OutlinedButton(
+                        onClick = { retentionMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.persistent_logs_retention_value, retentionDays),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = retentionMenuExpanded,
+                        onDismissRequest = { retentionMenuExpanded = false },
+                    ) {
+                        retentionOptions.forEach { days ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.persistent_logs_retention_value, days)) },
+                                onClick = {
+                                    retentionDays = days
+                                    PersistentLoggingPrefsStore.saveRetentionDays(prefs, days)
+                                    retentionMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Size selector
+                Text(stringResource(R.string.persistent_logs_max_size_title), style = MaterialTheme.typography.bodySmall)
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp)) {
+                    val sizeOptions = listOf(10, 50, 100)
+                    OutlinedButton(
+                        onClick = { sizeMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.persistent_logs_max_size_value, maxSizeMb),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = sizeMenuExpanded,
+                        onDismissRequest = { sizeMenuExpanded = false },
+                    ) {
+                        sizeOptions.forEach { mb ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.persistent_logs_max_size_value, mb)) },
+                                onClick = {
+                                    maxSizeMb = mb
+                                    PersistentLoggingPrefsStore.saveMaxSizeMb(prefs, mb)
+                                    sizeMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                runCatching {
+                                    val report = PersistentLogExport.exportZip(context)
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/zip"
+                                        putExtra(Intent.EXTRA_STREAM, report.uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, context.getString(R.string.persistent_logs_export)))
+                                    persistentActionStatus = context.getString(
+                                        R.string.persistent_logs_export_done,
+                                        report.fileName,
+                                        report.fileCount,
+                                    )
+                                }.onFailure { e ->
+                                    persistentActionStatus = context.getString(
+                                        R.string.persistent_logs_export_failed,
+                                        e.javaClass.simpleName,
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = true,
+                    ) {
+                        Text(stringResource(R.string.persistent_logs_export))
+                    }
+                    OutlinedButton(
+                        onClick = { showClearPersistentConfirm = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.persistent_logs_clear))
+                    }
+                }
+
+                if (persistentActionStatus.isNotBlank()) {
+                    Text(
+                        text = persistentActionStatus,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+
+                if (showClearPersistentConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showClearPersistentConfirm = false },
+                        title = { Text(stringResource(R.string.persistent_logs_clear_title)) },
+                        text = { Text(stringResource(R.string.persistent_logs_clear_message)) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showClearPersistentConfirm = false
+                                    coroutineScope.launch {
+                                        runCatching {
+                                            PersistentLogStore.clearAll(context)
+                                            val bytes = PersistentLogStore.totalSizeBytes(context)
+                                            persistentSizeText = ConnectionMetricsFormatter.formatBytes(bytes)
+                                            persistentActionStatus = context.getString(R.string.persistent_logs_clear_done)
+                                        }.onFailure { e ->
+                                            persistentActionStatus = context.getString(
+                                                R.string.persistent_logs_clear_failed,
+                                                e.javaClass.simpleName,
+                                            )
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.persistent_logs_clear_confirm))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showClearPersistentConfirm = false }) {
+                                Text(stringResource(R.string.persistent_logs_clear_cancel))
+                            }
+                        },
                     )
                 }
                 }
@@ -2594,27 +2887,36 @@ fun TipsDialog(onDismiss: () -> Unit, onShowOnboarding: () -> Unit) {
 fun formatLogLine(raw: String): String {
     // Raw logcat line example:
     // 03-24 14:30:45.057 I/TgWsProxy(24567): INFO  11:30:45 WS pool warmup started...
-    // We want to extract: "11:30:45 WS pool warmup started..."
+    // Prefer logcat's own timestamp to avoid timezone/clock mismatches.
+    val timePrefix = runCatching {
+        // "MM-dd HH:mm:ss.SSS" -> time is at [6, 14)
+        if (raw.length >= 14) raw.substring(6, 14) else ""
+    }.getOrDefault("")
     val infoIdx = raw.indexOf("INFO  ")
     if (infoIdx >= 0) {
-        return "• " + raw.substring(infoIdx + 6).trim()
+        val msg = raw.substring(infoIdx + 6).trim()
+        return "• " + (if (timePrefix.isNotBlank()) "$timePrefix " else "") + msg
     }
     val warnIdx = raw.indexOf("WARN  ")
     if (warnIdx >= 0) {
-        return "⚠ " + raw.substring(warnIdx + 6).trim()
+        val msg = raw.substring(warnIdx + 6).trim()
+        return "⚠ " + (if (timePrefix.isNotBlank()) "$timePrefix " else "") + msg
     }
     val errIdx = raw.indexOf("ERROR ")
     if (errIdx >= 0) {
-        return "✖ " + raw.substring(errIdx + 6).trim()
+        val msg = raw.substring(errIdx + 6).trim()
+        return "✖ " + (if (timePrefix.isNotBlank()) "$timePrefix " else "") + msg
     }
     val dbgIdx = raw.indexOf("DEBUG ")
     if (dbgIdx >= 0) {
-        return "◦ " + raw.substring(dbgIdx + 6).trim()
+        val msg = raw.substring(dbgIdx + 6).trim()
+        return "◦ " + (if (timePrefix.isNotBlank()) "$timePrefix " else "") + msg
     }
     // Fallback: try to find the message after ): 
     val msgIdx = raw.indexOf("): ")
     if (msgIdx >= 0) {
-        return "• " + raw.substring(msgIdx + 3).trim()
+        val msg = raw.substring(msgIdx + 3).trim()
+        return "• " + (if (timePrefix.isNotBlank()) "$timePrefix " else "") + msg
     }
     return raw.trim()
 }
@@ -2689,12 +2991,15 @@ object LogManager {
     private var job: Job? = null
     private var logcatProcess: Process? = null
 
-    fun startListening() {
+    fun startListening(context: Context) {
         if (job?.isActive == true) return
         logs.value = emptyList()
         job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                val process = Runtime.getRuntime().exec(arrayOf("logcat", "-v", "time", "-s", "$LOG_TAG:I"))
+                val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
+                val persistent = PersistentLoggingPrefsStore.load(prefs)
+                val minLevel = if (persistent.enabled && persistent.verbosity == PersistentLogVerbosity.DEBUG) "D" else "I"
+                val process = Runtime.getRuntime().exec(arrayOf("logcat", "-v", "time", "-s", "$LOG_TAG:$minLevel"))
                 logcatProcess = process
                 val reader = BufferedReader(InputStreamReader(process.inputStream))
 
@@ -2703,6 +3008,10 @@ object LogManager {
                     logs.update { current ->
                         val next = current + line
                         if (next.size > MAX_LOG_LINES) next.takeLast(MAX_LOG_LINES) else next
+                    }
+                    runCatching {
+                        val p = PersistentLoggingPrefsStore.load(prefs)
+                        PersistentLogStore.logRawLogcatLine(context, p, line)
                     }
                 }
             } catch (e: Exception) {

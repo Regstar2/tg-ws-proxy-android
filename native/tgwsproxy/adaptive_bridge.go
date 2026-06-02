@@ -39,7 +39,7 @@ func applyAdaptiveProfile(settings runtimeSettings) {
 }
 
 func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool, dc int, isMedia bool) []routeKind {
-	base := tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect)
+	base := filterRoutesByPolicy(settings, tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect), "adaptive_base")
 	if mode != modeAuto && mode != modeDirectWithFallback {
 		return base
 	}
@@ -49,6 +49,13 @@ func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDi
 
 	strategy := tgwsroute.ParseAutoStrategy(settings.AutoStrategy)
 	sel := tgwsroute.AdaptiveOrderRoutes(base, store, toRouteSettings(settings), strategy, dc, isMedia, skipDirect)
+	// Absolute policy filter: even if adaptive logic returns something stale, drop it.
+	filtered := filterRoutesByPolicy(settings, sel.Routes, "adaptive_selection")
+	if len(filtered) == 0 {
+		// No allowed candidates scored: choose safe fallback from allowed routes only.
+		filtered = chooseFallbackAllowed(settings, base)
+	}
+	sel.Routes = filtered
 	lastAdaptiveMu.Lock()
 	lastAdaptiveSel = sel
 	lastAdaptiveMu.Unlock()
@@ -59,13 +66,57 @@ func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDi
 	}
 	logInfo.Printf("Auto route scoring network=%s dc=%d media=%t", netLabel, dc, isMedia)
 	for route, score := range sel.Scores {
+		if !isRouteAllowedByPolicy(settings, route) {
+			continue
+		}
 		logDebug.Printf("Auto candidate %s score=%.1f", route, score)
 	}
 	if len(sel.Routes) > 0 {
-		logInfo.Printf("Auto selected route=%s reason=%s",
-			sel.Routes[0], tgwsroute.FormatAdaptiveSelectionReason(sel, dc, isMedia, netLabel))
+		selected := sel.Routes[0]
+		logInfo.Printf("Route selected network=%s strategy=%s routeKind=%s transport=%s policyGeneration=%d allowed=%s preferred=%s reason=%s",
+			netLabel,
+			settings.Mode,
+			selected,
+			transportForRoute(selected),
+			settings.PolicyGen,
+			strings.Join(routeKindStrings(allowedRoutesList(settings)), "|"),
+			settings.Preferred,
+			tgwsroute.FormatAdaptiveSelectionReason(sel, dc, isMedia, netLabel),
+		)
 	}
 	return sel.Routes
+}
+
+func chooseFallbackAllowed(settings runtimeSettings, base []routeKind) []routeKind {
+	// Fallback rules (policy-only):
+	// 1) preferred (if allowed)
+	// 2) cf_proxy_ws
+	// 3) direct_ws
+	// 4) tcp_fallback
+	// 5) cf_worker_ws only if explicitly allowed
+	candidates := allowedRoutesList(settings)
+	if len(candidates) == 0 {
+		logWarn.Printf("No allowed routes in policy (generation=%d)", settings.PolicyGen)
+		return nil
+	}
+	preferred := settings.Preferred
+	if preferred != "" && isRouteAllowedByPolicy(settings, preferred) {
+		return []routeKind{preferred}
+	}
+	for _, r := range []routeKind{routeCFProxyWS, routeDirectWS, routeTCPFallback, routeCFWorkerWS} {
+		if isRouteAllowedByPolicy(settings, r) {
+			return []routeKind{r}
+		}
+	}
+	// As last resort, return the first allowed.
+	return []routeKind{candidates[0]}
+}
+
+func recordAdaptiveSessionSuccess(route routeKind, dc int, isMedia bool, latencyMs int64, closeReason string, settings runtimeSettings) {
+	if closeReason == "" {
+		closeReason = "session_end"
+	}
+	recordAdaptiveSuccessIfNotCancelled(route, dc, isMedia, latencyMs, closeReason, settings.PolicyGen)
 }
 
 func recordAdaptiveSuccess(route routeKind, dc int, isMedia bool, latencyMs int64) {
@@ -77,11 +128,39 @@ func recordAdaptiveSuccess(route routeKind, dc int, isMedia bool, latencyMs int6
 	logInfo.Printf("Auto last-good updated route=%s dc=%d media=%t", route, dc, isMedia)
 }
 
+func recordAdaptiveSuccessIfNotCancelled(route routeKind, dc int, isMedia bool, latencyMs int64, closeReason string, sessionGen uint64) {
+	settings := getRuntimeSettings()
+	if sessionGen != settings.PolicyGen {
+		logInfo.Printf("Skip current stats update for stale session route=%s sessionGeneration=%d currentGeneration=%d", route, sessionGen, settings.PolicyGen)
+		return
+	}
+	kind := tgwsroute.ClassifyFailureReason(closeReason)
+	if tgwsroute.IsNeutralFailure(kind) {
+		logInfo.Printf("Skip last-good update: close reason=%s route=%s", closeReason, route)
+		return
+	}
+	if settings.PolicyPresent && !isRouteAllowedByPolicy(settings, route) {
+		logInfo.Printf("Skip last-good update: route disabled by current policy route=%s allowed=%s",
+			route, strings.Join(routeKindStrings(allowedRoutesList(settings)), "|"))
+		return
+	}
+	recordAdaptiveSuccess(route, dc, isMedia, latencyMs)
+}
+
 func recordAdaptiveFailure(route routeKind, dc int, isMedia bool, reason string, latencyMs int64) {
-	adaptiveStoreMu.Lock()
-	defer adaptiveStoreMu.Unlock()
+	settings := getRuntimeSettings()
 	kind := tgwsroute.ClassifyFailureReason(reason)
+	adaptiveStoreMu.Lock()
 	adaptiveStore.RecordFailureClassified(route, dc, isMedia, kind, reason, latencyMs)
+	adaptiveStoreMu.Unlock()
+	if settings.PolicyPresent && !isRouteAllowedByPolicy(settings, route) {
+		logInfo.Printf("Skip current stats update route=%s reason=disabled_by_policy generation=%d", route, settings.PolicyGen)
+		return
+	}
+	if tgwsroute.IsNeutralFailure(kind) {
+		logInfo.Printf("Skip current route display update routeKind=%s reason=%s", route, kind)
+		return
+	}
 	updateProxyMetrics(route, latencyMs, string(kind))
 	logInfo.Printf("Auto updated stats route=%s failure kind=%s dc=%d media=%t", route, kind, dc, isMedia)
 }

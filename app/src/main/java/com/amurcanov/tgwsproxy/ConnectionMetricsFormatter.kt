@@ -4,6 +4,16 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 object ConnectionMetricsFormatter {
+    fun formatBytes(bytes: Long): String {
+        if (bytes < 0) return "0 B"
+        return when {
+            bytes < 1024L -> "$bytes B"
+            bytes < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+            bytes < 1024L * 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+            else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+        }
+    }
+
     fun formatSpeed(bytesPerSecond: Double): String {
         if (bytesPerSecond <= 0.5) {
             return ""

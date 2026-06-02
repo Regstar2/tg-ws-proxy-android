@@ -7,13 +7,20 @@ import org.junit.Test
 class ProxyRuntimeMetricsTest {
     @Test
     fun parseStatus_mapsFields() {
-        val raw = "running=1;mode=auto;route=cf_worker_ws;active=4;bytes_up=100;bytes_down=200;latency_ms=210;last_error=;" +
+        val raw = "running=1;mode=auto;route=cf_worker_ws;active_route_kind=cf_worker_ws;transport_type=websocket;" +
+            "policy_generation=7;allowed_routes=cf_worker_ws|cf_proxy_ws;preferred_route=cf_worker_ws;" +
+            "active=4;bytes_up=100;bytes_down=200;latency_ms=210;last_error=;" +
             "worker_pool_hits=3;worker_pool_misses=5;worker_pool_idle=2;worker_pool_refill_errors=1;" +
             "cf_pool_hits=4;cf_pool_misses=2;cf_pool_idle=1;cf_pool_refill_errors=0"
         val metrics = ProxyRuntimeMetrics.parseStatus(raw)!!
         assertTrue(metrics.running)
         assertEquals("auto", metrics.mode)
         assertEquals("cf_worker_ws", metrics.route)
+        assertEquals("cf_worker_ws", metrics.activeRouteKind)
+        assertEquals("websocket", metrics.transportType)
+        assertEquals(7L, metrics.policyGeneration)
+        assertEquals("cf_worker_ws|cf_proxy_ws", metrics.allowedRoutes)
+        assertEquals("cf_worker_ws", metrics.preferredRoute)
         assertEquals(4, metrics.activeConnections)
         assertEquals(100, metrics.bytesUp)
         assertEquals(200, metrics.bytesDown)
@@ -62,6 +69,12 @@ class ProxyRuntimeMetricsTest {
         assertEquals(R.string.route_display_worker, RouteDisplayNames.routeLabelRes("cf_worker_ws"))
         assertEquals(R.string.route_display_cf_proxy, RouteDisplayNames.routeLabelRes("cf_proxy_ws"))
         assertEquals(R.string.route_display_direct_ws, RouteDisplayNames.routeLabelRes("direct_ws"))
+    }
+
+    @Test
+    fun transportLabelRes_knownTransports() {
+        assertEquals(R.string.route_display_transport_websocket, RouteDisplayNames.transportLabelRes("websocket"))
+        assertEquals(R.string.route_display_transport_tcp, RouteDisplayNames.transportLabelRes("tcp"))
     }
 
     @Test

@@ -3,7 +3,13 @@ package com.amurcanov.tgwsproxy
 data class ProxyRuntimeMetrics(
     val running: Boolean = false,
     val mode: String = "",
+    /** @deprecated Legacy field; prefer [activeRouteKind]. */
     val route: String = "",
+    val activeRouteKind: String = "",
+    val transportType: String = "",
+    val policyGeneration: Long = 0,
+    val allowedRoutes: String = "",
+    val preferredRoute: String = "",
     val activeConnections: Long = 0,
     val totalConnections: Long = 0,
     val bytesUp: Long = 0,
@@ -20,7 +26,14 @@ data class ProxyRuntimeMetrics(
     val cfPoolErrors: Int = 0,
     val updatedAtMs: Long = System.currentTimeMillis(),
 ) {
-    fun routeLabel(context: android.content.Context): String = RouteDisplayNames.routeLabel(context, route)
+    val currentRouteKind: String
+        get() = activeRouteKind.ifBlank { route }
+
+    fun routeLabel(context: android.content.Context): String =
+        RouteDisplayNames.currentRouteLabel(context, currentRouteKind, running)
+
+    fun transportLabel(context: android.content.Context): String =
+        RouteDisplayNames.transportLabel(context, transportType)
 
     fun modeLabel(context: android.content.Context): String = RouteDisplayNames.modeLabel(context, mode)
 
@@ -36,10 +49,16 @@ data class ProxyRuntimeMetrics(
                     map[part.substring(0, idx)] = part.substring(idx + 1)
                 }
             }
+            val activeRoute = map["active_route_kind"].orEmpty().ifBlank { map["route"].orEmpty() }
             return ProxyRuntimeMetrics(
                 running = map["running"] == "1",
                 mode = map["mode"].orEmpty(),
-                route = map["route"].orEmpty(),
+                route = activeRoute,
+                activeRouteKind = activeRoute,
+                transportType = map["transport_type"].orEmpty(),
+                policyGeneration = map["policy_generation"]?.toLongOrNull() ?: 0,
+                allowedRoutes = map["allowed_routes"].orEmpty(),
+                preferredRoute = map["preferred_route"].orEmpty(),
                 activeConnections = map["active"]?.toLongOrNull() ?: 0,
                 bytesUp = map["bytes_up"]?.toLongOrNull() ?: 0,
                 bytesDown = map["bytes_down"]?.toLongOrNull() ?: 0,

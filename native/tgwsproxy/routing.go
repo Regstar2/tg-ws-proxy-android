@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"sync/atomic"
 
 	"tg-ws-proxy/tgwsroute"
 )
@@ -49,6 +50,15 @@ type runtimeSettings struct {
 	NetworkProfileLabel string
 	AdaptiveRouteStats  string
 	AutoStrategy        string
+	// Per-network route policy (from Android @route_* tokens).
+	PolicyPresent bool
+	AllowDirect   bool
+	AllowWorker   bool
+	AllowCFProxy  bool
+	AllowTCP      bool
+	Preferred     routeKind // empty means "no explicit preferred"
+	AllowFallback bool
+	PolicyGen     uint64
 }
 
 func (s runtimeSettings) workerRouteAvailable() bool {
@@ -73,16 +83,90 @@ func init() {
 	cfPool.SetBuiltinDomains(tgwsroute.BuiltInCFDomains())
 }
 
+var policyGenCounter atomic.Uint64
+
 func setRuntimeSettings(cfg runtimeSettings) {
+	prev := getRuntimeSettings()
 	cfg.CF = normalizeCfProxyConfig(cfg.CF)
 	cfg.Worker.Domain = NormalizeWorkerDomain(cfg.Worker.Domain)
 	cfg.CFManualDomains = tgwsroute.NormalizeCFDomains(cfg.CFManualDomains)
+	cfg.PolicyGen = policyGenCounter.Add(1)
 	runtimeCfgMu.Lock()
 	runtimeCfg = cfg
 	runtimeCfgMu.Unlock()
+	resetProxyRouteDisplayState()
 	cfPool.SetManualDomains(cfg.CFManualDomains)
 	cfPool.SetCachedUpstreamDomains(cfg.CFCachedUpstream)
 	applyAdaptiveProfile(cfg)
+	logPolicyChange(prev, cfg)
+}
+
+func parsePreferredRoute(raw string) routeKind {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "direct_ws", "direct":
+		return routeDirectWS
+	case "worker_ws", "cf_worker_ws", "worker":
+		return routeCFWorkerWS
+	case "cf_proxy_ws", "cf":
+		return routeCFProxyWS
+	case "tcp_fallback", "tcp":
+		return routeTCPFallback
+	default:
+		return ""
+	}
+}
+
+func allowedRoutesList(s runtimeSettings) []routeKind {
+	if !s.PolicyPresent {
+		return nil
+	}
+	out := make([]routeKind, 0, 4)
+	if s.AllowDirect {
+		out = append(out, routeDirectWS)
+	}
+	if s.AllowWorker {
+		out = append(out, routeCFWorkerWS)
+	}
+	if s.AllowCFProxy {
+		out = append(out, routeCFProxyWS)
+	}
+	if s.AllowTCP {
+		out = append(out, routeTCPFallback)
+	}
+	return out
+}
+
+func routeKindStrings(routes []routeKind) []string {
+	out := make([]string, 0, len(routes))
+	for _, r := range routes {
+		out = append(out, string(r))
+	}
+	return out
+}
+
+func logPolicyChange(old, cur runtimeSettings) {
+	if !cur.PolicyPresent {
+		return
+	}
+	oldAllowed := strings.Join(routeKindStrings(allowedRoutesList(old)), "|")
+	newAllowed := strings.Join(routeKindStrings(allowedRoutesList(cur)), "|")
+	if oldAllowed == "" {
+		oldAllowed = "none"
+	}
+	if newAllowed == "" {
+		newAllowed = "none"
+	}
+	logInfo.Printf("Policy changed generation=%d oldRoutes=%s newRoutes=%s preferred=%s fallback=%t",
+		cur.PolicyGen, oldAllowed, newAllowed, cur.Preferred, cur.AllowFallback)
+
+	// Close pools for disabled routes (best-effort). This prevents "ghost" worker/direct usage.
+	if !cur.AllowWorker {
+		workerPool.CloseAll()
+	}
+	if !cur.AllowDirect {
+		wsPool.CloseAll()
+	}
 }
 
 func getRuntimeSettings() runtimeSettings {
@@ -183,11 +267,62 @@ func newCFDomainPool() *tgwsroute.CFDomainPool {
 // ---------------------------------------------------------------------------
 
 func routesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool) []routeKind {
-	return tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect)
+	base := tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect)
+	return filterRoutesByPolicy(settings, base, "routesForMode")
 }
 
 func primaryRoutesBeforeDirectWS(mode connectionMode, settings runtimeSettings) []routeKind {
 	return tgwsroute.PrimaryRoutesBeforeDirectWS(mode, toRouteSettings(settings))
+}
+
+func isRouteAllowedByPolicy(settings runtimeSettings, r routeKind) bool {
+	if !settings.PolicyPresent {
+		return true
+	}
+	switch r {
+	case routeDirectWS:
+		return settings.AllowDirect
+	case routeCFWorkerWS:
+		return settings.AllowWorker
+	case routeCFProxyWS:
+		return settings.AllowCFProxy
+	case routeTCPFallback:
+		return settings.AllowTCP
+	default:
+		return false
+	}
+}
+
+func filterRoutesByPolicy(settings runtimeSettings, routes []routeKind, reason string) []routeKind {
+	if !settings.PolicyPresent {
+		return routes
+	}
+	if len(routes) == 0 {
+		return routes
+	}
+	before := strings.Join(routeKindStrings(routes), "|")
+	allowed := strings.Join(routeKindStrings(allowedRoutesList(settings)), "|")
+	out := make([]routeKind, 0, len(routes))
+	var dropped []routeKind
+	for _, r := range routes {
+		if isRouteAllowedByPolicy(settings, r) {
+			out = append(out, r)
+		} else {
+			dropped = append(dropped, r)
+		}
+	}
+	after := strings.Join(routeKindStrings(out), "|")
+	if after == "" {
+		after = "none"
+	}
+	if allowed == "" {
+		allowed = "none"
+	}
+	if len(dropped) > 0 {
+		logInfo.Printf("Route policy filter reason=%s allowed=%s before=%s after=%s dropped=%s",
+			reason, allowed, before, after, strings.Join(routeKindStrings(dropped), "|"))
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +331,11 @@ func primaryRoutesBeforeDirectWS(mode connectionMode, settings runtimeSettings) 
 
 func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
 	settings := getRuntimeSettings()
+	if settings.PolicyPresent && !settings.AllowWorker {
+		logWarn.Printf("[%s] DC%d%s Blocked endpoint build route=cf_worker_ws reason=disabled_by_policy allowed=%s",
+			label, dc, mediaTag(isMedia), strings.Join(routeKindStrings(allowedRoutesList(settings)), "|"))
+		return false, "disabled_by_policy"
+	}
 	domain := settings.Worker.Domain
 	if !settings.Worker.Enabled || domain == "" {
 		logDebug.Printf("[%s] DC%d skipping Worker route: domain is empty", label, dc)
@@ -250,6 +390,7 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 	}
 
 	logInfo.Printf("[%s] DC%d%s Worker WS connected host=%s", label, dc, mTag, domain)
+	noteActiveRoute(routeCFWorkerWS)
 	stats.connectionsCfWorker.Add(1)
 
 	if err := ws.Send(init); err != nil {
@@ -258,14 +399,15 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 	}
 
 	summary := bridgeWS(ctx, client, ws, label, dc, domain, 443, isMedia, splitter)
-	if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
-		recordAdaptiveSuccess(routeCFWorkerWS, dc, isMedia, 0)
-	}
+	recordAdaptiveSessionSuccess(routeCFWorkerWS, dc, isMedia, 0, summary.String(), settings)
 	return true, summary.String()
 }
 
 func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
 	settings := getRuntimeSettings()
+	if settings.PolicyPresent && !settings.AllowCFProxy {
+		return false, "disabled_by_policy"
+	}
 	if !settings.CF.Enabled {
 		return false, "cfproxy_disabled"
 	}
@@ -295,9 +437,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		ok, reason, failureKind, latencyMs := cfProxyDialHost(ctx, client, init, label, dc, isMedia, splitter, host, baseDomain)
 		if ok {
 			cfPool.MarkSuccess(wsDC, baseDomain, latencyMs)
-			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
-				recordAdaptiveSuccess(routeCFProxyWS, dc, isMedia, latencyMs)
-			}
+			recordAdaptiveSessionSuccess(routeCFProxyWS, dc, isMedia, latencyMs, reason, settings)
 			logInfo.Printf("[%s] DC%d%s CF proxy selected domain=%s", label, dc, mTag, baseDomain)
 			return true, reason
 		}
@@ -357,6 +497,7 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 	}
 
 	logInfo.Printf("[%s] DC%d%s cfproxy connected host=%s via=%s", label, dc, mTag, host, usedTarget)
+	noteActiveRoute(routeCFProxyWS)
 	stats.connectionsCfProxy.Add(1)
 
 	if err := ws.Send(init); err != nil {
@@ -423,7 +564,8 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 		case routeTCPFallback:
 			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s", label, dc, mTag, joinAddr(target, port))
 			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
-				recordAdaptiveSuccess(routeTCPFallback, dc, isMedia, 0)
+				noteActiveRoute(routeTCPFallback)
+				recordAdaptiveSessionSuccess(routeTCPFallback, dc, isMedia, 0, "", settings)
 				return true
 			}
 			recordAdaptiveFailure(routeTCPFallback, dc, isMedia, "tcp_failed", 0)

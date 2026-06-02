@@ -5,9 +5,10 @@ plugins {
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
+    val nativeDir = rootProject.file("native/tgwsproxy")
     val goSources = files(
-        rootProject.fileTree(rootProject.projectDir) { include("*.go") },
-        rootProject.fileTree(rootProject.file("tgwsroute")) { include("**/*.go") },
+        rootProject.fileTree(nativeDir) { include("*.go") },
+        rootProject.fileTree(nativeDir.resolve("tgwsroute")) { include("**/*.go") },
     )
     val output = project.file("src/main/jniLibs/arm64-v8a/libtgwsproxy.so")
     val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
@@ -45,8 +46,8 @@ android {
         applicationId = "com.amurcanov.tgwsproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.7.8"
+        versionCode = 36
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

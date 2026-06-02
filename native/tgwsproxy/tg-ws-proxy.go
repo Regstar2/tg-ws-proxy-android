@@ -2138,6 +2138,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	// Absolute policy guard: if direct_ws is disabled, never attempt direct WS path.
+	if settings.PolicyPresent && !settings.AllowDirect {
+		logInfo.Printf("[%s] DC%d%s direct_ws disabled by policy -> fallback chain",
+			label, dc, mTag)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		return
+	}
+
 	// -- WS blacklist check --
 	wsBlackMu.RLock()
 	blacklisted := wsBlacklist[dcKey]
@@ -2313,11 +2321,8 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	delete(dcFailUntil, dcKey)
 	dcFailMu.Unlock()
 
-	if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
-		recordAdaptiveSuccess(routeDirectWS, dc, isMedia, 0)
-	}
-
 	stats.connectionsWs.Add(1)
+	noteActiveRoute(routeDirectWS)
 
 	// Send init packet
 	if err := ws.Send(init); err != nil {
@@ -2330,7 +2335,8 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	}
 
 	// Bidirectional bridge
-	bridgeWS(ctx, conn, ws, label, dc, dst, port, isMedia, splitter)
+	summary := bridgeWS(ctx, conn, ws, label, dc, dst, port, isMedia, splitter)
+	recordAdaptiveSessionSuccess(routeDirectWS, dc, isMedia, 0, summary.String(), settings)
 }
 
 // ---------------------------------------------------------------------------
@@ -2417,11 +2423,17 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		// Periodic pool maintenance
 		go wsPool.Maintain(srvCtx, dcOptMap)
 	}
-	if settings.workerRouteAvailable() && poolSize > 0 {
+	workerWarmup := false
+	if settings.PolicyPresent {
+		workerWarmup = settings.AllowWorker && settings.Worker.Enabled && settings.Worker.Domain != "" && poolSize > 0
+	} else {
+		workerWarmup = settings.workerRouteAvailable() && poolSize > 0
+	}
+	if workerWarmup {
 		workerPool.Warmup(dcOptMap, settings.Worker.Domain)
 		go workerPool.Maintain(srvCtx, dcOptMap, settings.Worker.Domain)
 	} else {
-		logInfo.Printf("  Worker pool warmup skipped (mode=%s)", settings.Mode)
+		logInfo.Printf("  Worker pool warmup skipped (worker disabled or unavailable)")
 	}
 
 	// Track active connections for graceful shutdown
@@ -2561,7 +2573,7 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.Worker.Enabled = parseBoolValue(val)
 			case "worker_domain":
 				settings.Worker.Domain = NormalizeWorkerDomain(val)
-				if settings.Worker.Domain != "" {
+				if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
 					settings.Worker.Enabled = true
 				}
 			case "network_profile_id":
@@ -2574,6 +2586,24 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.AdaptiveRouteStats = val
 			case "auto_strategy":
 				settings.AutoStrategy = val
+			case "route_direct_ws":
+				settings.PolicyPresent = true
+				settings.AllowDirect = parseBoolValue(val)
+			case "route_worker_ws":
+				settings.PolicyPresent = true
+				settings.AllowWorker = parseBoolValue(val)
+			case "route_cf_proxy_ws":
+				settings.PolicyPresent = true
+				settings.AllowCFProxy = parseBoolValue(val)
+			case "route_tcp_fallback":
+				settings.PolicyPresent = true
+				settings.AllowTCP = parseBoolValue(val)
+			case "preferred_route":
+				settings.PolicyPresent = true
+				settings.Preferred = parsePreferredRoute(val)
+			case "route_fallback":
+				settings.PolicyPresent = true
+				settings.AllowFallback = parseBoolValue(val)
 			}
 			continue
 		}
@@ -2592,8 +2622,20 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 	if settings.Mode == "" {
 		settings.Mode = legacyModeFromCF(cfg)
 	}
-	if settings.Worker.Domain != "" {
+	if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
 		settings.Worker.Enabled = true
+	}
+
+	// Enforce policy as absolute filter when present.
+	if settings.PolicyPresent {
+		if !settings.AllowWorker {
+			settings.Worker.Enabled = false
+		}
+		if !settings.AllowCFProxy {
+			settings.CF.Enabled = false
+			settings.CF.Priority = false
+			settings.CF.Only = false
+		}
 	}
 	return dcMap, settings, nil
 }

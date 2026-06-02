@@ -1,193 +1,169 @@
-# TgWsProxy Android
+# TGWSProxyAndroid
 
-Локальный SOCKS5-прокси для Telegram на Android. Приложение поднимает локальный прокси, принимает MTProto-сессии Telegram и перенаправляет поддерживаемый трафик через WebSocket/WSS. Текущая версия умеет выбирать между Direct, Cloudflare Worker и Cloudflare Proxy маршрутами и рассчитана на сети, где прямые Telegram endpoint-ы недоступны или нестабильны.
+Android-приложение для локального SOCKS5-прокси Telegram с маршрутизацией через WebSocket (Direct, Cloudflare Worker, Cloudflare Proxy) и TCP fallback. Нативный runtime (`libtgwsproxy.so`) управляется из Kotlin UI.
 
-Текущая версия рабочей ветки: `1.7.4` (Worker pool, pool metrics, Worker setup refresh).
+**Версия:** 1.8.0 · **Статус:** активная разработка  
 
 Репозиторий: https://github.com/Regstar2/TgWsProxy_Android
 
-## Происхождение
+## Обзор
 
-Проект является форком Android-версии `tg-ws-proxy` и сохраняет атрибуцию исходным авторам:
+TgWsProxy поднимает прокси на `127.0.0.1` (порт по умолчанию `1081`), принимает SOCKS5 от Telegram и направляет MTProto-трафик по выбранным маршрутам. Подходит для сетей, где прямые Telegram endpoint-ы недоступны или нестабильны.
 
-- Runtime-идея и исходный проект: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)
-- Исходный Android-форк: [amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android)
+**Приложение не является VPN** и не шифрует весь трафик устройства — только сессии, идущие через настроенный SOCKS5 в Telegram.
 
-Android-форк распространяется под GPLv3. Оригинальный runtime-проект Flowseal распространяется под MIT; соответствующая атрибуция сохранена.
+## Возможности
 
-## AI-assisted development
-
-Изменения в этой рабочей ветке подготовлены при помощи Codex и GPT-5.4. Репозиторий остаётся форком и содержит код, идеи и лицензионные обязательства исходных проектов Flowseal и amurcanov; эта пометка не заменяет их атрибуцию.
-
-## Что умеет приложение
-
-- Локальный SOCKS5-прокси на `127.0.0.1`, порт по умолчанию `1081`.
-- Быстрое применение прокси в Telegram через deep link.
-- Foreground service для фоновой работы.
-- Jetpack Compose UI с системной, светлой и тёмной темой.
-- Выбор языка интерфейса: системный, русский, английский.
-- Настройки Worker domain, CF-domain pool и режимов маршрутизации.
-- Separate Wi-Fi and Mobile route policy settings.
-- Automatic runtime reconfigure when switching between Wi-Fi and Mobile networks.
-- Effective route policy diagnostics and export.
-- Active route diagnostics for the effective Wi-Fi/Mobile policy.
-- Worker route pool and pool metrics.
-- Updated Cloudflare Worker setup guide.
-- Runtime-логи в приложении и экспорт логов в выбранную папку.
-- Диагностическое логирование стадий `DNS -> TCP -> TLS -> WS`.
+- Локальный SOCKS5 для Telegram, deep link «Применить в Telegram»
+- Foreground service и уведомление со статусом
+- Режимы и **политики маршрутов** отдельно для Wi‑Fi и мобильной сети
+- Cloudflare Proxy (`cf_proxy_ws`) с пулом доменов и cooldown
+- Опциональный Cloudflare Worker (`cf_worker_ws`)
+- Прямой WebSocket (`direct_ws`) и TCP fallback
+- Адаптивный режим **Auto** (статистика, cooldown, last-good)
+- Runtime-логи, экспорт, диагностика маршрутов
+- RU/EN интерфейс, светлая/тёмная тема
 
 ## Скриншоты
 
-<p>
-  <img src="docs/screenshots/main-screen.jpg" width="260" alt="Главный экран TgWsProxy">
-  <img src="docs/screenshots/settings-screen.jpg" width="260" alt="Экран настроек TgWsProxy">
+<p align="center">
+  <img src="docs/assets/screenshots/screenshot-main.jpg" width="220" alt="Главный экран" />
+  <img src="docs/assets/screenshots/screenshot-settings-mobile.jpg" width="220" alt="Политика маршрутов — мобильная сеть" />
+  <img src="docs/assets/screenshots/screenshot-settings-wifi.jpg" width="220" alt="Политика маршрутов — Wi‑Fi" />
 </p>
 
-## Cloudflare Proxy
+## Маршруты
 
-На мобильной сети текущий рабочий путь подтверждён через CF Proxy и Cloudflare Worker. Direct path до Telegram endpoint-ов на тестовых сетях часто недоступен или нестабилен, поэтому для обычного использования сейчас рекомендуется `Auto`, а при необходимости явного приоритета - `Worker first` или `CF first`.
+| Тип маршрута | Описание |
+|------------|----------|
+| `direct_ws` | Прямой WebSocket к Telegram (`kws{dc}.web.telegram.org`) |
+| `cf_proxy_ws` | Cloudflare Proxy через `wss://kws{dc}.<domain>/apiws` |
+| `cf_worker_ws` | WebSocket через ваш Cloudflare Worker |
+| `tcp_fallback` | Резервный TCP к IP датацентра :443 |
 
-Режимы:
+**WebSocket — это транспорт**, а не название маршрута. Например, Cloudflare Proxy использует WebSocket, но это не «прямой WebSocket».
 
-- `Auto` - адаптивно выбирает маршрут по текущей сети, истории успехов/ошибок, cooldown и last-good route.
-- `Direct + fallback routes` - цепочка `Direct -> Worker -> CF -> TCP`.
-- `Worker first` - сначала пробует Cloudflare Worker, затем разрешённые fallback-маршруты.
-- `CF first` - сначала пробует `kws{dc}.<domain>`, затем fallback-маршруты.
-- `CF only` - не использует direct Telegram upstream и direct TCP passthrough для Telegram-like трафика.
-- `Worker only` - использует только Worker и тоже не допускает direct TCP passthrough для Telegram-like трафика.
-- `Direct only` - только прямой WebSocket route.
+В UI отображаются отдельно: **режим (стратегия)**, **текущий маршрут (route kind)** и **транспорт**.
 
-Домен по умолчанию: `pclead.co.uk`. Он взят из подхода Flowseal и удобен для проверки, но это общий endpoint. Cloudflare ограничивает одновременные WebSocket-подключения, поэтому домен по умолчанию может временно отдавать `429 Too Many Requests` или перестать работать. Для постоянного использования лучше настроить собственный Cloudflare-домен и указать его в настройках приложения.
+Подробнее: [docs/architecture/architecture.md](docs/architecture/architecture.md)
 
-Начиная с `v1.3.2`, ручной CF-домен больше не является единственной опорой. Android fork сохраняет поле для пользовательского домена, но также включает встроенный CF-domain pool. Если ручной домен возвращает `429`, `403`, `5xx` или повторно падает на timeout/TLS/WebSocket handshake, runtime временно переводит его в cooldown и пробует другой CF-домен либо следующий маршрут, разрешённый выбранным режимом.
+## Рекомендуемые настройки
 
-Начиная с `v1.4.0`, приложение также умеет обновлять список CF-доменов из Flowseal upstream GitHub. Обновление не является критической зависимостью: если GitHub недоступен, используется последний кэшированный upstream-список; если кэша ещё нет, остаётся встроенный список. Порядок выбора теперь явный: `Manual -> Cached upstream -> Built-in`. Пустой или битый downloaded list не заменяет сохранённый кэш.
+Ориентиры без привязки к конкретной сети оператора:
 
-В `v1.5.0` режим **Авто** стал адаптивным: runtime учитывает профиль сети (Wi‑Fi / mobile), статистику успехов/ошибок по маршрутам, cooldown и last-good route, чтобы быстрее выбирать рабочий путь. В `v1.5.1` добавлены пресеты стратегии Auto, явные веса scoring, классификация ошибок, краткие объяснения выбора маршрута и экспорт adaptive diagnostics (в т.ч. markdown-отчёт для GitHub Issues). Ручные режимы остаются предсказуемыми и не зависят от стратегии Auto. Подробнее: [docs/ADAPTIVE_ROUTING.md](docs/ADAPTIVE_ROUTING.md).
+| Сеть | Рекомендация |
+|------|----------------|
+| **Мобильная** | Предпочитать `cf_proxy_ws`, оставить `tcp_fallback`; direct/worker включать вручную только при необходимости |
+| **Wi‑Fi** | Часто подходит `direct_ws` с fallback на CF proxy и TCP |
 
-В `v1.4.1` обновление upstream-списка стало устойчивее: можно задать HTTPS-зеркало, primary failure автоматически переходит на mirror, ошибки download классифицируются по этапам (DNS/TCP/TLS/HTTP/parse), а автообновление использует backoff (24 часа после успеха, 1 час после ошибки). `Fake TLS` и pinned TLS для GitHub fetch по-прежнему не реализованы.
+В приложении: **Настройки → политика маршрутов** для Wi‑Fi/Mobile или пресет **«Рекомендуемый»** (если политика не менялась вручную — см. миграцию в release notes).
 
-Для собственного домена используются хосты вида:
+Режимы legacy (Auto, CF first, Worker first, …) по-прежнему передаются в runtime; фактический набор маршрутов задаёт политика `@route_*`.
 
-```text
-kws1.<domain>
-kws2.<domain>
-kws3.<domain>
-kws4.<domain>
-kws5.<domain>
-kws203.<domain>
-```
+## Быстрый старт
 
-Ориентируйтесь на инструкцию Flowseal по Cloudflare Proxy: [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy).
+1. Установите APK (debug или release).
+2. Откройте TgWsProxy, проверьте порт (`1081` по умолчанию).
+3. Настройте политику маршрутов для вашей сети.
+4. **Включить прокси** → **Применить в Telegram**.
+5. При проблемах включите runtime-логи и сохраните отчёт.
 
-## Как пользоваться
+Если параллельно используется ByeDPI на `1080`, выберите другой порт (например `1081`).
 
-1. Установите APK.
-2. Откройте TgWsProxy.
-3. Проверьте порт. По умолчанию используется `1081`.
-4. Для большинства пользователей выберите `Auto`. Если Direct часто ломается, попробуйте `Worker first`; если есть проверенный CF domain - `CF first`.
-5. Нажмите `Включить прокси`.
-6. Нажмите `Применить в Telegram`.
-7. Для диагностики временно включите runtime-логи и сохраните отчёт в выбранную папку.
+## Логи и диагностика
 
-Если используется ByeDPI или другой локальный прокси, порт `1081` обычно удобнее `1080`, чтобы избежать конфликта.
+Logcat, тег **`TgWsProxy`**. Полезные строки:
 
-## UI, Help и уведомления (v1.6.0)
+| Строка | Значение |
+|--------|----------|
+| `route_policy network=... routes=... preferred=...` | Активная политика |
+| `Policy changed generation=...` | Смена поколения policy |
+| `Route selected routeKind=... transport=...` | Выбор маршрута |
+| `cfproxy connected host=...` | Успешный CF proxy |
+| `UI route state activeRouteKind=... transport=...` | Состояние для UI |
+| `Skip current stats update route=... reason=...` | Старое/отключённое событие не влияет на UI |
 
-- **Onboarding** — при первом запуске; повторно: Настройки → Подсказки → «Показать onboarding снова».
-- **Подсказки** — разделы: быстрый старт, Telegram SOCKS5, режимы, Worker, CF, уведомление Android, диагностика.
-- **О приложении** — версия, описание, ссылки на [репозиторий](https://github.com/Regstar2/TgWsProxy_Android), Flowseal и amurcanov.
-- **Диагностика** — компактные проверки Direct / Worker / CF / «Проверить всё»; экспорт отчёта с маскированием доменов.
-- **Runtime logs** — по умолчанию скрыты; «Показать runtime logs» открывает отдельный диалог.
-- **Foreground notification** — статус, маршрут, скорость/задержка (опционально), действия Start/Stop/Reconnect/Open. Полностью скрыть уведомление при работающем foreground service нельзя (требование Android); доступны режимы Normal / Compact / Minimal. См. [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md).
+В приложении: runtime logs, экспорт, карточка политики маршрутов, проверки Direct/Worker/CF/TCP.
+
+## Структура репозитория
+
+| Путь | Содержимое |
+|------|------------|
+| `app/` | Android-приложение (Kotlin, UI, сервис) |
+| `native/tgwsproxy/` | Нативный proxy runtime (Go → `libtgwsproxy.so`) |
+| `docs/` | Документация, скриншоты в `docs/assets/screenshots/` |
+| `scripts/` | Сборка native/APK, иконки |
+
+Подробнее: [docs/development/repository-structure.md](docs/development/repository-structure.md)
 
 ## Сборка
 
-Требования:
+**Требования:** JDK 17, Android SDK, Go (для `native/tgwsproxy`), Gradle wrapper из репозитория.
 
-- JDK 17
-- Android SDK
-- Gradle wrapper из репозитория
-- Go toolchain для сборки native runtime
-
-Debug APK:
+Debug:
 
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-Готовый debug APK Gradle кладёт в:
+APK: `app\build\outputs\apk\debug\app-debug.apk`
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-Локальный helper-скрипт дополнительно копирует APK в `artifacts/apk/debug/`:
+Скрипт с копированием в `artifacts/`:
 
 ```powershell
 .\scripts\build-apk.ps1 -Configuration Debug
 ```
 
-Release-подпись хранится только локально. Keystore не должен попадать в git; credentials передаются через переменные окружения:
+Release (локальная подпись, секреты только в env):
 
 ```powershell
-$env:KEYSTORE_PASSWORD="..."
-$env:KEY_PASSWORD="..."
-$env:KEY_ALIAS="tgwsproxy"
+$env:KEYSTORE_FILE = "tgwsproxy-release.jks"
+$env:KEYSTORE_PASSWORD = "..."
+$env:KEY_PASSWORD = "..."
+$env:KEY_ALIAS = "tgwsproxy"
 .\scripts\build-apk.ps1 -Configuration Release
 ```
 
-Файлы APK, runtime-логи, `.so` и локальные Android build artifacts не должны попадать в git. Это зафиксировано в `.gitignore`.
+Go-тесты (из каталога runtime):
 
-## Диагностика
+```powershell
+cd native\tgwsproxy
+go test ./...
+```
 
-Полезные признаки в runtime-логах:
-
-- `cfproxy hostname dial start` - попытка подключиться через системный hostname path.
-- `cfproxy connected host=... via=hostname` - Cloudflare WebSocket успешно поднят.
-- `bridge first-exit primary ...` - первичная причина закрытия bridge-сессии.
-- `bridge secondary ...` - вторичная ошибка после закрытия одной из сторон.
-- `stats: ... cf=... up=... down=...` - счётчики активных CF-сессий и трафика.
-
-Если `cfproxy connected` есть, но `down=0.0B`, смотрите `bridge first-exit primary`: чаще всего это означает, что клиент Telegram закрыл локальный SOCKS-сокет до начала полезного обмена.
-
-## Текущий статус
-
-Подтверждено:
-
-- CF hostname-first порядок подключения работает.
-- `CF first` теперь реально выполняется до direct WS path.
-- В CF-first/CF-only режиме WS pool warmup отключён, чтобы не шуметь direct-попытками.
-- `DC1` больше не подменяется на `kws2.*` в direct WS domain mapping.
-- Bridge-логирование фиксирует первичную причину закрытия сессии.
-- Android routing намеренно отличается от Flowseal desktop: Android сохраняет `Worker first`, `CF first`, `Worker only`, `CF only`, `Auto` и `Direct + fallback routes`.
-- `v1.3.2` добавляет built-in CF pool, per-domain health/cooldown, диагностику CF-доменов и ручной сброс cooldown.
-- `v1.4.0` добавляет cached upstream list, ручное обновление, автообновление с 24-часовым throttle и fallback `Manual -> Cached upstream -> Built-in`.
-- `v1.4.1` добавляет mirror URL, staged download diagnostics, retry/backoff и cache-safe multi-source update.
-- `Fake TLS` и GitHub pinned TLS fallback не реализованы; эти улучшения остаются будущей работой (`v1.6.0` research).
-
-Не считается финально закрытым:
-
-- стабильность на всех мобильных операторах;
-- долгосрочная надёжность общего домена `pclead.co.uk`;
-- workflow для настройки собственного Cloudflare-домена в один клик.
+Подробнее: [docs/releases/release.md](docs/releases/release.md)
 
 ## Документация
 
-- [RELEASE_NOTES_v1.7.4.md](RELEASE_NOTES_v1.7.4.md) - notes for Worker pool, pool metrics, and Worker setup refresh.
-- [RELEASE_NOTES_v1.7.3.md](RELEASE_NOTES_v1.7.3.md) - notes for active route connection diagnostics.
-- [RELEASE_NOTES_v1.7.2.md](RELEASE_NOTES_v1.7.2.md) - notes for effective route policy diagnostics and export.
-- [RELEASE_NOTES_v1.7.1.md](RELEASE_NOTES_v1.7.1.md) - notes for automatic reconfigure on network switch.
-- [RELEASE_NOTES_v1.7.0.md](RELEASE_NOTES_v1.7.0.md) - notes for Wi-Fi/Mobile route policy UI.
-- [RELEASE_NOTES_v1.6.2.md](RELEASE_NOTES_v1.6.2.md) - notes for route policy resolver and runtime token foundation.
-- [RELEASE_NOTES_v1.6.1.md](RELEASE_NOTES_v1.6.1.md) - release notes for v1.6.1.
-- [RELEASE_NOTES_v1.6.0.md](RELEASE_NOTES_v1.6.0.md) - заметки к текущему релизу.
-- [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md) - заметки по сравнению с Flowseal runtime и исходным Android-форком.
-- [docs/CF_DOMAIN_POOL.md](docs/CF_DOMAIN_POOL.md) - источники CF-доменов, cache policy и fallback order.
-- [docs/cloudflare-worker.md](docs/cloudflare-worker.md) - Cloudflare Worker route setup, current Worker code, and Worker pool metrics.
-- [docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) - foreground notification, метрики и действия.
-- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) - чеклист перед релизом.
+| Документ | Описание |
+|----------|----------|
+| [docs/development/repository-structure.md](docs/development/repository-structure.md) | Структура репозитория |
+| [docs/architecture/architecture.md](docs/architecture/architecture.md) | Архитектура и терминология |
+| [docs/testing/README.md](docs/testing/README.md) | Чеклист ручного тестирования |
+| [docs/testing/manual-checklist-1.8.md](docs/testing/manual-checklist-1.8.md) | Проверка после рефакторинга 1.8 |
+| [docs/releases/release.md](docs/releases/release.md) | Выпуск релиза и APK |
+| [CHANGELOG.md](CHANGELOG.md) | История версий |
+| [docs/architecture/ADAPTIVE_ROUTING.md](docs/architecture/ADAPTIVE_ROUTING.md) | Адаптивный режим Auto |
+| [docs/architecture/CONNECTION_MODES.md](docs/architecture/CONNECTION_MODES.md) | Режимы подключения |
+| [docs/releases/](docs/releases/) | Заметки и чеклисты релизов |
+
+## Разработка с помощью нейросетей
+
+Значительная часть кода, документации и рефакторингов в этом репозитории выполнялась **с использованием больших языковых моделей** (в том числе через Cursor, OpenAI Codex, ChatGPT и аналогичные инструменты). Нейросети применялись для:
+
+- проектирования и правок Kotlin UI, настроек маршрутов и сервиса;
+- доработки native runtime, bridge и маршрутизации;
+- написания и обновления README и документации в `docs/`;
+- разбора логов, диагностики багов и подготовки release notes.
+
+## Происхождение
+
+- **[Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)** — исходный прокси и маршруты (MIT)
+- **[amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android)** — Android-обёртка (GPLv3)
+- **[Regstar2/TgWsProxy_Android](https://github.com/Regstar2/TgWsProxy_Android)** — текущая разработка ([LICENSE](LICENSE))
+
+Схема `kws{dc}.<domain>/apiws` и домен по умолчанию — из экосистемы Flowseal. Отличия от desktop: [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md).
 
 ## Лицензия
 
-См. [LICENSE](LICENSE).
+[LICENSE](LICENSE) (GPLv3).

@@ -67,6 +67,7 @@ class ProxyService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        PersistentLogStore.initIfNeeded(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -232,6 +233,7 @@ class ProxyService : Service() {
         metricsJob = null
         serviceScope.launch(Dispatchers.IO) {
             stopNativeOnly()
+            PersistentLogStore.flushAsync()
         }
         releaseWakeLock()
         _isRunning.value = false
@@ -248,6 +250,10 @@ class ProxyService : Service() {
     private fun startMetricsLoop() {
         metricsJob?.cancel()
         metricsJob = serviceScope.launch(Dispatchers.IO) {
+            val largeThresholdBytes = 10L * 1024L * 1024L
+            var lastBytesUp: Long? = null
+            var lastBytesDown: Long? = null
+            var lastBytesAtMs: Long? = null
             while (isActive && _isRunning.value) {
                 val prefs = NotificationPreferences.load(this@ProxyService)
                 val interval = if (prefs.displayMode == NotificationDisplayMode.MINIMAL) 3000L else 2000L
@@ -258,6 +264,43 @@ class ProxyService : Service() {
                 val status = NativeProxy.getProxyStatus()
                 val runtime = ProxyRuntimeMetrics.parseStatus(status)
                     ?: ProxyRuntimeMetrics(running = true)
+                // Best-effort large transfer detection (aggregate bytes counters).
+                runCatching {
+                    val now = System.currentTimeMillis()
+                    val prevUp = lastBytesUp
+                    val prevDown = lastBytesDown
+                    val prevAt = lastBytesAtMs
+                    if (prevUp != null && prevDown != null && prevAt != null) {
+                        val dt = (now - prevAt).coerceAtLeast(1L)
+                        val upDelta = (runtime.bytesUp - prevUp).coerceAtLeast(0L)
+                        val downDelta = (runtime.bytesDown - prevDown).coerceAtLeast(0L)
+                        if (upDelta >= largeThresholdBytes) {
+                            AppLogger.i(
+                                context = this@ProxyService,
+                                category = AppLogCategory.TG,
+                                message = "TG_LARGE_UPLOAD_DETECTED",
+                                details = mapOf(
+                                    "bytes" to upDelta.toString(),
+                                    "durationMs" to dt.toString(),
+                                ),
+                            )
+                        }
+                        if (downDelta >= largeThresholdBytes) {
+                            AppLogger.i(
+                                context = this@ProxyService,
+                                category = AppLogCategory.TG,
+                                message = "TG_LARGE_DOWNLOAD_DETECTED",
+                                details = mapOf(
+                                    "bytes" to downDelta.toString(),
+                                    "durationMs" to dt.toString(),
+                                ),
+                            )
+                        }
+                    }
+                    lastBytesUp = runtime.bytesUp
+                    lastBytesDown = runtime.bytesDown
+                    lastBytesAtMs = now
+                }
                 val (downBps, upBps) = speedSampler.sample(runtime.bytesDown, runtime.bytesUp)
                 ProxyRuntimeState.update {
                     it.copy(
@@ -311,7 +354,7 @@ class ProxyService : Service() {
             ProxyServiceStatus.RUNNING -> getString(
                 R.string.notification_status_connected,
                 ui.runtime.modeLabel(this),
-                ui.runtime.routeLabel(this).ifBlank { "—" },
+                ui.runtime.routeLabel(this),
             )
         }
         if (!prefs.showMetricsInNotification || prefs.displayMode == NotificationDisplayMode.MINIMAL) {
@@ -424,7 +467,11 @@ class ProxyService : Service() {
     }
 
     private fun logAction(action: String) {
-        Log.i("TgWsProxy", "Notification action: $action")
+        AppLogger.i(
+            context = this,
+            category = AppLogCategory.APP,
+            message = "NOTIFICATION_ACTION action=$action",
+        )
     }
 
     private fun createNotificationChannels() {
@@ -495,6 +542,7 @@ class ProxyService : Service() {
         if (_isRunning.value) {
             stopProxy()
         }
+        PersistentLogStore.flushAsync()
         super.onDestroy()
     }
 

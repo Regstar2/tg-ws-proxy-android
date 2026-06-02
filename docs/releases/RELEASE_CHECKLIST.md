@@ -1,11 +1,13 @@
 # Release checklist
 
+> Short workflow: [release.md](release.md). This file is the detailed checklist.
+
 ## Build
 
-- [ ] `go test ./...`
+- [ ] `cd native/tgwsproxy && go test ./...`
 - [ ] `./gradlew.bat testDebugUnitTest`
 - [ ] `./gradlew.bat assembleDebug`
-- [ ] `go test ./tgwsroute/...`
+- [ ] `cd native/tgwsproxy && go test ./tgwsroute/...`
 - [ ] `./gradlew lint`
 - [ ] `./gradlew assembleDebug`
 - [ ] `./gradlew assembleRelease` (if signing configured)

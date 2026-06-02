@@ -41,6 +41,7 @@ fun RoutePolicySettingsSection(
     hasSavedWifiPolicy: Boolean,
     hasSavedMobilePolicy: Boolean,
     isProxyRunning: Boolean,
+    onApplyRecommendedPreset: () -> Unit,
     onWifiPolicyChange: (NetworkRoutePolicy) -> Unit,
     onMobilePolicyChange: (NetworkRoutePolicy) -> Unit,
     onResetWifiPolicy: () -> Unit,
@@ -72,6 +73,35 @@ fun RoutePolicySettingsSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 10.dp),
     )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.route_policy_recommended_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.route_policy_recommended_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onApplyRecommendedPreset,
+                enabled = !isProxyRunning,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.route_policy_recommended_apply))
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(10.dp))
     if (isProxyRunning) {
         Text(
             text = stringResource(R.string.route_policy_stop_to_edit),

@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourceDir = $repoRoot
+$sourceDir = Join-Path $repoRoot "native\tgwsproxy"
 $artifactDir = Join-Path $repoRoot "artifacts\native\arm64-v8a"
 $jniLibDir = Join-Path $repoRoot "app\src\main\jniLibs\arm64-v8a"
 $outLib = Join-Path $artifactDir "libtgwsproxy.so"

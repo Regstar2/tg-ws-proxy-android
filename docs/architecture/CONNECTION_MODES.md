@@ -84,7 +84,7 @@ CF-domain list updates are best-effort and do not block proxy startup. Primary G
 ## Проверка
 
 ```bash
-go test ./tgwsroute/...
+cd native/tgwsproxy && go test ./tgwsroute/...
 ./gradlew test
 ./gradlew lint
 ./gradlew assembleDebug

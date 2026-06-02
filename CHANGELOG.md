@@ -1,0 +1,31 @@
+# Changelog
+
+All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
+
+## 1.8.0
+
+- Repository cleanup: Go runtime moved to `native/tgwsproxy/`.
+- Documentation layout: `docs/architecture/`, `docs/development/`, `docs/testing/`, `docs/releases/`, `docs/assets/screenshots/`.
+- README updated (structure, build, screenshot paths).
+- `.gitignore` hardened for `artifacts/`, `runtime-logs/`, logs, secrets, keystores.
+- Added `docs/development/repository-structure.md`, `docs/testing/manual-checklist-1.8.md`.
+- No intentional runtime or routing behavior changes.
+
+## 1.7.9.3
+
+- Fixed route status showing generic “websocket” instead of actual route kind.
+- Separated route kind from transport type in runtime/UI stats.
+- Current route uses active sessions for the current policy generation; stale direct/worker events no longer override UI.
+- Improved diagnostics logs (`routeKind`, `transportType`, `policyGeneration`).
+
+## 1.7.9.2
+
+- Route policy tokens from Android are applied in Go runtime; disabled routes (especially worker) are no longer selected.
+- Policy acts as absolute filter on adaptive selection and fallbacks.
+
+## 1.7.9.1
+
+- Safer default route policies for mobile/Wi‑Fi; migration for users who did not customize policies.
+- “Recommended” preset in route policy UI.
+
+Earlier versions: see [docs/release-notes/](docs/release-notes/).

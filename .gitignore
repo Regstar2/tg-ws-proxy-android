@@ -2,13 +2,7 @@
 .vscode/
 local.properties
 app/build/
-artifacts/native/
-artifacts/apk/**/*.apk
-artifacts/**/*.apk
-artifacts/**/*.so
-artifacts/apk/runtime-logs/
-artifacts/apk/upstream-sweep-*.txt
-artifacts/baselines/
+artifacts/
 app/src/main/jniLibs/**/*.so
 *.jks
 *.keystore
@@ -17,3 +11,27 @@ app/src/main/jniLibs/**/*.so
 *.pem
 *.key
 secrets/
+release-signing.env
+
+# Local AI/dev notes (not published in repo)
+AGENTS.md
+docs/development/development-principles.md
+
+# Local logs and captures (do not commit)
+app-current.log
+*.log
+runtime-logs/
+readme_images/
+*.tmp
+
+# Local keystores (release signing stays outside git)
+debug.keystore
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Gradle build outputs (app/build already listed; keep explicit)
+app/build/
