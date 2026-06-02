@@ -52,15 +52,15 @@ If Android rejects installation because of signature mismatch, uninstall the pre
 
 ## APK
 
-This GitHub Release attaches **`tgwsproxy-debug.apk`** (debug build).  
-Signed **`tgwsproxy-release.apk`** requires a local keystore and environment variables (`KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`) — not stored in the repository. See [docs/releases/release.md](docs/releases/release.md).
+Attach **`tgwsproxy-release.apk`** (signed release build).  
+Local signing: copy `release-signing.env.example` → `release-signing.env` (gitignored), then `.\scripts\build-apk.ps1 -Configuration Release`.
 
 ## Verification checklist
 
 - Go `tgwsroute` tests: passed (`native/tgwsproxy`).
 - Android `assembleDebug` and `lint`: passed.
 - Android `testDebugUnitTest`: failed on this Windows host (Gradle test worker `ClassNotFoundException` — environment issue, not an app assertion failure). Re-run on Linux/CI or Android Studio if needed.
-- Release signing: not configured in this environment; debug APK attached.
+- Signed release APK built with local `tgwsproxy-release.jks` via `release-signing.env`.
 
 ## Known limitations
 
