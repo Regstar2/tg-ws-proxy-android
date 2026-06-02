@@ -9,7 +9,8 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - README updated (structure, build, screenshot paths).
 - `.gitignore` hardened for `artifacts/`, `runtime-logs/`, logs, secrets, keystores.
 - Added `docs/development/repository-structure.md`, `docs/testing/manual-checklist-1.8.md`.
-- No intentional runtime or routing behavior changes.
+- Removed default Cloudflare domain `pclead.co.uk` (manual domain empty by default; built-in/cached pool).
+- No intentional runtime or routing behavior changes for the v1.8.0 tag itself (1.7.9.x fixes included).
 
 ## 1.7.9.3
 
@@ -28,4 +29,4 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - Safer default route policies for mobile/Wi‑Fi; migration for users who did not customize policies.
 - “Recommended” preset in route policy UI.
 
-Earlier versions: see [docs/release-notes/](docs/release-notes/).
+Earlier versions: see [docs/releases/](docs/releases/).

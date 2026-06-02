@@ -4,13 +4,12 @@
 
 ## Build
 
-- [ ] `cd native/tgwsproxy && go test ./...`
+- [ ] `cd native/tgwsproxy && go test ./tgwsroute/...` (or `go test ./...` on Linux/CI)
 - [ ] `./gradlew.bat testDebugUnitTest`
 - [ ] `./gradlew.bat assembleDebug`
-- [ ] `cd native/tgwsproxy && go test ./tgwsroute/...`
-- [ ] `./gradlew lint`
-- [ ] `./gradlew assembleDebug`
-- [ ] `./gradlew assembleRelease` (if signing configured)
+- [ ] `./gradlew.bat lint`
+- [ ] `./gradlew.bat assembleRelease` (if signing configured)
+- [ ] `.\scripts\build-apk.ps1 -Configuration Release` (signed copy to `artifacts/apk/release/`)
 
 ## Runtime
 
