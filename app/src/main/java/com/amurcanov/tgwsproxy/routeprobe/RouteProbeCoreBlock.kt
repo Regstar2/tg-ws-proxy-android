@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -23,6 +24,7 @@ fun RouteProbeCoreBlock(
     snapshot: RouteProbeSnapshot?,
     isRunning: Boolean,
     onRunProbe: () -> Unit,
+    onOpenDiagnostics: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -80,6 +82,14 @@ fun RouteProbeCoreBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+        onOpenDiagnostics?.let { open ->
+            TextButton(
+                onClick = open,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.diagnostics_open_screen))
+            }
         }
     }
 }

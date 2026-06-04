@@ -35,6 +35,7 @@ fun ProxyConnectionMetricsCard(
     routeProbeSnapshot: RouteProbeSnapshot? = null,
     routeProbeRunning: Boolean = false,
     onRunRouteProbe: (() -> Unit)? = null,
+    onOpenDiagnostics: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!showMetrics) {
@@ -88,6 +89,7 @@ fun ProxyConnectionMetricsCard(
                     snapshot = routeProbeSnapshot,
                     isRunning = routeProbeRunning,
                     onRunProbe = onRunRouteProbe,
+                    onOpenDiagnostics = onOpenDiagnostics,
                 )
             }
             MetricLine(stringResource(R.string.metrics_transport), transportLabel)

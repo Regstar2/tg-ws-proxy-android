@@ -2,6 +2,11 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.8.3
+
+- Route diagnostics screen with probe result cards, step details, and read-only runtime route block.
+- Entry from main screen and Settings; uses `RouteDiagnosticsRepository` (no duplicate network checks in UI).
+
 ## 1.8.2
 
 - Route Probe Core: structured route diagnostics (`RouteProbeRunner`, step-based DNS/TCP/TLS/HTTP/WebSocket checks).

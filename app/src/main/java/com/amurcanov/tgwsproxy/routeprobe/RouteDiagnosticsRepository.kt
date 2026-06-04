@@ -44,5 +44,15 @@ class RouteDiagnosticsRepository(
             RouteProbeTarget.WORKER_WEBSOCKET,
             RouteProbeTarget.CLOUDFLARE_PROXY,
         )
+
+        val DIAGNOSTICS_SCREEN_TARGETS: List<RouteProbeTarget> = listOf(
+            RouteProbeTarget.CURRENT_NETWORK,
+            RouteProbeTarget.DIRECT_WEBSOCKET,
+            RouteProbeTarget.WORKER_WEBSOCKET,
+            RouteProbeTarget.CLOUDFLARE_PROXY,
+            RouteProbeTarget.TELEGRAM_REACHABILITY,
+            RouteProbeTarget.IPV4_CONNECTIVITY,
+            RouteProbeTarget.IPV6_CONNECTIVITY,
+        )
     }
 }

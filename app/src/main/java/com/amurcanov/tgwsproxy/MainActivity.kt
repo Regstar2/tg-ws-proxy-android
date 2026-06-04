@@ -54,9 +54,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsScreen
+import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsViewModel
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeDiagnosticsState
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -93,6 +96,7 @@ private enum class PendingFolderAction {
 private enum class ProxyScreenPage {
     Main,
     Settings,
+    Diagnostics,
 }
 
 private const val MIN_RECONFIGURE_INTERVAL_MS = 3000L
@@ -278,6 +282,10 @@ private fun ProxyScreen(
     val routeProbeCoreSummary by RouteProbeDiagnosticsState.lastSummary.collectAsStateWithLifecycle()
     val routeProbeCoreSnapshot by RouteProbeDiagnosticsState.lastSnapshot.collectAsStateWithLifecycle()
     val routeDiagnosticsRepository = remember { RouteDiagnosticsRepository() }
+    val diagnosticsViewModel = remember(routeDiagnosticsRepository) {
+        DiagnosticsViewModel(routeDiagnosticsRepository)
+    }
+    val diagnosticsScreenState by diagnosticsViewModel.state.collectAsStateWithLifecycle()
     var notificationPrefs by remember {
         mutableStateOf(NotificationPreferences.load(context))
     }
@@ -413,6 +421,11 @@ private fun ProxyScreen(
         )
     }
 
+    BackHandler(enabled = currentPage == ProxyScreenPage.Diagnostics && !hasOpenModal) {
+        currentPage = ProxyScreenPage.Main
+        coroutineScope.launch { screenScroll.scrollTo(0) }
+    }
+
     BackHandler(enabled = currentPage == ProxyScreenPage.Settings && !hasOpenModal) {
         currentPage = ProxyScreenPage.Main
         coroutineScope.launch { screenScroll.scrollTo(0) }
@@ -535,6 +548,11 @@ private fun ProxyScreen(
 
     LaunchedEffect(currentPage) {
         screenScroll.scrollTo(0)
+        if (currentPage == ProxyScreenPage.Diagnostics) {
+            DiagnosticsViewModel.onScreenOpened()
+            diagnosticsViewModel.syncRuntimeRoute()
+            diagnosticsViewModel.loadFromRepository()
+        }
         if (currentPage == ProxyScreenPage.Settings) {
             refreshRoutePolicySnapshot()
             reconfigureStatus = ReconfigureStatusStore.load(prefs)
@@ -673,6 +691,78 @@ private fun ProxyScreen(
             putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
         }
         ContextCompat.startForegroundService(context, startIntent)
+    }
+
+    fun buildRouteProbeRequest(): RouteProbeRequest {
+        return RouteProbeRequest(
+            workerDomain = workerDomainText,
+            manualCfDomains = manualCfDomains,
+            cachedUpstreamDomains = cfUpstreamState.domains,
+            networkProfile = currentNetworkProfile,
+        )
+    }
+
+    val diagnosticsCheckingLabel = stringResource(R.string.diagnostics_checking)
+
+    fun runDiagnosticsAll() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runAll(context, buildRouteProbeRequest(), diagnosticsCheckingLabel)
+        }
+    }
+
+    fun runDiagnosticsDirect() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runTarget(
+                context,
+                buildRouteProbeRequest(),
+                RouteProbeTarget.DIRECT_WEBSOCKET,
+                diagnosticsCheckingLabel,
+            )
+        }
+    }
+
+    fun runDiagnosticsWorker() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runTarget(
+                context,
+                buildRouteProbeRequest(),
+                RouteProbeTarget.WORKER_WEBSOCKET,
+                diagnosticsCheckingLabel,
+            )
+        }
+    }
+
+    fun runDiagnosticsCloudflare() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runTarget(
+                context,
+                buildRouteProbeRequest(),
+                RouteProbeTarget.CLOUDFLARE_PROXY,
+                diagnosticsCheckingLabel,
+            )
+        }
+    }
+
+    fun runDiagnosticsNetwork() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runTarget(
+                context,
+                buildRouteProbeRequest(),
+                RouteProbeTarget.CURRENT_NETWORK,
+                diagnosticsCheckingLabel,
+            )
+        }
+    }
+
+    fun runDiagnosticsTelegram() {
+        coroutineScope.launch {
+            diagnosticsViewModel.runTarget(
+                context,
+                buildRouteProbeRequest(),
+                RouteProbeTarget.TELEGRAM_REACHABILITY,
+                diagnosticsCheckingLabel,
+            )
+        }
     }
 
     val runRouteProbeCore by rememberUpdatedState {
@@ -861,16 +951,16 @@ private fun ProxyScreen(
             TopAppBar(
                 title = {
                     Text(
-                        if (currentPage == ProxyScreenPage.Settings) {
-                            stringResource(R.string.screen_settings_title)
-                        } else {
-                            stringResource(R.string.screen_main_title)
+                        when (currentPage) {
+                            ProxyScreenPage.Settings -> stringResource(R.string.screen_settings_title)
+                            ProxyScreenPage.Diagnostics -> stringResource(R.string.diagnostics_title)
+                            ProxyScreenPage.Main -> stringResource(R.string.screen_main_title)
                         },
                         fontWeight = FontWeight.SemiBold
                     )
                 },
                 navigationIcon = {
-                    if (currentPage == ProxyScreenPage.Settings) {
+                    if (currentPage == ProxyScreenPage.Settings || currentPage == ProxyScreenPage.Diagnostics) {
                         IconButton(onClick = {
                             currentPage = ProxyScreenPage.Main
                             coroutineScope.launch { screenScroll.scrollTo(0) }
@@ -898,7 +988,7 @@ private fun ProxyScreen(
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    if (currentPage == ProxyScreenPage.Main) {
+                    if (currentPage == ProxyScreenPage.Main || currentPage == ProxyScreenPage.Diagnostics) {
                         IconButton(onClick = { currentPage = ProxyScreenPage.Settings }) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
@@ -957,7 +1047,17 @@ private fun ProxyScreen(
                             routeProbeSnapshot = routeProbeCoreSnapshot,
                             routeProbeRunning = routeProbeCoreRunning,
                             onRunRouteProbe = runRouteProbeCore,
+                            onOpenDiagnostics = { currentPage = ProxyScreenPage.Diagnostics },
                         )
+                    }
+
+                    OutlinedButton(
+                        onClick = { currentPage = ProxyScreenPage.Diagnostics },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                    ) {
+                        Text(stringResource(R.string.diagnostics_open_screen))
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1016,6 +1116,16 @@ private fun ProxyScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                } else if (currentPage == ProxyScreenPage.Diagnostics) {
+                    DiagnosticsScreen(
+                        state = diagnosticsScreenState,
+                        onCheckAll = ::runDiagnosticsAll,
+                        onCheckDirect = ::runDiagnosticsDirect,
+                        onCheckWorker = ::runDiagnosticsWorker,
+                        onCheckCloudflare = ::runDiagnosticsCloudflare,
+                        onCheckNetwork = ::runDiagnosticsNetwork,
+                        onCheckTelegram = ::runDiagnosticsTelegram,
+                    )
                 } else {
                 if (isRunning) {
                     RunningProxySettingsBanner()
@@ -1644,6 +1754,14 @@ private fun ProxyScreen(
                     },
                     onProbeTcp = { runDiag(diagLabelTcp) { ConnectionDiagnostics.probeTcpFallback() } },
                 )
+                OutlinedButton(
+                    onClick = { currentPage = ProxyScreenPage.Diagnostics },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    Text(stringResource(R.string.diagnostics_open_screen))
+                }
                 }
 
                 CollapsibleSettingsSection(
