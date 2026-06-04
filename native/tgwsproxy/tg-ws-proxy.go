@@ -481,9 +481,12 @@ func fallbackTarget(dc int, dst string) string {
 	return dst
 }
 
-func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter) bool {
+func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter, fallbackReason string) bool {
 	settings := getRuntimeSettings()
 	routes := adaptiveRoutesForMode(settings.Mode, settings, true, dc, isMedia)
+	if len(routes) > 0 && strings.TrimSpace(fallbackReason) != "" {
+		noteFallbackActivated(routes[0], fallbackReason)
+	}
 	return runRouteChain(ctx, client, init, label, dc, isMedia, dst, port, splitter, routes)
 }
 
@@ -2134,7 +2137,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			label, rawDst, joinAddr(dst, port), dc)
 		logInfo.Printf("[%s] DC%d%s not in config -> fallback",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "dc_not_configured")
 		return
 	}
 
@@ -2142,7 +2145,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if settings.PolicyPresent && !settings.AllowDirect {
 		logInfo.Printf("[%s] DC%d%s direct_ws disabled by policy -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "direct_disabled_by_policy")
 		return
 	}
 
@@ -2154,14 +2157,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if blacklisted {
 		logInfo.Printf("[%s] DC%d%s fallback reason=ws_blacklisted -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "ws_blacklisted")
 		return
 	}
 
 	if settings.Mode == modeCFOnly || settings.Mode == modeWorkerOnly || cfg.Only {
 		logInfo.Printf("[%s] DC%d%s fallback reason=restricted_mode mode=%s -> route chain",
 			label, dc, mTag, settings.Mode)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "restricted_mode")
 		return
 	}
 
@@ -2171,16 +2174,20 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		if runRouteChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, pre) {
 			return
 		}
+		noteFallbackActivated(routeDirectWS, "primary_routes_exhausted")
 	}
 
 	if shouldSkipDirectWSAdaptive(dcKey, settings.Mode) {
 		logInfo.Printf("[%s] DC%d%s skipping direct WS (mode=%s cooldown/active)",
 			label, dc, mTag, settings.Mode)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "direct_ws_cooldown")
 		return
 	}
 
 	// -- Try WebSocket --
+	noteRouteSelected(routeDirectWS)
+	noteRouteConnectStarted(routeDirectWS)
+
 	dcFailMu.RLock()
 	failUntil := dcFailUntil[dcKey]
 	dcFailMu.RUnlock()
@@ -2310,9 +2317,10 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			}
 			recordAdaptiveFailure(routeDirectWS, dc, isMedia, reason, 0)
 		}
+		noteRouteConnectFailed(routeDirectWS, "ws_unavailable")
 		logInfo.Printf("[%s] DC%d%s fallback reason=ws_unavailable -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter)
+		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "ws_unavailable")
 		return
 	}
 
@@ -2322,6 +2330,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	dcFailMu.Unlock()
 
 	stats.connectionsWs.Add(1)
+	noteRouteConnectSucceeded(routeDirectWS)
 	noteActiveRoute(routeDirectWS)
 
 	// Send init packet
@@ -2718,6 +2727,7 @@ func StopProxy() C.int {
 
 	wsPool.CloseAll()
 	workerPool.CloseAll()
+	resetProxyRouteDisplayState()
 
 	return 0
 }

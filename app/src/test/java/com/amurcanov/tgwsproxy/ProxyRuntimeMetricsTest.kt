@@ -17,6 +17,7 @@ class ProxyRuntimeMetricsTest {
         assertEquals("auto", metrics.mode)
         assertEquals("cf_worker_ws", metrics.route)
         assertEquals("cf_worker_ws", metrics.activeRouteKind)
+        assertEquals("cf_worker_ws", metrics.routeRuntime.activeRoute)
         assertEquals("websocket", metrics.transportType)
         assertEquals(7L, metrics.policyGeneration)
         assertEquals("cf_worker_ws|cf_proxy_ws", metrics.allowedRoutes)

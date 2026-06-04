@@ -2,6 +2,12 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.8.1
+
+- Runtime route truth: UI separates configured mode, selected route, active route, last success/failure, and fallback reason.
+- Go runtime exports structured route state via `GetProxyStatus` and logs route lifecycle events (`Route selected`, `Route connect started`, `Fallback activated`, etc.).
+- Connection metrics card shows a compact route status block (strings in resources, EN/RU).
+
 ## 1.8.0
 
 - Repository cleanup: Go runtime moved to `native/tgwsproxy/`.

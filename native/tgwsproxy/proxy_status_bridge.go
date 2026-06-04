@@ -33,6 +33,7 @@ func resetProxyRouteDisplayState() {
 	lastMetricsRoute.Store("")
 	lastMetricsTransport.Store("")
 	lastMetricsError.Store("")
+	resetRouteRuntimeState()
 }
 
 func noteActiveRoute(route routeKind) {
@@ -47,6 +48,7 @@ func noteActiveRoute(route routeKind) {
 	lastActiveRouteKind.Store(kind)
 	lastMetricsRoute.Store(kind)
 	lastMetricsTransport.Store(transport)
+	noteActiveRouteRuntime(route)
 	logInfo.Printf("UI route state activeRouteKind=%s transport=%s strategy=%s generation=%d stale=false",
 		kind, transport, settings.Mode, settings.PolicyGen)
 }
@@ -123,7 +125,7 @@ func exportProxyStatus() string {
 		active = 0
 	}
 
-	return fmt.Sprintf(
+	base := fmt.Sprintf(
 		"running=%d;mode=%s;route=%s;active_route_kind=%s;transport_type=%s;policy_generation=%d;allowed_routes=%s;preferred_route=%s;active=%d;bytes_up=%d;bytes_down=%d;latency_ms=%d;last_error=%s;worker_pool_hits=%d;worker_pool_misses=%d;worker_pool_idle=%d;worker_pool_refill_errors=%d;worker_pool_err=%d;cf_pool_hits=%d;cf_pool_misses=%d;cf_pool_idle=%d;cf_pool_refill_errors=%d;cf_pool_err=%d",
 		running,
 		settings.Mode,
@@ -149,6 +151,9 @@ func exportProxyStatus() string {
 		stats.cfPoolRefillErrors.Load(),
 		stats.cfPoolRefillErrors.Load(),
 	)
+	parts := strings.Split(base, ";")
+	parts = appendRouteRuntimeStatusFields(parts)
+	return strings.Join(parts, ";")
 }
 
 func escapeStatusField(s string) string {
@@ -165,4 +170,5 @@ func init() {
 	lastActiveRouteKind.Store("")
 	lastMetricsTransport.Store("")
 	lastMetricsError.Store("")
+	initRouteRuntimeState()
 }

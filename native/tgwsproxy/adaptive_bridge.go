@@ -73,6 +73,7 @@ func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDi
 	}
 	if len(sel.Routes) > 0 {
 		selected := sel.Routes[0]
+		noteRouteSelected(selected)
 		logInfo.Printf("Route selected network=%s strategy=%s routeKind=%s transport=%s policyGeneration=%d allowed=%s preferred=%s reason=%s",
 			netLabel,
 			settings.Mode,

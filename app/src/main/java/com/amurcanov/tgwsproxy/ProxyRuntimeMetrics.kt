@@ -24,6 +24,7 @@ data class ProxyRuntimeMetrics(
     val cfPoolMisses: Int = 0,
     val cfPoolIdle: Int = 0,
     val cfPoolErrors: Int = 0,
+    val routeRuntime: RouteRuntimeState = RouteRuntimeState(),
     val updatedAtMs: Long = System.currentTimeMillis(),
 ) {
     val currentRouteKind: String
@@ -50,11 +51,12 @@ data class ProxyRuntimeMetrics(
                 }
             }
             val activeRoute = map["active_route_kind"].orEmpty().ifBlank { map["route"].orEmpty() }
+            val routeRuntime = RouteRuntimeState.fromStatusMap(map)
             return ProxyRuntimeMetrics(
                 running = map["running"] == "1",
                 mode = map["mode"].orEmpty(),
                 route = activeRoute,
-                activeRouteKind = activeRoute,
+                activeRouteKind = routeRuntime.activeRoute.ifBlank { activeRoute },
                 transportType = map["transport_type"].orEmpty(),
                 policyGeneration = map["policy_generation"]?.toLongOrNull() ?: 0,
                 allowedRoutes = map["allowed_routes"].orEmpty(),
@@ -72,6 +74,7 @@ data class ProxyRuntimeMetrics(
                 cfPoolMisses = map.safeInt("cf_pool_misses"),
                 cfPoolIdle = map.safeInt("cf_pool_idle"),
                 cfPoolErrors = map.safeInt("cf_pool_refill_errors", "cf_pool_err"),
+                routeRuntime = routeRuntime,
             )
         }
 

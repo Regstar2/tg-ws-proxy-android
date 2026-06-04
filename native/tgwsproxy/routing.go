@@ -330,6 +330,7 @@ func filterRoutesByPolicy(settings runtimeSettings, routes []routeKind, reason s
 // ---------------------------------------------------------------------------
 
 func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
+	noteRouteConnectStarted(routeCFWorkerWS)
 	settings := getRuntimeSettings()
 	if settings.PolicyPresent && !settings.AllowWorker {
 		logWarn.Printf("[%s] DC%d%s Blocked endpoint build route=cf_worker_ws reason=disabled_by_policy allowed=%s",
@@ -383,6 +384,7 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 			reason = fmt.Sprintf("worker_ws_connect_failed: %v", lastErr)
 		}
 		logWarn.Printf("[%s] DC%d%s Worker WS failed: %s", label, dc, mTag, reason)
+		noteRouteConnectFailed(routeCFWorkerWS, reason)
 		if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
 			recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, reason, 0)
 		}
@@ -390,6 +392,7 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 	}
 
 	logInfo.Printf("[%s] DC%d%s Worker WS connected host=%s", label, dc, mTag, domain)
+	noteRouteConnectSucceeded(routeCFWorkerWS)
 	noteActiveRoute(routeCFWorkerWS)
 	stats.connectionsCfWorker.Add(1)
 
@@ -404,6 +407,7 @@ func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label s
 }
 
 func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
+	noteRouteConnectStarted(routeCFProxyWS)
 	settings := getRuntimeSettings()
 	if settings.PolicyPresent && !settings.AllowCFProxy {
 		return false, "disabled_by_policy"
@@ -437,6 +441,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		ok, reason, failureKind, latencyMs := cfProxyDialHost(ctx, client, init, label, dc, isMedia, splitter, host, baseDomain)
 		if ok {
 			cfPool.MarkSuccess(wsDC, baseDomain, latencyMs)
+			noteRouteConnectSucceeded(routeCFProxyWS)
 			recordAdaptiveSessionSuccess(routeCFProxyWS, dc, isMedia, latencyMs, reason, settings)
 			logInfo.Printf("[%s] DC%d%s CF proxy selected domain=%s", label, dc, mTag, baseDomain)
 			return true, reason
@@ -450,6 +455,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 
 	logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
 	stats.cfPoolRefillErrors.Add(1)
+	noteRouteConnectFailed(routeCFProxyWS, "cfproxy_all_domains_failed")
 	return false, "cfproxy_all_domains_failed"
 }
 
@@ -514,6 +520,12 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 	mTag := mediaTag(isMedia)
 	target := fallbackTarget(dc, dst)
 	cfFailed := false
+	var lastFailRoute routeKind
+	var lastFailReason string
+
+	if len(routes) > 0 {
+		noteRouteSelected(routes[0])
+	}
 
 	if settings.Mode == modeWorkerOnly && (!settings.Worker.Enabled || settings.Worker.Domain == "") {
 		logWarn.Printf("[%s] DC%d%s Worker domain is empty in worker-only mode", label, dc, mTag)
@@ -525,6 +537,9 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 	}
 
 	for _, route := range routes {
+		if lastFailRoute != "" {
+			noteFallbackActivated(route, lastFailReason)
+		}
 		switch route {
 		case routeCFWorkerWS:
 			if cfFailed {
@@ -540,20 +555,28 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 			}
 			if ok, reason := cfWorkerFallback(ctx, client, init, label, dc, isMedia, splitter); ok {
 				logInfo.Printf("[%s] DC%d%s Worker closed: reason=%s", label, dc, mTag, reason)
+				noteConnectionClosed(routeCFWorkerWS)
 				return true
 			}
+			lastFailRoute = routeCFWorkerWS
+			lastFailReason = "worker_failed"
 			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
 				recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, "worker_failed", 0)
 			}
 		case routeCFProxyWS:
-			if ok, reason := cfProxyFallbackWithPool(ctx, client, init, label, dc, isMedia, splitter); ok {
-				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, reason)
+			ok, cfReason := cfProxyFallbackWithPool(ctx, client, init, label, dc, isMedia, splitter)
+			if ok {
+				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, cfReason)
+				noteConnectionClosed(routeCFProxyWS)
 				return true
-			} else if settings.Mode == modeCFOnly {
-				if reason == "cfproxy_unavailable" || reason == "cfproxy_all_domains_failed" {
+			}
+			lastFailRoute = routeCFProxyWS
+			lastFailReason = cfReason
+			if settings.Mode == modeCFOnly {
+				if cfReason == "cfproxy_unavailable" || cfReason == "cfproxy_all_domains_failed" {
 					logWarn.Printf("[%s] DC%d%s CF proxy is unavailable in cf-only mode", label, dc, mTag)
 				} else {
-					logWarn.Printf("[%s] DC%d%s CF only mode failed: %s", label, dc, mTag, reason)
+					logWarn.Printf("[%s] DC%d%s CF only mode failed: %s", label, dc, mTag, cfReason)
 				}
 				return false
 			}
@@ -562,12 +585,17 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 			}
 			cfFailed = true
 		case routeTCPFallback:
+			noteRouteConnectStarted(routeTCPFallback)
 			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s", label, dc, mTag, joinAddr(target, port))
 			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
+				noteRouteConnectSucceeded(routeTCPFallback)
 				noteActiveRoute(routeTCPFallback)
 				recordAdaptiveSessionSuccess(routeTCPFallback, dc, isMedia, 0, "", settings)
 				return true
 			}
+			noteRouteConnectFailed(routeTCPFallback, "tcp_failed")
+			lastFailRoute = routeTCPFallback
+			lastFailReason = "tcp_failed"
 			recordAdaptiveFailure(routeTCPFallback, dc, isMedia, "tcp_failed", 0)
 		case routeDirectWS:
 			// Direct WS is handled by the caller before fallback chains.

@@ -42,8 +42,8 @@ fun ProxyConnectionMetricsCard(
         ProxyServiceStatus.ERROR -> stringResource(R.string.status_error)
         ProxyServiceStatus.STOPPED -> stringResource(R.string.status_stopped)
     }
-    val strategyLabel = ui.runtime.modeLabel(context)
-    val routeLabel = ui.runtime.routeLabel(context)
+    val running = ui.serviceStatus == ProxyServiceStatus.RUNNING ||
+        ui.serviceStatus == ProxyServiceStatus.RECONNECTING
     val transportLabel = ui.runtime.transportLabel(context)
     val hasTraffic = ui.downloadBps > 0.0 || ui.uploadBps > 0.0
     val speed = if (hasTraffic) {
@@ -71,8 +71,10 @@ fun ProxyConnectionMetricsCard(
                 fontWeight = FontWeight.SemiBold,
             )
             MetricLine(stringResource(R.string.metrics_status), statusLabel)
-            MetricLine(stringResource(R.string.metrics_strategy), strategyLabel)
-            MetricLine(stringResource(R.string.metrics_current_route), routeLabel)
+            RouteRuntimeStatusBlock(
+                routeState = ui.runtime.routeRuntime,
+                running = running,
+            )
             MetricLine(stringResource(R.string.metrics_transport), transportLabel)
             MetricLine(stringResource(R.string.metrics_speed), speed)
             MetricLine(stringResource(R.string.metrics_latency), latency)
@@ -152,7 +154,7 @@ fun ProxyConnectionMetricsCard(
 }
 
 @Composable
-private fun MetricLine(label: String, value: String) {
+internal fun MetricLine(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
