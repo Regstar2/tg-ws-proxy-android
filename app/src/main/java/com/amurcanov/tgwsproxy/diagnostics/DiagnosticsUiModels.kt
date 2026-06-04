@@ -54,4 +54,7 @@ data class DiagnosticsScreenState(
     val lastRunAtMs: Long? = null,
     val screenError: Boolean = false,
     val runtimeRoute: RuntimeRouteUiModel? = null,
+    val isGeneratingReport: Boolean = false,
+    val persistentLogsEnabled: Boolean = false,
+    val persistentLogsSizeLabel: String = "",
 )

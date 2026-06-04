@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +48,8 @@ fun DiagnosticsScreen(
     onCheckCloudflare: () -> Unit,
     onCheckNetwork: () -> Unit,
     onCheckTelegram: () -> Unit,
+    onCopyReport: () -> Unit,
+    onShareReport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -117,6 +120,14 @@ fun DiagnosticsScreen(
             RuntimeRouteReadOnlyBlock(runtime)
         }
 
+        DiagnosticReportActionsCard(
+            isGenerating = state.isGeneratingReport,
+            persistentLogsEnabled = state.persistentLogsEnabled,
+            persistentLogsSizeLabel = state.persistentLogsSizeLabel,
+            onCopyReport = onCopyReport,
+            onShareReport = onShareReport,
+        )
+
         if (!state.hasRunOnce && !state.isChecking) {
             Column(
                 modifier = Modifier
@@ -149,6 +160,92 @@ fun DiagnosticsScreen(
             state.results.forEach { card ->
                 RouteProbeResultCard(card)
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DiagnosticReportActionsCard(
+    isGenerating: Boolean,
+    persistentLogsEnabled: Boolean,
+    persistentLogsSizeLabel: String,
+    onCopyReport: () -> Unit,
+    onShareReport: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(R.string.diagnostic_report_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(R.string.diagnostic_report_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (isGenerating) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.padding(end = 4.dp))
+                    Text(
+                        stringResource(R.string.diagnostic_report_generating),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(
+                    onClick = onCopyReport,
+                    enabled = !isGenerating,
+                ) {
+                    Text(stringResource(R.string.diagnostic_report_copy))
+                }
+                OutlinedButton(
+                    onClick = onShareReport,
+                    enabled = !isGenerating,
+                ) {
+                    Text(stringResource(R.string.diagnostic_report_share))
+                }
+            }
+            Text(
+                stringResource(
+                    if (persistentLogsEnabled) {
+                        R.string.persistent_logs_enabled
+                    } else {
+                        R.string.persistent_logs_disabled
+                    },
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (persistentLogsSizeLabel.isNotBlank()) {
+                Text(
+                    stringResource(R.string.persistent_logs_size, persistentLogsSizeLabel),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                stringResource(R.string.persistent_logs_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

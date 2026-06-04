@@ -27,7 +27,8 @@ object PersistentLogStore {
     private const val TAG = "TgWsProxy"
     private const val DIR_NAME = "logs"
     private const val CURRENT_FILE = "app-current.log"
-    private const val MAX_CURRENT_FILE_BYTES = 5L * 1024L * 1024L // safety rotation to avoid huge single file
+    private const val MAX_CURRENT_FILE_BYTES = PersistentLogLimits.DEFAULT_MAX_LOG_FILE_SIZE_BYTES
+    private const val MAX_ARCHIVED_FILES = PersistentLogLimits.DEFAULT_MAX_LOG_FILE_COUNT
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val queue = Channel<WriteCmd>(capacity = Channel.BUFFERED)
@@ -214,18 +215,36 @@ object PersistentLogStore {
         }
         closeWriter()
 
-        val dateToUse = (currentDate ?: nowDate)
-        val baseName = "app-$dateToUse.log"
         val dir = logsDir(context)
-        var target = File(dir, baseName)
-        var idx = 1
-        while (target.exists()) {
-            target = File(dir, "app-$dateToUse-$idx.log")
-            idx++
+        if (tooBig && !dateChanged) {
+            rotateNumberedFiles(dir, from)
+        } else {
+            val dateToUse = (currentDate ?: nowDate)
+            val baseName = "app-$dateToUse.log"
+            var target = File(dir, baseName)
+            var idx = 1
+            while (target.exists()) {
+                target = File(dir, "app-$dateToUse-$idx.log")
+                idx++
+            }
+            runCatching { from.renameTo(target) }
         }
-        runCatching { from.renameTo(target) }
         currentDate = nowDate
         ensureWriter(context)
+    }
+
+    private fun rotateNumberedFiles(dir: File, current: File) {
+        val oldest = File(dir, "$CURRENT_FILE.$MAX_ARCHIVED_FILES")
+        runCatching { oldest.delete() }
+        for (index in MAX_ARCHIVED_FILES downTo 2) {
+            val from = File(dir, "$CURRENT_FILE.${index - 1}")
+            val to = File(dir, "$CURRENT_FILE.$index")
+            if (from.exists()) {
+                runCatching { from.renameTo(to) }
+            }
+        }
+        val firstArchive = File(dir, "$CURRENT_FILE.1")
+        runCatching { current.renameTo(firstArchive) }
     }
 
     private fun maintenance(context: Context) {

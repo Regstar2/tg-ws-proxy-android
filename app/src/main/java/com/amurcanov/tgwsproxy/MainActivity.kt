@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amurcanov.tgwsproxy.diagnostics.DiagnosticReportEvent
+import com.amurcanov.tgwsproxy.diagnostics.DiagnosticReportUiContext
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsScreen
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsViewModel
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
@@ -552,10 +554,36 @@ private fun ProxyScreen(
             DiagnosticsViewModel.onScreenOpened()
             diagnosticsViewModel.syncRuntimeRoute()
             diagnosticsViewModel.loadFromRepository()
+            val persistentEnabled = prefs.getBoolean("persistent_logs_enabled", false)
+            val bytes = PersistentLogStore.totalSizeBytes(context)
+            diagnosticsViewModel.updatePersistentLogsState(
+                enabled = persistentEnabled,
+                sizeLabel = ConnectionMetricsFormatter.formatBytes(bytes),
+            )
         }
         if (currentPage == ProxyScreenPage.Settings) {
             refreshRoutePolicySnapshot()
             reconfigureStatus = ReconfigureStatusStore.load(prefs)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        diagnosticsViewModel.reportEvents.collect { event ->
+            when (event) {
+                DiagnosticReportEvent.CopySuccess -> {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.diagnostic_report_copied),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                is DiagnosticReportEvent.ShareReady -> {
+                    context.startActivity(event.intent)
+                }
+                is DiagnosticReportEvent.Failed -> {
+                    Toast.makeText(context, context.getString(event.messageRes), Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -700,6 +728,50 @@ private fun ProxyScreen(
             cachedUpstreamDomains = cfUpstreamState.domains,
             networkProfile = currentNetworkProfile,
         )
+    }
+
+    fun buildDiagnosticReportUiContext(): DiagnosticReportUiContext {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        val isDebug = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode.toInt()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode
+        }
+        return DiagnosticReportUiContext(
+            versionName = packageInfo.versionName ?: "unknown",
+            versionCode = versionCode,
+            buildType = if (isDebug) "debug" else "release",
+            connectionMode = context.getString(connectionMode.displayLabelRes()),
+            proxyPort = portText,
+            workerDomain = workerDomainText,
+            cfProxyConfigured = manualCfDomains.isNotEmpty() || cfUpstreamState.domains.isNotEmpty(),
+            maskDomains = maskDomainsInReport,
+            fallbackEnabled = routePolicySnapshot.policy.allowFallback,
+            diagnosticsEnabled = true,
+        )
+    }
+
+    fun runDiagnosticsCopyReport() {
+        coroutineScope.launch {
+            diagnosticsViewModel.copyReport(
+                context = context,
+                uiContext = buildDiagnosticReportUiContext(),
+                recentLogLines = logs.map(AppLogSanitizer::sanitizeText),
+            )
+        }
+    }
+
+    fun runDiagnosticsShareReport() {
+        coroutineScope.launch {
+            diagnosticsViewModel.shareReport(
+                context = context,
+                uiContext = buildDiagnosticReportUiContext(),
+                recentLogLines = logs.map(AppLogSanitizer::sanitizeText),
+                chooserTitle = context.getString(R.string.diagnostic_report_share),
+            )
+        }
     }
 
     val diagnosticsCheckingLabel = stringResource(R.string.diagnostics_checking)
@@ -1125,6 +1197,8 @@ private fun ProxyScreen(
                         onCheckCloudflare = ::runDiagnosticsCloudflare,
                         onCheckNetwork = ::runDiagnosticsNetwork,
                         onCheckTelegram = ::runDiagnosticsTelegram,
+                        onCopyReport = ::runDiagnosticsCopyReport,
+                        onShareReport = ::runDiagnosticsShareReport,
                     )
                 } else {
                 if (isRunning) {

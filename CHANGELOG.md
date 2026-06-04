@@ -2,6 +2,12 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.8.4
+
+- Diagnostic report: copy/share from Route diagnostics screen (runtime route, probe results, config summary, recent logs).
+- Report and persistent logs sanitization (tokens, secrets, Authorization, URL query params).
+- Persistent log rotation tuned to 1 MB per file with up to 3 archived files (existing enable/export/clear in Settings → App).
+
 ## 1.8.3
 
 - Route diagnostics screen with probe result cards, step details, and read-only runtime route block.

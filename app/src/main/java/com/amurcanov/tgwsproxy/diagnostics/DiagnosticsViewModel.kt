@@ -2,13 +2,17 @@ package com.amurcanov.tgwsproxy.diagnostics
 
 import android.content.Context
 import android.util.Log
+import com.amurcanov.tgwsproxy.R
 import com.amurcanov.tgwsproxy.ProxyRuntimeState
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -17,6 +21,13 @@ class DiagnosticsViewModel(
 ) {
     private val _state = MutableStateFlow(DiagnosticsScreenState())
     val state: StateFlow<DiagnosticsScreenState> = _state.asStateFlow()
+
+    private val _reportEvents = MutableSharedFlow<DiagnosticReportEvent>(extraBufferCapacity = 1)
+    val reportEvents: SharedFlow<DiagnosticReportEvent> = _reportEvents.asSharedFlow()
+
+    fun updatePersistentLogsState(enabled: Boolean, sizeLabel: String) {
+        _state.update { it.copy(persistentLogsEnabled = enabled, persistentLogsSizeLabel = sizeLabel) }
+    }
 
     fun syncRuntimeRoute() {
         val runtime = ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
@@ -98,6 +109,60 @@ class DiagnosticsViewModel(
                 results = stored.map(RouteProbeUiMapper::toUiModel),
                 lastRunAtMs = stored.maxOfOrNull { r -> r.finishedAtMs },
             )
+        }
+    }
+
+    suspend fun copyReport(
+        context: Context,
+        uiContext: DiagnosticReportUiContext,
+        recentLogLines: List<String>,
+    ) {
+        if (_state.value.isGeneratingReport) return
+        _state.update { it.copy(isGeneratingReport = true) }
+        try {
+            syncRuntimeRoute()
+            val input = DiagnosticReportContextFactory.build(
+                context = context,
+                repository = repository,
+                reportUi = uiContext.copy(probeUiResults = _state.value.results),
+                recentLogLines = recentLogLines,
+            )
+            val text = DiagnosticReportGenerator.generate(context, input)
+            DiagnosticReportExporter.copyToClipboard(context, text)
+            _reportEvents.emit(DiagnosticReportEvent.CopySuccess)
+        } catch (e: Exception) {
+            Log.e(TAG, "Diagnostic report copy failed", e)
+            _reportEvents.emit(DiagnosticReportEvent.Failed(R.string.diagnostic_report_failed))
+        } finally {
+            _state.update { it.copy(isGeneratingReport = false) }
+        }
+    }
+
+    suspend fun shareReport(
+        context: Context,
+        uiContext: DiagnosticReportUiContext,
+        recentLogLines: List<String>,
+        chooserTitle: String,
+    ) {
+        if (_state.value.isGeneratingReport) return
+        _state.update { it.copy(isGeneratingReport = true) }
+        try {
+            syncRuntimeRoute()
+            val input = DiagnosticReportContextFactory.build(
+                context = context,
+                repository = repository,
+                reportUi = uiContext.copy(probeUiResults = _state.value.results),
+                recentLogLines = recentLogLines,
+            )
+            val text = DiagnosticReportGenerator.generate(context, input)
+            val shareFile = DiagnosticReportExporter.writeTempReportFile(context, text)
+            val intent = DiagnosticReportExporter.shareIntent(shareFile, chooserTitle)
+            _reportEvents.emit(DiagnosticReportEvent.ShareReady(intent))
+        } catch (e: Exception) {
+            Log.e(TAG, "Diagnostic report share failed", e)
+            _reportEvents.emit(DiagnosticReportEvent.Failed(R.string.diagnostic_report_share_failed))
+        } finally {
+            _state.update { it.copy(isGeneratingReport = false) }
         }
     }
 

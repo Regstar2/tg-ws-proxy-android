@@ -7,19 +7,25 @@ package com.amurcanov.tgwsproxy
 object AppLogSanitizer {
     // key=value (or key:"value") redaction. Keep key, redact value.
     private val patterns = listOf(
-        Regex("""(?i)\b(token|auth|auth_key|key|password|authorization|cookie)\s*=\s*("[^"]*"|[^\s]+)"""),
-        Regex("""(?i)\b(token|auth|auth_key|key|password|authorization|cookie)\s*:\s*("[^"]*"|[^\s,}]+)"""),
+        Regex("""(?i)\b(token|auth|auth_key|key|password|cookie|secret)\s*=\s*("[^"]*"|[^\s&]+)"""),
+        Regex("""(?i)\b(token|auth|auth_key|key|password|cookie|secret)\s*:\s*("[^"]*"|[^\s,}]+)"""),
         Regex("""(?i)\b(payload|raw)\s*=\s*("[^"]*"|[^\s]+)"""),
         Regex("""(?i)\b(payload|raw)\s*:\s*("[^"]*"|[^\s,}]+)"""),
     )
+    private val bearerPattern = Regex("""(?i)\bAuthorization\s*:\s*Bearer\s+\S+""")
+    private val urlQueryPattern = Regex("""(\?)([^#\s"]+)""")
 
     fun sanitizeText(text: String): String {
         var out = text
+        out = bearerPattern.replace(out, "Authorization: ***")
         patterns.forEach { re ->
             out = out.replace(re) { m ->
                 val key = m.groupValues[1]
-                "$key=<redacted>"
+                "$key=***"
             }
+        }
+        out = urlQueryPattern.replace(out) { m ->
+            "${m.groupValues[1]}***"
         }
         return out
     }
