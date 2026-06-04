@@ -2,6 +2,12 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.8.2
+
+- Route Probe Core: structured route diagnostics (`RouteProbeRunner`, step-based DNS/TCP/TLS/HTTP/WebSocket checks).
+- `RouteDiagnosticsRepository` and metrics-card **Check routes** button; results in UI and logcat only (no routing changes).
+- Unit tests for probe status aggregation.
+
 ## 1.8.1
 
 - Runtime route truth: UI separates configured mode, selected route, active route, last success/failure, and fallback reason.

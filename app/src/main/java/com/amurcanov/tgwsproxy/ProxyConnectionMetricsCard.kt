@@ -23,11 +23,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeCoreBlock
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeSnapshot
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeSummary
 
 @Composable
 fun ProxyConnectionMetricsCard(
     ui: ProxyUiMetrics,
     showMetrics: Boolean,
+    routeProbeSummary: RouteProbeSummary? = null,
+    routeProbeSnapshot: RouteProbeSnapshot? = null,
+    routeProbeRunning: Boolean = false,
+    onRunRouteProbe: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!showMetrics) {
@@ -75,6 +82,14 @@ fun ProxyConnectionMetricsCard(
                 routeState = ui.runtime.routeRuntime,
                 running = running,
             )
+            if (onRunRouteProbe != null) {
+                RouteProbeCoreBlock(
+                    summary = routeProbeSummary,
+                    snapshot = routeProbeSnapshot,
+                    isRunning = routeProbeRunning,
+                    onRunProbe = onRunRouteProbe,
+                )
+            }
             MetricLine(stringResource(R.string.metrics_transport), transportLabel)
             MetricLine(stringResource(R.string.metrics_speed), speed)
             MetricLine(stringResource(R.string.metrics_latency), latency)

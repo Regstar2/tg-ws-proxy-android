@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeDiagnosticsState
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -271,6 +274,10 @@ private fun ProxyScreen(
     }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
+    val routeProbeCoreRunning by RouteProbeDiagnosticsState.isRunning.collectAsStateWithLifecycle()
+    val routeProbeCoreSummary by RouteProbeDiagnosticsState.lastSummary.collectAsStateWithLifecycle()
+    val routeProbeCoreSnapshot by RouteProbeDiagnosticsState.lastSnapshot.collectAsStateWithLifecycle()
+    val routeDiagnosticsRepository = remember { RouteDiagnosticsRepository() }
     var notificationPrefs by remember {
         mutableStateOf(NotificationPreferences.load(context))
     }
@@ -668,6 +675,24 @@ private fun ProxyScreen(
         ContextCompat.startForegroundService(context, startIntent)
     }
 
+    val runRouteProbeCore by rememberUpdatedState {
+        if (routeProbeCoreRunning) return@rememberUpdatedState
+        coroutineScope.launch {
+            RouteProbeDiagnosticsState.run {
+                routeDiagnosticsRepository.runProbes(
+                    context = context,
+                    targets = RouteDiagnosticsRepository.DEFAULT_ROUTE_TARGETS,
+                    request = RouteProbeRequest(
+                        workerDomain = workerDomainText,
+                        manualCfDomains = manualCfDomains,
+                        cachedUpstreamDomains = cfUpstreamState.domains,
+                        networkProfile = currentNetworkProfile,
+                    ),
+                )
+            }
+        }
+    }
+
     val runEffectiveRouteProbe by rememberUpdatedState {
         if (isDiagRunning || isRouteProbeRunning) return@rememberUpdatedState
         isDiagRunning = true
@@ -928,6 +953,10 @@ private fun ProxyScreen(
                                 },
                             ),
                             showMetrics = true,
+                            routeProbeSummary = routeProbeCoreSummary,
+                            routeProbeSnapshot = routeProbeCoreSnapshot,
+                            routeProbeRunning = routeProbeCoreRunning,
+                            onRunRouteProbe = runRouteProbeCore,
                         )
                     }
 
