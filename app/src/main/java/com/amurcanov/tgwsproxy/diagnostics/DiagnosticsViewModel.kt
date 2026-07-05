@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.amurcanov.tgwsproxy.R
 import com.amurcanov.tgwsproxy.ProxyRuntimeState
+import com.amurcanov.tgwsproxy.RouteRuntimeState
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
@@ -29,8 +30,8 @@ class DiagnosticsViewModel(
         _state.update { it.copy(persistentLogsEnabled = enabled, persistentLogsSizeLabel = sizeLabel) }
     }
 
-    fun syncRuntimeRoute() {
-        val runtime = ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
+    fun syncRuntimeRoute(routeState: RouteRuntimeState? = null) {
+        val runtime = routeState ?: ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
         _state.update { it.copy(runtimeRoute = RuntimeRouteUiModel.from(runtime)) }
     }
 

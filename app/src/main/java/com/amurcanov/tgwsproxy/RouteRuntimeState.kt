@@ -14,6 +14,10 @@ data class RouteRuntimeState(
     val lastFailedRoute: String = "",
     val fallbackReason: String = "",
     val currentWorkerDomain: String = "",
+    val currentWorkerId: String = "",
+    val currentWorkerName: String = "",
+    val currentWorkerUrlMasked: String = "",
+    val currentWorkerState: com.amurcanov.tgwsproxy.worker.WorkerHealthState? = null,
     val networkType: String = "",
     val lastUpdatedAtMs: Long = 0L,
 ) {
@@ -37,6 +41,24 @@ data class RouteRuntimeState(
 
     fun networkTypeLabel(context: Context): String =
         RouteNetworkType.label(context, networkType)
+
+    fun currentWorkerLabel(context: Context): String {
+        if (currentWorkerName.isNotBlank()) {
+            return currentWorkerName
+        }
+        if (currentWorkerUrlMasked.isNotBlank()) {
+            return currentWorkerUrlMasked
+        }
+        if (currentWorkerDomain.isNotBlank()) {
+            return com.amurcanov.tgwsproxy.worker.WorkerUrlSanitizer.maskForDisplay(currentWorkerDomain)
+        }
+        return context.getString(R.string.common_none)
+    }
+
+    fun currentWorkerStateLabel(context: Context): String {
+        val state = currentWorkerState ?: com.amurcanov.tgwsproxy.worker.WorkerHealthState.UNKNOWN
+        return WorkerHealthStateLabels.label(context, state)
+    }
 
     companion object {
         fun fromStatusMap(map: Map<String, String>): RouteRuntimeState {
@@ -90,5 +112,23 @@ internal object RouteNetworkType {
             "unknown", "" -> context.getString(R.string.adaptive_network_unknown)
             else -> raw.ifBlank { context.getString(R.string.adaptive_network_unknown) }
         }
+    }
+}
+
+internal object WorkerHealthStateLabels {
+    fun label(context: Context, state: com.amurcanov.tgwsproxy.worker.WorkerHealthState): String {
+        val res = when (state) {
+            com.amurcanov.tgwsproxy.worker.WorkerHealthState.UNKNOWN ->
+                R.string.worker_pool_worker_state_unknown
+            com.amurcanov.tgwsproxy.worker.WorkerHealthState.HEALTHY ->
+                R.string.worker_pool_worker_state_healthy
+            com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEGRADED ->
+                R.string.worker_pool_worker_state_degraded
+            com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEAD ->
+                R.string.worker_pool_worker_state_dead
+            com.amurcanov.tgwsproxy.worker.WorkerHealthState.DISABLED ->
+                R.string.worker_pool_worker_state_disabled
+        }
+        return context.getString(res)
     }
 }

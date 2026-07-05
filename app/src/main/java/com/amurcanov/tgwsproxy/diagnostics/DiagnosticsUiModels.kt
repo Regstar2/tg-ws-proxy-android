@@ -31,6 +31,8 @@ data class RuntimeRouteUiModel(
     val lastSuccessfulRoute: String = "",
     val lastFailedRoute: String = "",
     val fallbackReason: String = "",
+    val currentWorkerName: String = "",
+    val currentWorkerState: com.amurcanov.tgwsproxy.worker.WorkerHealthState? = null,
 ) {
     companion object {
         fun from(route: RouteRuntimeState): RuntimeRouteUiModel {
@@ -41,6 +43,8 @@ data class RuntimeRouteUiModel(
                 lastSuccessfulRoute = route.lastSuccessfulRoute,
                 lastFailedRoute = route.lastFailedRoute,
                 fallbackReason = route.fallbackReason,
+                currentWorkerName = route.currentWorkerName,
+                currentWorkerState = route.currentWorkerState,
             )
         }
     }

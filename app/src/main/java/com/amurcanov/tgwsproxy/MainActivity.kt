@@ -59,7 +59,15 @@ import com.amurcanov.tgwsproxy.diagnostics.DiagnosticReportUiContext
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsScreen
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsViewModel
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
-import com.amurcanov.tgwsproxy.routeprobe.RouteProbeDiagnosticsState
+import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
+import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
+import com.amurcanov.tgwsproxy.worker.WorkerPoolMigration
+import com.amurcanov.tgwsproxy.worker.WorkerPoolRepository
+import com.amurcanov.tgwsproxy.worker.WorkerRouteResolver
+import com.amurcanov.tgwsproxy.worker.WorkerRuntimeTruth
+import com.amurcanov.tgwsproxy.worker.WorkerPoolOperationException
+import com.amurcanov.tgwsproxy.worker.WorkerPoolError
+import com.amurcanov.tgwsproxy.worker.WorkerValidationError
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
 import kotlinx.coroutines.*
@@ -264,12 +272,16 @@ private fun ProxyScreen(
     val routePolicyRepository = remember {
         NetworkRoutePolicyRepository(prefs)
     }
+    val workerPoolRepository = remember {
+        WorkerPoolRepository(SharedPreferencesWorkerPoolPersistence(prefs))
+    }
 
     LaunchedEffect(Unit) {
         RouteDefaultsMigration.applyIfNeeded(
             prefs = prefs,
             repository = routePolicyRepository,
         )
+        WorkerPoolMigration.applyIfNeeded(prefs, workerPoolRepository)
     }
     val cfDomainListUpdater = remember {
         CfDomainListUpdater(
@@ -280,9 +292,6 @@ private fun ProxyScreen(
     }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
-    val routeProbeCoreRunning by RouteProbeDiagnosticsState.isRunning.collectAsStateWithLifecycle()
-    val routeProbeCoreSummary by RouteProbeDiagnosticsState.lastSummary.collectAsStateWithLifecycle()
-    val routeProbeCoreSnapshot by RouteProbeDiagnosticsState.lastSnapshot.collectAsStateWithLifecycle()
     val routeDiagnosticsRepository = remember { RouteDiagnosticsRepository() }
     val diagnosticsViewModel = remember(routeDiagnosticsRepository) {
         DiagnosticsViewModel(routeDiagnosticsRepository)
@@ -331,6 +340,15 @@ private fun ProxyScreen(
     }
     var workerEnabled by remember { mutableStateOf(prefs.getBoolean("worker_enabled", false)) }
     var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
+    var workerPoolEnabled by remember {
+        mutableStateOf(workerPoolRepository.getWorkerPoolConfig().enabled)
+    }
+    var workerPoolWorkers by remember {
+        mutableStateOf(workerPoolRepository.getWorkers())
+    }
+    var workerPoolSelectedWorker by remember {
+        mutableStateOf(workerPoolRepository.getSelectedWorker())
+    }
     var diagStatusText by remember { mutableStateOf(prefs.getString("diag_last_status", "") ?: "") }
     var isDiagRunning by remember { mutableStateOf(false) }
     var cfUpstreamState by remember { mutableStateOf(cfDomainListRepository.state()) }
@@ -343,9 +361,10 @@ private fun ProxyScreen(
         mutableStateOf(CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains))
     }
     var cfDomainLastCheckAtMs by remember { mutableStateOf(CfDomainDiagnosticsState.lastCheckAtMs) }
-    var cfDomainsExpanded by rememberSaveable { mutableStateOf(false) }
     var adaptiveDetailsExpanded by rememberSaveable { mutableStateOf(false) }
-    var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.CONNECTION) }
+    var settingsPage by rememberSaveable { mutableStateOf(SettingsPage.HOME) }
+    var routesSettingsPage by rememberSaveable { mutableStateOf(RoutesSettingsPage.OVERVIEW) }
+    var cloudflareSettingsPage by rememberSaveable { mutableStateOf(CloudflareSettingsPage.OVERVIEW) }
     var autoStrategy by remember {
         mutableStateOf(AutoStrategy.fromPref(prefs.getString("auto_strategy", null)))
     }
@@ -388,6 +407,7 @@ private fun ProxyScreen(
     var lastRuntimeConfigKey by remember { mutableStateOf("") }
     var lastReconfigureAtMs by remember { mutableStateOf(0L) }
     var pendingReconfigureJob by remember { mutableStateOf<Job?>(null) }
+    val syncCfDomainsToRuntimeHolder = remember { mutableStateOf<() -> Unit>({}) }
 
     fun refreshRoutePolicySnapshot() {
         routePolicySnapshot = RoutePolicyDiagnostics.buildSnapshot(
@@ -409,6 +429,25 @@ private fun ProxyScreen(
         if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
     }
 
+    fun refreshWorkerPoolState() {
+        workerPoolEnabled = workerPoolRepository.getWorkerPoolConfig().enabled
+        workerPoolWorkers = workerPoolRepository.getWorkers()
+        workerPoolSelectedWorker = workerPoolRepository.getSelectedWorker()
+    }
+
+    fun enrichedRuntimeRoute(): RouteRuntimeState {
+        return WorkerRuntimeTruth.enrichRouteState(
+            routeState = uiMetrics.runtime.routeRuntime,
+            repository = workerPoolRepository,
+            legacyWorkerDomain = workerDomainText,
+            maskDomains = maskDomainsInReport,
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        refreshWorkerPoolState()
+    }
+
     fun runtimeConfigFactory(): ProxyRuntimeConfigFactory {
         return ProxyRuntimeConfigFactory(
             prefs = prefs,
@@ -416,11 +455,22 @@ private fun ProxyScreen(
             adaptiveRouteStatsRepository = adaptiveRouteStatsRepository,
             cfUpstreamDomainsProvider = { cfUpstreamState.domains },
             manualCfDomainsProvider = { manualCfDomains },
-            workerDomainProvider = { workerDomainText },
+            workerDomainProvider = {
+                WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText)
+            },
             dcEntriesProvider = { currentDcEntries() },
             poolSizeProvider = { selectedPoolSize },
             portProvider = { portText.toIntOrNull() },
         )
+    }
+
+    LaunchedEffect(settingsPage) {
+        if (settingsPage != SettingsPage.ROUTES) {
+            routesSettingsPage = RoutesSettingsPage.OVERVIEW
+        }
+        if (settingsPage != SettingsPage.CLOUDFLARE) {
+            cloudflareSettingsPage = CloudflareSettingsPage.OVERVIEW
+        }
     }
 
     BackHandler(enabled = currentPage == ProxyScreenPage.Diagnostics && !hasOpenModal) {
@@ -429,7 +479,20 @@ private fun ProxyScreen(
     }
 
     BackHandler(enabled = currentPage == ProxyScreenPage.Settings && !hasOpenModal) {
-        currentPage = ProxyScreenPage.Main
+        when {
+            settingsPage == SettingsPage.ROUTES && routesSettingsPage != RoutesSettingsPage.OVERVIEW -> {
+                routesSettingsPage = RoutesSettingsPage.OVERVIEW
+            }
+            settingsPage == SettingsPage.CLOUDFLARE && cloudflareSettingsPage != CloudflareSettingsPage.OVERVIEW -> {
+                cloudflareSettingsPage = CloudflareSettingsPage.OVERVIEW
+            }
+            settingsPage != SettingsPage.HOME -> {
+                settingsPage = SettingsPage.HOME
+            }
+            else -> {
+                currentPage = ProxyScreenPage.Main
+            }
+        }
         coroutineScope.launch { screenScroll.scrollTo(0) }
     }
 
@@ -552,7 +615,7 @@ private fun ProxyScreen(
         screenScroll.scrollTo(0)
         if (currentPage == ProxyScreenPage.Diagnostics) {
             DiagnosticsViewModel.onScreenOpened()
-            diagnosticsViewModel.syncRuntimeRoute()
+            diagnosticsViewModel.syncRuntimeRoute(enrichedRuntimeRoute())
             diagnosticsViewModel.loadFromRepository()
             val persistentEnabled = prefs.getBoolean("persistent_logs_enabled", false)
             val bytes = PersistentLogStore.totalSizeBytes(context)
@@ -592,8 +655,17 @@ private fun ProxyScreen(
         autoUpdateCfDomains = state.autoUpdateEnabled
         cfMirrorEnabled = state.mirrorEnabled
         cfMirrorUrlText = state.mirrorUrl
-        cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, state.domains)
-        NativeProxy.setCachedCfDomains(state.domains)
+        val manualSnapshot = manualCfDomains
+        val upstreamDomains = state.domains
+        coroutineScope.launch(Dispatchers.Default) {
+            val rows = CfDomainDiagnosticsState.snapshot(manualSnapshot, upstreamDomains)
+            withContext(Dispatchers.Main) {
+                cfDomainRows = rows
+            }
+        }
+        if (isRunning) {
+            syncCfDomainsToRuntimeHolder.value()
+        }
     }
 
     fun applyCfMirrorSettings(enabled: Boolean, url: String) {
@@ -616,7 +688,11 @@ private fun ProxyScreen(
                 Toast.makeText(
                     context,
                     if (result.dryRun) {
-                        context.getString(R.string.cf_update_test_ok, result.domainCount, sourceLabel)
+                        context.getString(
+                            R.string.cf_update_test_ok,
+                            result.domainCount,
+                            safeToastFormatArg(sourceLabel),
+                        )
                     } else {
                         context.getString(R.string.cf_domains_update_success, result.domainCount)
                     },
@@ -630,7 +706,10 @@ private fun ProxyScreen(
                 Toast.makeText(
                     context,
                     if (result.dryRun) {
-                        context.getString(R.string.cf_update_test_not_modified, sourceLabel)
+                        context.getString(
+                            R.string.cf_update_test_not_modified,
+                            safeToastFormatArg(sourceLabel),
+                        )
                     } else {
                         context.getString(R.string.cf_domains_update_not_modified)
                     },
@@ -643,7 +722,11 @@ private fun ProxyScreen(
                 val stageLabel = context.getString(result.stage.userMessageKey())
                 Toast.makeText(
                     context,
-                    context.getString(R.string.cf_domains_update_failed, stageLabel, result.message),
+                    context.getString(
+                        R.string.cf_domains_update_failed,
+                        stageLabel,
+                        safeToastFormatArg(result.message),
+                    ),
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -657,6 +740,14 @@ private fun ProxyScreen(
                 ).show()
             }
 
+            CfDomainListUpdateResult.AlreadyRunning -> {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.cf_domains_update_running),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+
             else -> Unit
         }
     }
@@ -667,8 +758,22 @@ private fun ProxyScreen(
         }
         isCfDomainUpdateRunning = true
         coroutineScope.launch {
-            showCfDomainUpdateResult(block())
-            isCfDomainUpdateRunning = false
+            try {
+                showCfDomainUpdateResult(block())
+            } catch (t: Throwable) {
+                Log.e("MainActivity", "CF domain update failed", t)
+                Toast.makeText(
+                    context,
+                    context.getString(
+                        R.string.cf_domains_update_failed,
+                        context.getString(R.string.cf_update_error_unavailable),
+                        safeToastFormatArg(t.message ?: "unknown"),
+                    ),
+                    Toast.LENGTH_LONG,
+                ).show()
+            } finally {
+                isCfDomainUpdateRunning = false
+            }
         }
     }
 
@@ -678,7 +783,9 @@ private fun ProxyScreen(
         invalidManualCfDomains = parsed.invalidEntries
         manualCfDomains = manualCfDomainRepository.save(parsed.domains)
         cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains)
-        NativeProxy.setManualCfDomains(manualCfDomains)
+        if (isRunning) {
+            syncCfDomainsToRuntimeHolder.value()
+        }
     }
 
     LaunchedEffect(currentPage, autoUpdateCfDomains) {
@@ -686,13 +793,18 @@ private fun ProxyScreen(
             return@LaunchedEffect
         }
         isCfDomainUpdateRunning = true
-        when (val result = cfDomainListUpdater.maybeAutoUpdate()) {
-            is CfDomainListUpdateResult.Success -> applyCfUpstreamState(result.state)
-            is CfDomainListUpdateResult.NotModified -> applyCfUpstreamState(result.state)
-            is CfDomainListUpdateResult.Failure -> applyCfUpstreamState(result.state)
-            else -> Unit
+        try {
+            when (val result = cfDomainListUpdater.maybeAutoUpdate()) {
+                is CfDomainListUpdateResult.Success -> applyCfUpstreamState(result.state)
+                is CfDomainListUpdateResult.NotModified -> applyCfUpstreamState(result.state)
+                is CfDomainListUpdateResult.Failure -> applyCfUpstreamState(result.state)
+                else -> Unit
+            }
+        } catch (t: Throwable) {
+            Log.e("MainActivity", "CF domain auto-update failed", t)
+        } finally {
+            isCfDomainUpdateRunning = false
         }
-        isCfDomainUpdateRunning = false
     }
 
     val startProxyAction by rememberUpdatedState {
@@ -723,7 +835,7 @@ private fun ProxyScreen(
 
     fun buildRouteProbeRequest(): RouteProbeRequest {
         return RouteProbeRequest(
-            workerDomain = workerDomainText,
+            workerDomain = WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText),
             manualCfDomains = manualCfDomains,
             cachedUpstreamDomains = cfUpstreamState.domains,
             networkProfile = currentNetworkProfile,
@@ -745,7 +857,12 @@ private fun ProxyScreen(
             buildType = if (isDebug) "debug" else "release",
             connectionMode = context.getString(connectionMode.displayLabelRes()),
             proxyPort = portText,
-            workerDomain = workerDomainText,
+            workerDomain = WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText),
+            workerPoolSnapshot = workerPoolRepository.buildReportSnapshot(
+                legacyWorkerDomain = workerDomainText,
+                maskDomains = maskDomainsInReport,
+            ),
+            enrichedRuntimeRoute = enrichedRuntimeRoute(),
             cfProxyConfigured = manualCfDomains.isNotEmpty() || cfUpstreamState.domains.isNotEmpty(),
             maskDomains = maskDomainsInReport,
             fallbackEnabled = routePolicySnapshot.policy.allowFallback,
@@ -837,24 +954,6 @@ private fun ProxyScreen(
         }
     }
 
-    val runRouteProbeCore by rememberUpdatedState {
-        if (routeProbeCoreRunning) return@rememberUpdatedState
-        coroutineScope.launch {
-            RouteProbeDiagnosticsState.run {
-                routeDiagnosticsRepository.runProbes(
-                    context = context,
-                    targets = RouteDiagnosticsRepository.DEFAULT_ROUTE_TARGETS,
-                    request = RouteProbeRequest(
-                        workerDomain = workerDomainText,
-                        manualCfDomains = manualCfDomains,
-                        cachedUpstreamDomains = cfUpstreamState.domains,
-                        networkProfile = currentNetworkProfile,
-                    ),
-                )
-            }
-        }
-    }
-
     val runEffectiveRouteProbe by rememberUpdatedState {
         if (isDiagRunning || isRouteProbeRunning) return@rememberUpdatedState
         isDiagRunning = true
@@ -936,6 +1035,12 @@ private fun ProxyScreen(
             putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
         }
         ContextCompat.startForegroundService(context, intent)
+    }
+
+    syncCfDomainsToRuntimeHolder.value = {
+        if (isRunning) {
+            runNetworkReconfigure(NetworkProfileProvider.current(context))
+        }
     }
 
     val latestReconfigureAction by rememberUpdatedState<(NetworkProfile) -> Unit> { profile ->
@@ -1034,7 +1139,24 @@ private fun ProxyScreen(
                 navigationIcon = {
                     if (currentPage == ProxyScreenPage.Settings || currentPage == ProxyScreenPage.Diagnostics) {
                         IconButton(onClick = {
-                            currentPage = ProxyScreenPage.Main
+                            when {
+                                currentPage == ProxyScreenPage.Settings &&
+                                    settingsPage == SettingsPage.ROUTES &&
+                                    routesSettingsPage != RoutesSettingsPage.OVERVIEW -> {
+                                    routesSettingsPage = RoutesSettingsPage.OVERVIEW
+                                }
+                                currentPage == ProxyScreenPage.Settings &&
+                                    settingsPage == SettingsPage.CLOUDFLARE &&
+                                    cloudflareSettingsPage != CloudflareSettingsPage.OVERVIEW -> {
+                                    cloudflareSettingsPage = CloudflareSettingsPage.OVERVIEW
+                                }
+                                currentPage == ProxyScreenPage.Settings && settingsPage != SettingsPage.HOME -> {
+                                    settingsPage = SettingsPage.HOME
+                                }
+                                else -> {
+                                    currentPage = ProxyScreenPage.Main
+                                }
+                            }
                             coroutineScope.launch { screenScroll.scrollTo(0) }
                         }) {
                             Icon(
@@ -1061,7 +1183,10 @@ private fun ProxyScreen(
                         )
                     }
                     if (currentPage == ProxyScreenPage.Main || currentPage == ProxyScreenPage.Diagnostics) {
-                        IconButton(onClick = { currentPage = ProxyScreenPage.Settings }) {
+                        IconButton(onClick = {
+                            currentPage = ProxyScreenPage.Settings
+                            settingsPage = SettingsPage.HOME
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
                                 contentDescription = stringResource(R.string.action_settings),
@@ -1115,21 +1240,7 @@ private fun ProxyScreen(
                                 },
                             ),
                             showMetrics = true,
-                            routeProbeSummary = routeProbeCoreSummary,
-                            routeProbeSnapshot = routeProbeCoreSnapshot,
-                            routeProbeRunning = routeProbeCoreRunning,
-                            onRunRouteProbe = runRouteProbeCore,
-                            onOpenDiagnostics = { currentPage = ProxyScreenPage.Diagnostics },
                         )
-                    }
-
-                    OutlinedButton(
-                        onClick = { currentPage = ProxyScreenPage.Diagnostics },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                    ) {
-                        Text(stringResource(R.string.diagnostics_open_screen))
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1204,13 +1315,42 @@ private fun ProxyScreen(
                 if (isRunning) {
                     RunningProxySettingsBanner()
                 }
-                SettingsTabsBar(
-                    selectedTab = settingsTab,
-                    onTabSelected = { settingsTab = it },
+                val applyRecommendedRoutes: () -> Unit = {
+                    RouteDefaultsMigration.applyRecommendedPreset1791(
+                        prefs = prefs,
+                        repository = routePolicyRepository,
+                    )
+                    wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                    mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                    hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                    hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                    refreshRoutePolicySnapshot()
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.route_policy_recommended_applied),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                val settingsNetworkLabel = RoutePolicyDisplayNames.networkTypeLabel(
+                    context,
+                    currentNetworkProfile.type,
                 )
-
-                if (settingsTab == SettingsTab.CONNECTION) {
-                SettingsSectionCard(titleRes = R.string.section_connection) {
+                when (settingsPage) {
+                    SettingsPage.HOME -> {
+                        SettingsHomeScreen(
+                            networkLabel = settingsNetworkLabel,
+                            proxyAddress = proxyAddress,
+                            routeLabel = activePolicyChipText,
+                            applyRecommendedEnabled = !isRunning,
+                            onNavigate = { settingsPage = it },
+                            onApplyRecommendedRoutes = applyRecommendedRoutes,
+                        )
+                    }
+                    SettingsPage.CONNECTION -> {
+                        SettingsPageHeader(
+                            titleRes = R.string.settings_section_connection_title,
+                            subtitleRes = R.string.settings_section_connection_subtitle,
+                        )
                 if (cfProxyOnly) {
                     HintText(stringResource(R.string.cf_only_hint))
                 }
@@ -1295,220 +1435,176 @@ private fun ProxyScreen(
                             )
                         }
                     }
+                }
+                }
                     }
-                }
-                }
-                }
-
-                if (settingsTab == SettingsTab.ROUTES) {
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_routes,
-                    initiallyExpanded = true,
-                ) {
-                if (isRunning) {
-                    SettingsSectionLockedSummary(R.string.settings_routes_locked)
-                } else {
-                Text(
-                    stringResource(R.string.connection_mode_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-                val connectionModes = ConnectionMode.entries
-                var connectionMenuExpanded by rememberSaveable { mutableStateOf(false) }
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { connectionMenuExpanded = true },
-                        enabled = !isRunning,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(stringResource(connectionMode.displayLabelRes()))
-                    }
-                    DropdownMenu(
-                        expanded = connectionMenuExpanded,
-                        onDismissRequest = { connectionMenuExpanded = false }
-                    ) {
-                        connectionModes.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(mode.displayLabelRes())) },
-                                onClick = {
-                                    connectionMenuExpanded = false
-                                    connectionMode = mode
-                                    prefs.edit().putString("connection_mode", mode.prefValue).apply()
-                                    when (mode) {
-                                        ConnectionMode.CFOnly -> {
-                                            cfProxyOnly = true
-                                            cfProxyPriority = true
-                                            cfProxyEnabled = true
-                                        }
-                                        ConnectionMode.CFFirst -> {
-                                            cfProxyOnly = false
-                                            cfProxyPriority = true
-                                            cfProxyEnabled = true
-                                        }
-                                        ConnectionMode.DirectOnly -> {
-                                            cfProxyOnly = false
-                                            cfProxyPriority = false
-                                            cfProxyEnabled = false
-                                        }
-                                        ConnectionMode.WorkerOnly, ConnectionMode.WorkerFirst -> {
-                                            cfProxyOnly = false
-                                            cfProxyPriority = false
-                                            cfProxyEnabled = true
-                                            workerEnabled = true
-                                        }
-                                        else -> {
-                                            cfProxyOnly = false
-                                            cfProxyPriority = false
-                                            cfProxyEnabled = true
-                                        }
+                    SettingsPage.ROUTES -> {
+                        SettingsPageHeader(
+                            titleRes = R.string.settings_section_routes_title,
+                            subtitleRes = R.string.settings_section_routes_subtitle,
+                        )
+                        RoutesSettingsScreen(
+                            page = routesSettingsPage,
+                            onPageChange = { routesSettingsPage = it },
+                            currentProfile = currentNetworkProfile,
+                            connectionMode = connectionMode,
+                            isProxyRunning = isRunning,
+                            wifiPolicy = wifiRoutePolicy,
+                            mobilePolicy = mobileRoutePolicy,
+                            hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
+                            hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
+                            policySnapshot = routePolicySnapshot,
+                            reconfigureStatus = reconfigureStatus,
+                            routeProbeReport = routeProbeReport,
+                            isRouteProbeRunning = isRouteProbeRunning,
+                            onConnectionModeChange = { mode ->
+                                connectionMode = mode
+                                prefs.edit().putString("connection_mode", mode.prefValue).apply()
+                                when (mode) {
+                                    ConnectionMode.CFOnly -> {
+                                        cfProxyOnly = true
+                                        cfProxyPriority = true
+                                        cfProxyEnabled = true
                                     }
-                                    prefs.edit()
-                                        .putBoolean("cfproxy_only", cfProxyOnly)
-                                        .putBoolean("cfproxy_priority", cfProxyPriority)
-                                        .putBoolean("cfproxy_enabled", cfProxyEnabled)
-                                        .putBoolean("worker_enabled", workerEnabled)
-                                        .apply()
-                                    refreshRoutePolicySnapshot()
+                                    ConnectionMode.CFFirst -> {
+                                        cfProxyOnly = false
+                                        cfProxyPriority = true
+                                        cfProxyEnabled = true
+                                    }
+                                    ConnectionMode.DirectOnly -> {
+                                        cfProxyOnly = false
+                                        cfProxyPriority = false
+                                        cfProxyEnabled = false
+                                    }
+                                    ConnectionMode.WorkerOnly, ConnectionMode.WorkerFirst -> {
+                                        cfProxyOnly = false
+                                        cfProxyPriority = false
+                                        cfProxyEnabled = true
+                                        workerEnabled = true
+                                    }
+                                    else -> {
+                                        cfProxyOnly = false
+                                        cfProxyPriority = false
+                                        cfProxyEnabled = true
+                                    }
                                 }
-                            )
-                        }
-                    }
-                }
-                connectionMode.hintRes()?.let { hintRes ->
-                    Text(
-                        stringResource(hintRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-                }
-
-                RoutePolicySettingsSection(
-                    currentProfile = currentNetworkProfile,
-                    wifiPolicy = wifiRoutePolicy,
-                    mobilePolicy = mobileRoutePolicy,
-                    hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
-                    hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
-                    isProxyRunning = isRunning,
-                    onApplyRecommendedPreset = {
-                        RouteDefaultsMigration.applyRecommendedPreset1791(
-                            prefs = prefs,
-                            repository = routePolicyRepository,
-                        )
-                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
-                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
-                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
-                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
-                        refreshRoutePolicySnapshot()
-                        Toast.makeText(context, context.getString(R.string.route_policy_recommended_applied), Toast.LENGTH_SHORT).show()
-                    },
-                    onWifiPolicyChange = { policy ->
-                        val normalized = NetworkRoutePolicyEditor.normalize(
-                            policy.copy(networkType = NetworkProfileType.WIFI),
-                        )
-                        routePolicyRepository.save(normalized)
-                        RouteDefaultsMigration.markUserModified(prefs)
-                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
-                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
-                        refreshRoutePolicySnapshot()
-                        Toast.makeText(context, context.getString(R.string.route_policy_saved), Toast.LENGTH_SHORT).show()
-                    },
-                    onMobilePolicyChange = { policy ->
-                        val normalized = NetworkRoutePolicyEditor.normalize(
-                            policy.copy(networkType = NetworkProfileType.MOBILE),
-                        )
-                        routePolicyRepository.save(normalized)
-                        RouteDefaultsMigration.markUserModified(prefs)
-                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
-                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
-                        refreshRoutePolicySnapshot()
-                        Toast.makeText(context, context.getString(R.string.route_policy_saved), Toast.LENGTH_SHORT).show()
-                    },
-                    onResetWifiPolicy = {
-                        routePolicyRepository.reset(NetworkProfileType.WIFI)
-                        RouteDefaultsMigration.markUserModified(prefs)
-                        wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
-                        hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
-                        refreshRoutePolicySnapshot()
-                        Toast.makeText(context, context.getString(R.string.route_policy_reset_done), Toast.LENGTH_SHORT).show()
-                    },
-                    onResetMobilePolicy = {
-                        routePolicyRepository.reset(NetworkProfileType.MOBILE)
-                        RouteDefaultsMigration.markUserModified(prefs)
-                        mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
-                        hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
-                        refreshRoutePolicySnapshot()
-                        Toast.makeText(context, context.getString(R.string.route_policy_reset_done), Toast.LENGTH_SHORT).show()
-                    },
-                )
-                }
-
-                RoutePolicyDiagnosticsCard(
-                    snapshot = routePolicySnapshot,
-                    reconfigureStatus = reconfigureStatus,
-                    onCopyDiagnostics = {
-                        val markdown = RoutePolicyDiagnostics.formatMarkdown(
-                            context = context,
-                            snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository),
-                            maskSensitive = maskDomainsInReport,
-                        )
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("route-policy-diagnostics", markdown))
-                        Toast.makeText(context, context.getString(R.string.route_policy_diagnostics_copied), Toast.LENGTH_SHORT).show()
-                    },
-                )
-                }
-
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_route_probe,
-                    initiallyExpanded = false,
-                ) {
-                    RouteLevelDiagnosticsCard(
-                        report = routeProbeReport,
-                        isRunning = isRouteProbeRunning,
-                        onRunProbe = runEffectiveRouteProbe,
-                        onCopyReport = {
-                            routeProbeReport?.let { report ->
-                                val markdown = RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                prefs.edit()
+                                    .putBoolean("cfproxy_only", cfProxyOnly)
+                                    .putBoolean("cfproxy_priority", cfProxyPriority)
+                                    .putBoolean("cfproxy_enabled", cfProxyEnabled)
+                                    .putBoolean("worker_enabled", workerEnabled)
+                                    .apply()
+                                refreshRoutePolicySnapshot()
+                            },
+                            onApplyRecommendedPreset = applyRecommendedRoutes,
+                            onWifiPolicyChange = { policy ->
+                                val normalized = NetworkRoutePolicyEditor.normalize(
+                                    policy.copy(networkType = NetworkProfileType.WIFI),
+                                )
+                                routePolicyRepository.save(normalized)
+                                RouteDefaultsMigration.markUserModified(prefs)
+                                wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                                hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                                refreshRoutePolicySnapshot()
+                            },
+                            onMobilePolicyChange = { policy ->
+                                val normalized = NetworkRoutePolicyEditor.normalize(
+                                    policy.copy(networkType = NetworkProfileType.MOBILE),
+                                )
+                                routePolicyRepository.save(normalized)
+                                RouteDefaultsMigration.markUserModified(prefs)
+                                mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                                hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                                refreshRoutePolicySnapshot()
+                            },
+                            onResetWifiPolicy = {
+                                routePolicyRepository.reset(NetworkProfileType.WIFI)
+                                RouteDefaultsMigration.markUserModified(prefs)
+                                wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
+                                hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
+                                refreshRoutePolicySnapshot()
+                                Toast.makeText(
                                     context,
-                                    report,
-                                    maskSensitive = true,
-                                    poolMetrics = uiMetrics.runtime,
+                                    context.getString(R.string.route_policy_reset_done),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            onResetMobilePolicy = {
+                                routePolicyRepository.reset(NetworkProfileType.MOBILE)
+                                RouteDefaultsMigration.markUserModified(prefs)
+                                mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
+                                hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
+                                refreshRoutePolicySnapshot()
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.route_policy_reset_done),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            onCopyPolicyDiagnostics = {
+                                val markdown = RoutePolicyDiagnostics.formatMarkdown(
+                                    context = context,
+                                    snapshot = RoutePolicyDiagnostics.buildSnapshot(
+                                        context,
+                                        prefs,
+                                        routePolicyRepository,
+                                    ),
+                                    maskSensitive = maskDomainsInReport,
                                 )
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("route-probe-report", markdown))
-                                Toast.makeText(context, context.getString(R.string.route_probe_report_copied), Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                    )
-                }
-                }
-
-                if (settingsTab == SettingsTab.CLOUDFLARE) {
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_cf_worker,
-                    initiallyExpanded = true,
-                ) {
-                OutlinedTextField(
-                    value = workerDomainText,
-                    onValueChange = {
-                        workerDomainText = it
-                        workerNormalizeHint = null
-                        if (WorkerDomain.normalize(it).isNotBlank()) {
-                            workerEnabled = true
+                                clipboard.setPrimaryClip(ClipData.newPlainText("route-policy-diagnostics", markdown))
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.route_policy_diagnostics_copied),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            onRunRouteProbe = runEffectiveRouteProbe,
+                            onCopyRouteProbeReport = {
+                                routeProbeReport?.let { report ->
+                                    val markdown = RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                        context,
+                                        report,
+                                        maskSensitive = true,
+                                        poolMetrics = uiMetrics.runtime,
+                                    )
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("route-probe-report", markdown))
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.route_probe_report_copied),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                        )
+                    }
+                    SettingsPage.CLOUDFLARE -> {
+                        if (cloudflareSettingsPage == CloudflareSettingsPage.OVERVIEW) {
+                            SettingsPageHeader(
+                                titleRes = R.string.settings_section_cloudflare_title,
+                                subtitleRes = R.string.settings_section_cloudflare_subtitle,
+                            )
                         }
-                    },
-                    enabled = !isRunning,
-                    label = { Text(stringResource(R.string.cf_worker_domain_label)) },
-                    placeholder = { Text(stringResource(R.string.worker_domain_placeholder)) },
-                    supportingText = { Text(stringResource(R.string.worker_domain_helper)) },
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp)
-                        .onFocusChanged { focusState ->
-                            if (!focusState.isFocused) {
+                        CloudflareSettingsScreen(
+                            page = cloudflareSettingsPage,
+                            onPageChange = { cloudflareSettingsPage = it },
+                            isProxyRunning = isRunning,
+                            workerDomainText = workerDomainText,
+                            workerEnabled = workerEnabled,
+                            workerNormalizeHint = workerNormalizeHint,
+                            workerPoolEnabled = workerPoolEnabled,
+                            workerPoolWorkers = workerPoolWorkers,
+                            workerPoolSelectedWorker = workerPoolSelectedWorker,
+                            maskDomainsInSettings = maskDomainsInReport,
+                            onWorkerDomainChange = { value ->
+                                workerDomainText = value
+                                workerNormalizeHint = null
+                                if (WorkerDomain.normalize(value).isNotBlank()) {
+                                    workerEnabled = true
+                                }
+                            },
+                            onWorkerDomainBlur = {
                                 val normalized = WorkerDomain.normalize(workerDomainText)
                                 if (normalized.isNotBlank() && normalized != workerDomainText.trim()) {
                                     workerDomainText = normalized
@@ -1521,272 +1617,271 @@ private fun ProxyScreen(
                                     .putString("worker_domain", WorkerDomain.normalize(workerDomainText))
                                     .putBoolean("worker_enabled", workerEnabled)
                                     .apply()
-                            }
-                        },
-                    singleLine = true,
-                )
-                Text(
-                    stringResource(R.string.cf_worker_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                workerNormalizeHint?.let { hint ->
-                    Text(
-                        hint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                    )
-                }
-                WorkerDomain.validationWarning(WorkerDomain.normalize(workerDomainText))?.let { warnRes ->
-                    Text(
-                        stringResource(warnRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(stringResource(R.string.cf_worker_enable), style = MaterialTheme.typography.bodyLarge)
-                    Switch(
-                        checked = workerEnabled,
-                        enabled = !isRunning,
-                        onCheckedChange = {
-                            workerEnabled = it
-                            prefs.edit().putBoolean("worker_enabled", it).apply()
-                        }
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            if (WorkerDomain.normalize(workerDomainText).isBlank()) {
-                                Toast.makeText(context, context.getString(R.string.cf_worker_not_configured), Toast.LENGTH_SHORT).show()
-                                return@OutlinedButton
-                            }
-                            if (isDiagRunning) return@OutlinedButton
-                            isDiagRunning = true
-                            diagStatusText = context.getString(R.string.diag_running)
-                            coroutineScope.launch {
-                                val report = ConnectionDiagnostics.probeWorker(workerDomainText)
-                                ConnectionDiagnostics.logReport(report)
-                                val status = if (report.successCount > 0) {
-                                    context.getString(R.string.cf_worker_test_ok, report.successCount, report.totalCount)
+                            },
+                            onWorkerEnabledChange = { enabled ->
+                                workerEnabled = enabled
+                                prefs.edit().putBoolean("worker_enabled", enabled).apply()
+                            },
+                            onWorkerPoolEnabledChange = { enabled ->
+                                workerPoolRepository.setPoolEnabled(enabled)
+                                refreshWorkerPoolState()
+                            },
+                            onSelectWorker = { id ->
+                                workerPoolRepository.selectWorker(id)
+                                refreshWorkerPoolState()
+                            },
+                            onAddWorker = { name, url, enabled ->
+                                val result = workerPoolRepository.addWorker(
+                                    WorkerEndpoint.create(name = name, url = url, enabled = enabled),
+                                )
+                                if (result.isSuccess) {
+                                    val created = result.getOrThrow()
+                                    if (workerPoolRepository.getWorkerPoolConfig().selectedWorkerId.isNullOrBlank()) {
+                                        workerPoolRepository.selectWorker(created.id)
+                                    }
+                                    refreshWorkerPoolState()
+                                    null
                                 } else {
-                                    context.getString(R.string.cf_worker_test_fail)
+                                    when ((result.exceptionOrNull() as? WorkerPoolOperationException)?.code) {
+                                        WorkerPoolError.INVALID_WORKER_URL -> WorkerValidationError.INVALID_URL
+                                        else -> WorkerValidationError.EMPTY_NAME
+                                    }
                                 }
-                                diagStatusText = status
-                                prefs.edit().putString("diag_last_status", status).apply()
-                                isDiagRunning = false
-                                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        enabled = !isRunning && !isDiagRunning,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(stringResource(R.string.cf_worker_test))
-                    }
-                    TextButton(onClick = { openUrl("https://github.com/Regstar2/TgWsProxy_Android/blob/main/docs/cloudflare-worker.md") }) {
-                        Text(stringResource(R.string.cf_worker_help_link))
-                    }
-                }
-                }
-
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_cf_proxy_domains,
-                    initiallyExpanded = false,
-                ) {
-                OutlinedTextField(
-                    value = manualCfDomainsText,
-                    onValueChange = ::applyManualCfDomains,
-                    enabled = !isRunning,
-                    label = { Text(stringResource(R.string.cf_domain_label)) },
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    minLines = 3,
-                    maxLines = 5,
-                )
-                if (invalidManualCfDomains.isNotEmpty()) {
-                    Text(
-                        stringResource(
-                            R.string.cf_domains_invalid_entries,
-                            invalidManualCfDomains.joinToString(", "),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-
-                CfDomainsPanel(
-                    rows = cfDomainRows,
-                    manualDomains = manualCfDomains,
-                    lastCheckAtMs = cfDomainLastCheckAtMs,
-                    upstreamState = cfUpstreamState,
-                    autoUpdateEnabled = autoUpdateCfDomains,
-                    mirrorEnabled = cfMirrorEnabled,
-                    mirrorUrl = cfMirrorUrlText,
-                    mirrorValidationError = cfMirrorValidationError,
-                    isUpdateRunning = isCfDomainUpdateRunning,
-                    expanded = cfDomainsExpanded,
-                    onExpandedChange = { cfDomainsExpanded = it },
-                    proxyRunning = isRunning,
-                    isDiagRunning = isDiagRunning,
-                    onAutoUpdateChange = {
-                        autoUpdateCfDomains = it
-                        applyCfUpstreamState(cfDomainListRepository.setAutoUpdateEnabled(it))
-                    },
-                    onMirrorEnabledChange = { enabled ->
-                        applyCfMirrorSettings(enabled, cfMirrorUrlText)
-                    },
-                    onMirrorUrlChange = { url ->
-                        applyCfMirrorSettings(cfMirrorEnabled, url)
-                    },
-                    onUpdateAll = { launchCfDomainUpdate { cfDomainListUpdater.manualUpdate() } },
-                    onTestPrimary = { launchCfDomainUpdate { cfDomainListUpdater.testPrimarySource() } },
-                    onTestMirror = { launchCfDomainUpdate { cfDomainListUpdater.testMirrorSource() } },
-                    onTest = {
-                        if (!isDiagRunning) {
-                            isDiagRunning = true
-                            diagStatusText = context.getString(R.string.diag_running)
-                            coroutineScope.launch {
-                                val report = ConnectionDiagnostics.probeCfPool(
+                            },
+                            onUpdateWorker = { worker ->
+                                val result = workerPoolRepository.updateWorker(worker)
+                                if (result.isSuccess) {
+                                    refreshWorkerPoolState()
+                                    null
+                                } else {
+                                    WorkerValidationError.INVALID_URL
+                                }
+                            },
+                            onDeleteWorker = { id ->
+                                workerPoolRepository.removeWorker(id)
+                                refreshWorkerPoolState()
+                            },
+                            onSetWorkerEnabled = { id, enabled ->
+                                workerPoolRepository.setWorkerEnabled(id, enabled)
+                                refreshWorkerPoolState()
+                            },
+                            onTestWorker = {
+                                val probeDomain = if (workerPoolEnabled) {
+                                    WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText)
+                                } else {
+                                    workerDomainText
+                                }
+                                if (WorkerDomain.normalize(probeDomain).isBlank()) {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.cf_worker_not_configured),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else if (!isDiagRunning) {
+                                    isDiagRunning = true
+                                    diagStatusText = context.getString(R.string.diag_running)
+                                    coroutineScope.launch {
+                                        val report = ConnectionDiagnostics.probeWorker(probeDomain)
+                                        ConnectionDiagnostics.logReport(report)
+                                        val status = if (report.successCount > 0) {
+                                            context.getString(
+                                                R.string.cf_worker_test_ok,
+                                                report.successCount,
+                                                report.totalCount,
+                                            )
+                                        } else {
+                                            context.getString(R.string.cf_worker_test_fail)
+                                        }
+                                        diagStatusText = status
+                                        prefs.edit().putString("diag_last_status", status).apply()
+                                        isDiagRunning = false
+                                        Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            onOpenWorkerHelp = {
+                                openUrl("https://github.com/Regstar2/TgWsProxy_Android/blob/main/docs/cloudflare-worker.md")
+                            },
+                            manualCfDomainsText = manualCfDomainsText,
+                            invalidManualCfDomains = invalidManualCfDomains,
+                            onManualCfDomainsChange = ::applyManualCfDomains,
+                            cfDomainRows = cfDomainRows,
+                            cfDomainLastCheckAtMs = cfDomainLastCheckAtMs,
+                            upstreamState = cfUpstreamState,
+                            autoUpdateEnabled = autoUpdateCfDomains,
+                            mirrorEnabled = cfMirrorEnabled,
+                            mirrorUrl = cfMirrorUrlText,
+                            mirrorValidationError = cfMirrorValidationError,
+                            isUpdateRunning = isCfDomainUpdateRunning,
+                            isDiagRunning = isDiagRunning,
+                            onAutoUpdateChange = {
+                                autoUpdateCfDomains = it
+                                applyCfUpstreamState(cfDomainListRepository.setAutoUpdateEnabled(it))
+                            },
+                            onMirrorEnabledChange = { enabled ->
+                                applyCfMirrorSettings(enabled, cfMirrorUrlText)
+                            },
+                            onMirrorUrlChange = { url ->
+                                applyCfMirrorSettings(cfMirrorEnabled, url)
+                            },
+                            onTestCfDomains = {
+                                if (!isDiagRunning) {
+                                    isDiagRunning = true
+                                    diagStatusText = context.getString(R.string.diag_running)
+                                    coroutineScope.launch {
+                                        val report = ConnectionDiagnostics.probeCfPool(
+                                            manualCfDomains,
+                                            cfUpstreamState.domains,
+                                        )
+                                        ConnectionDiagnostics.logReport(report.routeReport)
+                                        cfDomainRows = report.domains
+                                        cfDomainLastCheckAtMs = report.checkedAtMs
+                                            val manual = report.summary.manualResult?.let {
+                                                safeToastFormatArg(
+                                                    "${it.domain} ${cfDomainStatusLabel(context, it.status())}",
+                                                )
+                                            } ?: context.getString(R.string.cf_domains_unset)
+                                            val best = report.summary.bestDomain?.let {
+                                                safeToastFormatArg("${it.domain}, ${it.lastLatencyMs ?: 0} ms")
+                                            } ?: context.getString(R.string.cf_domains_none)
+                                        val status = context.getString(
+                                            R.string.cf_domains_test_summary,
+                                            manual,
+                                            report.summary.availableCachedUpstream,
+                                            report.summary.failedCachedUpstream,
+                                            report.summary.uncheckedCachedUpstream,
+                                            report.summary.availableBuiltIn,
+                                            report.summary.failedBuiltIn,
+                                            report.summary.uncheckedBuiltIn,
+                                            best,
+                                        )
+                                        diagStatusText = status
+                                        prefs.edit().putString("diag_last_status", status).apply()
+                                        isDiagRunning = false
+                                        Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            onUpdateUpstream = {
+                                launchCfDomainUpdate { cfDomainListUpdater.manualUpdate() }
+                            },
+                            onResetCooldown = {
+                                CfDomainDiagnosticsState.resetCooldowns()
+                                NativeProxy.resetCfDomainCooldowns()
+                                cfDomainRows = CfDomainDiagnosticsState.snapshot(
                                     manualCfDomains,
                                     cfUpstreamState.domains,
                                 )
-                                ConnectionDiagnostics.logReport(report.routeReport)
-                                cfDomainRows = report.domains
-                                cfDomainLastCheckAtMs = report.checkedAtMs
-                                val manual = report.summary.manualResult?.let {
-                                    "${it.domain} ${cfDomainStatusLabel(context, it.status())}"
-                                } ?: context.getString(R.string.cf_domains_unset)
-                                val best = report.summary.bestDomain?.let {
-                                    "${it.domain}, ${it.lastLatencyMs ?: 0} ms"
-                                } ?: context.getString(R.string.cf_domains_none)
-                                val status = context.getString(
-                                    R.string.cf_domains_test_summary,
-                                    manual,
-                                    report.summary.availableCachedUpstream,
-                                    report.summary.failedCachedUpstream,
-                                    report.summary.uncheckedCachedUpstream,
-                                    report.summary.availableBuiltIn,
-                                    report.summary.failedBuiltIn,
-                                    report.summary.uncheckedBuiltIn,
-                                    best,
-                                )
-                                diagStatusText = status
-                                prefs.edit().putString("diag_last_status", status).apply()
-                                isDiagRunning = false
-                                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    onResetCooldown = {
-                        CfDomainDiagnosticsState.resetCooldowns()
-                        NativeProxy.resetCfDomainCooldowns()
-                        cfDomainRows = CfDomainDiagnosticsState.snapshot(manualCfDomains, cfUpstreamState.domains)
-                        Toast.makeText(context, context.getString(R.string.cf_domains_cooldown_reset_done), Toast.LENGTH_SHORT).show()
-                    },
-                )
-                }
-
-                if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_auto_route,
-                    initiallyExpanded = false,
-                ) {
-                    val adaptiveProfile = NetworkProfileProvider.current(context)
-                    AdaptiveRoutingPanel(
-                        profile = adaptiveProfile,
-                        strategy = autoStrategy,
-                        stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
-                        maskDomainsInReport = maskDomainsInReport,
-                        includeDomainsInLogExport = includeDomainsInLogExport,
-                        detailsExpanded = adaptiveDetailsExpanded,
-                        onDetailsExpandedChange = { adaptiveDetailsExpanded = it },
-                        onStrategyChange = { strategy ->
-                            autoStrategy = strategy
-                            prefs.edit().putString("auto_strategy", strategy.prefValue).apply()
-                            refreshRoutePolicySnapshot()
-                        },
-                        onMaskDomainsChange = { mask ->
-                            maskDomainsInReport = mask
-                            prefs.edit().putBoolean("mask_domains_in_export", mask).apply()
-                        },
-                        onIncludeDomainsInLogsChange = { include ->
-                            includeDomainsInLogExport = include
-                            prefs.edit().putBoolean("include_domains_in_log_export", include).apply()
-                        },
-                        onCopyReport = {
-                            val effectivePolicyMarkdown = RoutePolicyDiagnostics.formatMarkdown(
-                                context = context,
-                                snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository),
-                                maskSensitive = maskDomainsInReport,
-                            )
-                            val markdown = AdaptiveDiagnosticsReport.buildMarkdown(
-                                context = context,
-                                versionName = appVersionName(context),
-                                connectionMode = connectionMode,
-                                strategy = autoStrategy,
-                                profile = adaptiveProfile,
-                                workerDomain = WorkerDomain.normalize(workerDomainText),
-                                manualCfDomains = manualCfDomains,
-                                cachedUpstreamCount = cfUpstreamState.domains.size,
-                                builtInCount = CfDomain.builtInDomains.size,
-                                stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
-                                maskDomains = maskDomainsInReport,
-                                effectiveRoutePolicyMarkdown = effectivePolicyMarkdown,
-                            ) + routeProbeReport?.let { report ->
-                                "\n\n" + RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                Toast.makeText(
                                     context,
-                                    report,
-                                    maskSensitive = true,
-                                    poolMetrics = uiMetrics.runtime,
-                                )
-                            }.orEmpty()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("diagnostics", markdown))
-                            Toast.makeText(context, context.getString(R.string.adaptive_report_copied), Toast.LENGTH_SHORT).show()
-                        },
-                        onResetAll = {
-                            adaptiveRouteStatsRepository.resetAll()
-                            NativeProxy.resetAdaptiveRouteStats(true)
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.adaptive_stats_reset_done),
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        },
-                        onResetNetwork = {
-                            val profile = NetworkProfileProvider.current(context)
-                            adaptiveRouteStatsRepository.resetCurrentNetwork(profile.id)
-                            NativeProxy.resetAdaptiveNetworkRouteStats(profile.id)
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.adaptive_stats_reset_done),
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        },
-                    )
-                }
-                }
-                }
-
-                if (settingsTab == SettingsTab.APP) {
+                                    context.getString(R.string.cf_domains_cooldown_reset_done),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            onTestPrimarySource = {
+                                launchCfDomainUpdate { cfDomainListUpdater.testPrimarySource() }
+                            },
+                            onTestMirrorSource = {
+                                launchCfDomainUpdate { cfDomainListUpdater.testMirrorSource() }
+                            },
+                            overviewFooter = {
+                                if (connectionMode == ConnectionMode.Auto || connectionMode == ConnectionMode.DirectWithFallback) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    CollapsibleSettingsSection(
+                                        titleRes = R.string.section_auto_route,
+                                        initiallyExpanded = false,
+                                    ) {
+                                        val adaptiveProfile = NetworkProfileProvider.current(context)
+                                        AdaptiveRoutingPanel(
+                                            profile = adaptiveProfile,
+                                            strategy = autoStrategy,
+                                            stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
+                                            maskDomainsInReport = maskDomainsInReport,
+                                            includeDomainsInLogExport = includeDomainsInLogExport,
+                                            detailsExpanded = adaptiveDetailsExpanded,
+                                            onDetailsExpandedChange = { adaptiveDetailsExpanded = it },
+                                            onStrategyChange = { strategy ->
+                                                autoStrategy = strategy
+                                                prefs.edit().putString("auto_strategy", strategy.prefValue).apply()
+                                                refreshRoutePolicySnapshot()
+                                            },
+                                            onMaskDomainsChange = { mask ->
+                                                maskDomainsInReport = mask
+                                                prefs.edit().putBoolean("mask_domains_in_export", mask).apply()
+                                            },
+                                            onIncludeDomainsInLogsChange = { include ->
+                                                includeDomainsInLogExport = include
+                                                prefs.edit().putBoolean("include_domains_in_log_export", include).apply()
+                                            },
+                                            onCopyReport = {
+                                                val effectivePolicyMarkdown = RoutePolicyDiagnostics.formatMarkdown(
+                                                    context = context,
+                                                    snapshot = RoutePolicyDiagnostics.buildSnapshot(
+                                                        context,
+                                                        prefs,
+                                                        routePolicyRepository,
+                                                    ),
+                                                    maskSensitive = maskDomainsInReport,
+                                                )
+                                                val markdown = AdaptiveDiagnosticsReport.buildMarkdown(
+                                                    context = context,
+                                                    versionName = appVersionName(context),
+                                                    connectionMode = connectionMode,
+                                                    strategy = autoStrategy,
+                                                    profile = adaptiveProfile,
+                                                    workerDomain = WorkerDomain.normalize(workerDomainText),
+                                                    manualCfDomains = manualCfDomains,
+                                                    cachedUpstreamCount = cfUpstreamState.domains.size,
+                                                    builtInCount = CfDomain.builtInDomains.size,
+                                                    stats = adaptiveRouteStatsRepository.snapshotForDisplay(adaptiveProfile.id),
+                                                    maskDomains = maskDomainsInReport,
+                                                    effectiveRoutePolicyMarkdown = effectivePolicyMarkdown,
+                                                ) + routeProbeReport?.let { report ->
+                                                    "\n\n" + RouteLevelDiagnosticsFormatter.formatMarkdown(
+                                                        context,
+                                                        report,
+                                                        maskSensitive = true,
+                                                        poolMetrics = uiMetrics.runtime,
+                                                    )
+                                                }.orEmpty()
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("diagnostics", markdown))
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.adaptive_report_copied),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            },
+                                            onResetAll = {
+                                                adaptiveRouteStatsRepository.resetAll()
+                                                NativeProxy.resetAdaptiveRouteStats(true)
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.adaptive_stats_reset_done),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            },
+                                            onResetNetwork = {
+                                                val profile = NetworkProfileProvider.current(context)
+                                                adaptiveRouteStatsRepository.resetCurrentNetwork(profile.id)
+                                                NativeProxy.resetAdaptiveNetworkRouteStats(profile.id)
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.adaptive_stats_reset_done),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            },
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    SettingsPage.DIAGNOSTICS_LOGS -> {
+                        SettingsPageHeader(
+                            titleRes = R.string.settings_section_diagnostics_logs_title,
+                            subtitleRes = R.string.settings_section_diagnostics_logs_subtitle,
+                        )
                 CollapsibleSettingsSection(
                     titleRes = R.string.section_diagnostics,
                     initiallyExpanded = true,
@@ -1836,145 +1931,6 @@ private fun ProxyScreen(
                 ) {
                     Text(stringResource(R.string.diagnostics_open_screen))
                 }
-                }
-
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_legacy_connection,
-                    initiallyExpanded = false,
-                ) {
-                    LegacyConnectionModeSection(
-                        cfProxyEnabled = cfProxyEnabled,
-                        cfProxyPriority = cfProxyPriority,
-                        cfProxyOnly = cfProxyOnly,
-                        controlsEnabled = !isRunning,
-                        onCfProxyEnabledChange = {
-                            cfProxyEnabled = it
-                            if (!it) {
-                                cfProxyOnly = false
-                                prefs.edit().putBoolean("cfproxy_only", false).apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
-                        },
-                        onCfProxyPriorityChange = {
-                            cfProxyPriority = it
-                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
-                        },
-                        onCfProxyOnlyChange = {
-                            cfProxyOnly = it
-                            if (it) {
-                                cfProxyEnabled = true
-                                cfProxyPriority = true
-                                prefs.edit()
-                                    .putBoolean("cfproxy_enabled", true)
-                                    .putBoolean("cfproxy_priority", true)
-                                    .apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_only", it).apply()
-                        },
-                    )
-                }
-
-                SettingsSectionCard(
-                    titleRes = R.string.section_notifications,
-                    subtitle = stringResource(R.string.section_notifications_hint),
-                ) {
-                NotificationSettingsSection(
-                    prefs = notificationPrefs,
-                    onChange = { updated ->
-                        notificationPrefs = updated
-                        NotificationPreferences.save(context, updated)
-                    },
-                )
-                }
-
-                SettingsSectionCard(titleRes = R.string.section_appearance) {
-                Text(
-                    stringResource(R.string.theme_mode_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        ThemeMode.System to stringResource(R.string.theme_system),
-                        ThemeMode.Light to stringResource(R.string.theme_light),
-                        ThemeMode.Dark to stringResource(R.string.theme_dark)
-                    ).forEach { (mode, label) ->
-                        FilterChip(
-                            selected = themeMode == mode,
-                            onClick = { onThemeModeChange(mode) },
-                            label = { Text(label) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                Text(
-                    stringResource(R.string.language_mode_label),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-                val languageOptions = listOf(
-                    LanguageMode.System to stringResource(R.string.language_system),
-                    LanguageMode.Russian to stringResource(R.string.language_russian),
-                    LanguageMode.English to stringResource(R.string.language_english)
-                )
-                val selectedLanguageLabel = languageOptions
-                    .firstOrNull { it.first == languageMode }
-                    ?.second
-                    ?: stringResource(R.string.language_system)
-                var languageMenuExpanded by rememberSaveable { mutableStateOf(false) }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { languageMenuExpanded = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        Text(
-                            text = selectedLanguageLabel,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = null
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = languageMenuExpanded,
-                        onDismissRequest = { languageMenuExpanded = false }
-                    ) {
-                        languageOptions.forEach { (mode, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    languageMenuExpanded = false
-                                    onLanguageModeChange(mode)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Text(
-                    stringResource(R.string.language_restart_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                )
                 }
 
                 SettingsSectionCard(titleRes = R.string.section_logs) {
@@ -2343,6 +2299,151 @@ private fun ProxyScreen(
                     )
                 }
                 }
+                    }
+                    SettingsPage.APP -> {
+                        SettingsPageHeader(
+                            titleRes = R.string.settings_section_app_title,
+                            subtitleRes = R.string.settings_section_app_subtitle,
+                        )
+                CollapsibleSettingsSection(
+                    titleRes = R.string.section_legacy_connection,
+                    initiallyExpanded = false,
+                ) {
+                    LegacyConnectionModeSection(
+                        cfProxyEnabled = cfProxyEnabled,
+                        cfProxyPriority = cfProxyPriority,
+                        cfProxyOnly = cfProxyOnly,
+                        controlsEnabled = !isRunning,
+                        onCfProxyEnabledChange = {
+                            cfProxyEnabled = it
+                            if (!it) {
+                                cfProxyOnly = false
+                                prefs.edit().putBoolean("cfproxy_only", false).apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
+                        },
+                        onCfProxyPriorityChange = {
+                            cfProxyPriority = it
+                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
+                        },
+                        onCfProxyOnlyChange = {
+                            cfProxyOnly = it
+                            if (it) {
+                                cfProxyEnabled = true
+                                cfProxyPriority = true
+                                prefs.edit()
+                                    .putBoolean("cfproxy_enabled", true)
+                                    .putBoolean("cfproxy_priority", true)
+                                    .apply()
+                            }
+                            prefs.edit().putBoolean("cfproxy_only", it).apply()
+                        },
+                    )
+                }
+
+                SettingsSectionCard(
+                    titleRes = R.string.section_notifications,
+                    subtitle = stringResource(R.string.section_notifications_hint),
+                ) {
+                NotificationSettingsSection(
+                    prefs = notificationPrefs,
+                    onChange = { updated ->
+                        notificationPrefs = updated
+                        NotificationPreferences.save(context, updated)
+                    },
+                )
+                }
+
+                SettingsSectionCard(titleRes = R.string.section_appearance) {
+                Text(
+                    stringResource(R.string.theme_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        ThemeMode.System to stringResource(R.string.theme_system),
+                        ThemeMode.Light to stringResource(R.string.theme_light),
+                        ThemeMode.Dark to stringResource(R.string.theme_dark)
+                    ).forEach { (mode, label) ->
+                        FilterChip(
+                            selected = themeMode == mode,
+                            onClick = { onThemeModeChange(mode) },
+                            label = { Text(label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Text(
+                    stringResource(R.string.language_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+                val languageOptions = listOf(
+                    LanguageMode.System to stringResource(R.string.language_system),
+                    LanguageMode.Russian to stringResource(R.string.language_russian),
+                    LanguageMode.English to stringResource(R.string.language_english)
+                )
+                val selectedLanguageLabel = languageOptions
+                    .firstOrNull { it.first == languageMode }
+                    ?.second
+                    ?: stringResource(R.string.language_system)
+                var languageMenuExpanded by rememberSaveable { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { languageMenuExpanded = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = selectedLanguageLabel,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = languageMenuExpanded,
+                        onDismissRequest = { languageMenuExpanded = false }
+                    ) {
+                        languageOptions.forEach { (mode, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    languageMenuExpanded = false
+                                    onLanguageModeChange(mode)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    stringResource(R.string.language_restart_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                )
+                }
+                    }
                 }
                 }
             }
@@ -2491,325 +2592,6 @@ private fun runtimeConfigKey(config: ProxyRuntimeStartConfig): String {
     return "${config.port}|${config.poolSize}|${config.ips}"
 }
 
-@Composable
-private fun CfDomainsPanel(
-    rows: List<CfDomainHealth>,
-    manualDomains: List<String>,
-    lastCheckAtMs: Long?,
-    upstreamState: CfDomainUpstreamState,
-    autoUpdateEnabled: Boolean,
-    mirrorEnabled: Boolean,
-    mirrorUrl: String,
-    mirrorValidationError: String?,
-    isUpdateRunning: Boolean,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    proxyRunning: Boolean,
-    isDiagRunning: Boolean,
-    onAutoUpdateChange: (Boolean) -> Unit,
-    onMirrorEnabledChange: (Boolean) -> Unit,
-    onMirrorUrlChange: (String) -> Unit,
-    onUpdateAll: () -> Unit,
-    onTestPrimary: () -> Unit,
-    onTestMirror: () -> Unit,
-    onTest: () -> Unit,
-    onResetCooldown: () -> Unit,
-) {
-    val now = System.currentTimeMillis()
-    val manualDomainSummary = manualDomains.takeIf { it.isNotEmpty() }
-        ?.joinToString(", ")
-        ?: stringResource(R.string.cf_domains_unset)
-    val cachedCount = upstreamState.domains.size
-    val builtInCount = CfDomain.builtInDomains.size
-    val activeCount = rows.count { it.status(now) != CfDomainStatus.COOLDOWN }
-    val cooldownCount = rows.count { it.status(now) == CfDomainStatus.COOLDOWN }
-    val lastCheck = lastCheckAtMs?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
-    } ?: stringResource(R.string.cf_domains_unchecked)
-    val lastUpdate = upstreamState.lastSuccessfulUpdateAtMs.takeIf { it > 0 }?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
-    } ?: stringResource(R.string.cf_domains_unchecked)
-    val lastAttempt = upstreamState.lastAttemptAtMs.takeIf { it > 0 }?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
-    } ?: stringResource(R.string.cf_domains_unchecked)
-    val lastSuccessfulSource = upstreamState.lastSuccessfulSource?.let {
-        stringResource(it.labelKey())
-    } ?: stringResource(R.string.cf_domains_none)
-    val lastUpdateError = upstreamState.lastError ?: stringResource(R.string.cf_domains_none)
-    val primaryHost = safeUrlForLog(CfDomainUpdateConfig.PRIMARY_URL)
-
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    stringResource(R.string.cf_domains_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                DetailsExpandButton(
-                    expanded = expanded,
-                    onExpandedChange = onExpandedChange,
-                )
-            }
-
-            Text("${stringResource(R.string.cf_domains_active)}: $activeCount", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_cooldown)}: $cooldownCount", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_last_check)}: $lastCheck", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_last_update)}: $lastUpdate", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_update_last_success_source)}: $lastSuccessfulSource", style = MaterialTheme.typography.bodySmall)
-            Text("${stringResource(R.string.cf_domains_last_update_error)}: $lastUpdateError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onTest,
-                    enabled = !proxyRunning && !isDiagRunning,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(stringResource(R.string.cf_domains_test))
-                }
-                TextButton(onClick = onResetCooldown) {
-                    Text(stringResource(R.string.cf_domains_reset_cooldown))
-                }
-            }
-
-            AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(top = 10.dp)) {
-                    Text(
-                        "${stringResource(R.string.cf_domains_manual)}: $manualDomainSummary",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_domains_cached_count)}: $cachedCount · ${stringResource(R.string.cf_domains_builtin_count)}: $builtInCount",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        if (cachedCount > 0) {
-                            stringResource(R.string.cf_domains_cached_used)
-                        } else {
-                            stringResource(R.string.cf_domains_builtin_used)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.cf_update_sources_title),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_update_source_primary)}: $primaryHost",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_domains_last_update)}: $lastUpdate",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_update_last_attempt)}: $lastAttempt",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_update_last_success_source)}: $lastSuccessfulSource",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        "${stringResource(R.string.cf_domains_last_update_error)}: $lastUpdateError",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(stringResource(R.string.cf_domains_auto_update), style = MaterialTheme.typography.bodySmall)
-                        Switch(
-                            checked = autoUpdateEnabled,
-                            onCheckedChange = onAutoUpdateChange,
-                        )
-                    }
-                    Text(
-                        stringResource(R.string.cf_update_mirror_title),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(stringResource(R.string.cf_update_mirror_enable), style = MaterialTheme.typography.bodySmall)
-                        Switch(
-                            checked = mirrorEnabled,
-                            onCheckedChange = onMirrorEnabledChange,
-                        )
-                    }
-                    OutlinedTextField(
-                        value = mirrorUrl,
-                        onValueChange = onMirrorUrlChange,
-                        enabled = mirrorEnabled,
-                        label = { Text(stringResource(R.string.cf_update_mirror_url)) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        singleLine = true,
-                    )
-                    if (mirrorValidationError != null) {
-                        Text(
-                            stringResource(R.string.cf_update_mirror_invalid),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = onTestPrimary,
-                            enabled = !isUpdateRunning,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.cf_update_test_primary))
-                        }
-                        OutlinedButton(
-                            onClick = onTestMirror,
-                            enabled = !isUpdateRunning && mirrorEnabled,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.cf_update_test_mirror))
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onUpdateAll,
-                        enabled = !isUpdateRunning,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 10.dp),
-                    ) {
-                        Text(
-                            if (isUpdateRunning) {
-                                stringResource(R.string.cf_domains_update_running)
-                            } else {
-                                stringResource(R.string.cf_domains_update_all)
-                            }
-                        )
-                    }
-                    CfDomainGroup(
-                        title = stringResource(R.string.cf_domains_manual),
-                        domains = manualDomains,
-                    )
-                    CfDomainGroup(
-                        title = stringResource(R.string.cf_domains_upstream_list),
-                        domains = upstreamState.domains,
-                    )
-                    CfDomainGroup(
-                        title = stringResource(R.string.cf_domains_builtin_list),
-                        domains = CfDomain.builtInDomains,
-                    )
-                    rows.forEach { row ->
-                        CfDomainHealthRow(row = row)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CfDomainGroup(
-    title: String,
-    domains: List<String>,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp)
-    ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        if (domains.isEmpty()) {
-            Text(
-                stringResource(R.string.cf_domains_none),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            domains.forEach { domain ->
-                Text(
-                    domain,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CfDomainHealthRow(row: CfDomainHealth) {
-    val status = row.status()
-    val source = when (row.source) {
-        CfDomainSource.MANUAL -> stringResource(R.string.cf_domains_source_manual)
-        CfDomainSource.BUILT_IN -> stringResource(R.string.cf_domains_source_builtin)
-        CfDomainSource.CACHED_UPSTREAM -> stringResource(R.string.cf_domains_source_cached)
-    }
-    val cooldown = row.cooldownUntilMs?.takeIf { it > System.currentTimeMillis() }?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-    ) {
-        Text(
-            "${row.domain} · $source · ${cfDomainStatusLabel(LocalContext.current, status)}",
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium
-        )
-        val detail = buildList {
-            row.lastLatencyMs?.let { add("${it} ms") }
-            row.lastFailureReason?.let { add("${stringResource(R.string.cf_domains_last_error)}: $it") }
-            cooldown?.let { add("${stringResource(R.string.cf_domains_cooldown_until)}: $it") }
-        }.joinToString(" · ")
-        if (detail.isNotBlank()) {
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
 private fun appVersionName(context: Context): String {
     return try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
@@ -2817,6 +2599,8 @@ private fun appVersionName(context: Context): String {
         "unknown"
     }
 }
+
+private fun safeToastFormatArg(value: String): String = value.replace("%", "%%")
 
 private fun cfDomainStatusLabel(context: Context, status: CfDomainStatus): String {
     return context.getString(

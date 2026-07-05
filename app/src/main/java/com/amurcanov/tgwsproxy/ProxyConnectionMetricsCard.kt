@@ -23,19 +23,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.amurcanov.tgwsproxy.routeprobe.RouteProbeCoreBlock
-import com.amurcanov.tgwsproxy.routeprobe.RouteProbeSnapshot
-import com.amurcanov.tgwsproxy.routeprobe.RouteProbeSummary
 
 @Composable
 fun ProxyConnectionMetricsCard(
     ui: ProxyUiMetrics,
     showMetrics: Boolean,
-    routeProbeSummary: RouteProbeSummary? = null,
-    routeProbeSnapshot: RouteProbeSnapshot? = null,
-    routeProbeRunning: Boolean = false,
-    onRunRouteProbe: (() -> Unit)? = null,
-    onOpenDiagnostics: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!showMetrics) {
@@ -43,15 +35,18 @@ fun ProxyConnectionMetricsCard(
     }
     val context = LocalContext.current
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
-    val statusLabel = when (ui.serviceStatus) {
-        ProxyServiceStatus.RUNNING -> stringResource(R.string.status_running)
-        ProxyServiceStatus.STARTING -> stringResource(R.string.notification_status_starting)
-        ProxyServiceStatus.RECONNECTING -> stringResource(R.string.notification_status_reconnecting)
-        ProxyServiceStatus.ERROR -> stringResource(R.string.status_error)
-        ProxyServiceStatus.STOPPED -> stringResource(R.string.status_stopped)
-    }
     val running = ui.serviceStatus == ProxyServiceStatus.RUNNING ||
         ui.serviceStatus == ProxyServiceStatus.RECONNECTING
+    val connectionStatus = if (running) {
+        stringResource(R.string.metrics_connected)
+    } else {
+        stringResource(R.string.metrics_disconnected)
+    }
+    val routeLabel = if (running) {
+        ui.runtime.routeRuntime.activeRouteLabel(context, running)
+    } else {
+        stringResource(R.string.metrics_route_unavailable)
+    }
     val transportLabel = ui.runtime.transportLabel(context)
     val hasTraffic = ui.downloadBps > 0.0 || ui.uploadBps > 0.0
     val speed = if (hasTraffic) {
@@ -78,27 +73,10 @@ fun ProxyConnectionMetricsCard(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            MetricLine(stringResource(R.string.metrics_status), statusLabel)
-            RouteRuntimeStatusBlock(
-                routeState = ui.runtime.routeRuntime,
-                running = running,
-            )
-            if (onRunRouteProbe != null) {
-                RouteProbeCoreBlock(
-                    summary = routeProbeSummary,
-                    snapshot = routeProbeSnapshot,
-                    isRunning = routeProbeRunning,
-                    onRunProbe = onRunRouteProbe,
-                    onOpenDiagnostics = onOpenDiagnostics,
-                )
-            }
-            MetricLine(stringResource(R.string.metrics_transport), transportLabel)
+            MetricLine(stringResource(R.string.metrics_connection), connectionStatus)
             MetricLine(stringResource(R.string.metrics_speed), speed)
-            MetricLine(stringResource(R.string.metrics_latency), latency)
+            MetricLine(stringResource(R.string.metrics_route), routeLabel)
             MetricLine(stringResource(R.string.metrics_connections), connections)
-            if (lastError.isNotBlank()) {
-                MetricLine(stringResource(R.string.metrics_last_error), lastError)
-            }
             Text(
                 text = if (detailsExpanded) {
                     stringResource(R.string.metrics_hide_details)
@@ -115,6 +93,12 @@ fun ProxyConnectionMetricsCard(
             AnimatedVisibility(visible = detailsExpanded) {
                 Column {
                     Spacer(Modifier.height(8.dp))
+                    MetricLine(stringResource(R.string.metrics_transport), transportLabel)
+                    MetricLine(stringResource(R.string.metrics_latency), latency)
+                    if (lastError.isNotBlank()) {
+                        MetricLine(stringResource(R.string.metrics_last_error), lastError)
+                    }
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         stringResource(R.string.worker_pool_metrics_title),
                         style = MaterialTheme.typography.labelMedium,

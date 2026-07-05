@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy.diagnostics
 
 import com.amurcanov.tgwsproxy.ConnectionMetricsFormatter
 import com.amurcanov.tgwsproxy.RouteDisplayNames
+import com.amurcanov.tgwsproxy.worker.WorkerUrlSanitizer
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeResult
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
 import java.text.DateFormat
@@ -58,6 +59,15 @@ object DiagnosticReportGenerator {
             appendLine("Last successful route: ${labelOrUnknown(context, runtime.lastSuccessfulRoute) { ctx, raw -> RouteDisplayNames.routeLabel(ctx, raw) }}")
             appendLine("Last failed route: ${labelOrUnknown(context, runtime.lastFailedRoute) { ctx, raw -> RouteDisplayNames.routeLabel(ctx, raw) }}")
             appendLine("Fallback reason: ${runtime.fallbackReason.ifBlank { "NONE" }}")
+            if (runtime.currentWorkerName.isNotBlank()) {
+                appendLine("Current worker: ${runtime.currentWorkerName}")
+                runtime.currentWorkerState?.let { state ->
+                    appendLine("Worker state: ${state.name}")
+                }
+            }
+            appendLine()
+            appendLine("[Worker Pool]")
+            formatWorkerPoolSection(input)?.let { append(it) }
             appendLine()
             appendLine("[Route Probes]")
             if (probes.isEmpty()) {
@@ -116,6 +126,31 @@ object DiagnosticReportGenerator {
             appendLine("- Sensitive values are masked; verify before sharing externally.")
         }
         return DiagnosticReportSanitizer.sanitize(report)
+    }
+
+    private fun formatWorkerPoolSection(input: DiagnosticReportContext): String? {
+        val snapshot = input.workerPoolSnapshot ?: return null
+        return buildString {
+            appendLine("Enabled: ${DiagnosticReportSanitizer.yesNo(snapshot.enabled)}")
+            appendLine("Workers count: ${snapshot.workers.size}")
+            appendLine(
+                "Selected worker: ${snapshot.selectedWorker?.name ?: "NONE"}",
+            )
+            appendLine("Enabled workers: ${snapshot.workers.count { it.enabled }}")
+            appendLine("Disabled workers: ${snapshot.workers.count { !it.enabled }}")
+            snapshot.selectedWorker?.let { worker ->
+                appendLine(
+                    "Selected worker URL: ${WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)}",
+                )
+            }
+            snapshot.workers.forEach { worker ->
+                appendLine(
+                    "- ${worker.name}: enabled=${worker.enabled}, state=${worker.state.name}, url=${
+                        WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)
+                    }",
+                )
+            }
+        }
     }
 
     private fun networkTypeLabel(context: android.content.Context, input: DiagnosticReportContext): String {

@@ -43,10 +43,12 @@ object NativeProxy {
         ProxyLibrary.INSTANCE.ResetCFDomainCooldowns()
     }
     fun setManualCfDomains(domains: List<String>) {
-        ProxyLibrary.INSTANCE.SetManualCFDomains(domains.joinToString("|"))
+        val payload = domains.mapNotNull(CfDomain::normalizeOrNull).distinct().joinToString("|")
+        ProxyLibrary.INSTANCE.SetManualCFDomains(payload)
     }
     fun setCachedCfDomains(domains: List<String>) {
-        ProxyLibrary.INSTANCE.SetCachedCFDomains(domains.joinToString("|"))
+        val payload = domains.mapNotNull(CfDomain::normalizeOrNull).distinct().joinToString("|")
+        ProxyLibrary.INSTANCE.SetCachedCFDomains(payload)
     }
     fun getProxyStatus(): String? {
         val ptr = ProxyLibrary.INSTANCE.GetProxyStatus() ?: return null

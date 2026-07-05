@@ -33,6 +33,7 @@ import com.amurcanov.tgwsproxy.MetricLine
 import com.amurcanov.tgwsproxy.R
 import com.amurcanov.tgwsproxy.RouteDisplayNames
 import com.amurcanov.tgwsproxy.RouteFailureReason
+import com.amurcanov.tgwsproxy.WorkerHealthStateLabels
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
 import java.text.DateFormat
@@ -290,6 +291,18 @@ private fun RuntimeRouteReadOnlyBlock(runtime: RuntimeRouteUiModel) {
                 stringResource(R.string.route_runtime_fallback_reason),
                 RouteFailureReason.label(context, runtime.fallbackReason),
             )
+            if (runtime.currentWorkerName.isNotBlank()) {
+                MetricLine(
+                    stringResource(R.string.route_runtime_current_worker),
+                    runtime.currentWorkerName,
+                )
+                runtime.currentWorkerState?.let { state ->
+                    MetricLine(
+                        stringResource(R.string.route_runtime_worker_state),
+                        WorkerHealthStateLabels.label(context, state),
+                    )
+                }
+            }
         }
     }
 }

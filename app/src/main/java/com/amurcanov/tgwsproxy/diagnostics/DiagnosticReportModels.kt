@@ -3,6 +3,7 @@ package com.amurcanov.tgwsproxy.diagnostics
 import com.amurcanov.tgwsproxy.NetworkProfile
 import com.amurcanov.tgwsproxy.PersistentLoggingPrefs
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeResult
+import com.amurcanov.tgwsproxy.worker.WorkerPoolReportSnapshot
 
 data class DiagnosticReportContext(
     val appVersionName: String,
@@ -26,6 +27,8 @@ data class DiagnosticReportContext(
     val proxyPort: String,
     val workerConfigured: Boolean,
     val workerDomain: String,
+    val workerPoolSnapshot: WorkerPoolReportSnapshot? = null,
+    val enrichedRuntimeRoute: com.amurcanov.tgwsproxy.RouteRuntimeState? = null,
     val cfProxyConfigured: Boolean,
     val maskDomains: Boolean,
     val fallbackEnabled: Boolean,

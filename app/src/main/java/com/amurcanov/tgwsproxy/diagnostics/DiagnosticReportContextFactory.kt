@@ -38,7 +38,8 @@ object DiagnosticReportContextFactory {
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
         val persistent = PersistentLoggingPrefsStore.load(prefs)
-        val runtime = ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
+        val runtimeBase = reportUi.enrichedRuntimeRoute ?: ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
+        val runtime = runtimeBase
         val probeResults = repository.getLastProbeResults()
         val logsDir = File(context.filesDir, "logs").absolutePath
         val totalBytes = PersistentLogStore.totalSizeBytes(context)
@@ -66,8 +67,11 @@ object DiagnosticReportContextFactory {
             probeUiResults = reportUi.probeUiResults,
             connectionMode = reportUi.connectionMode,
             proxyPort = reportUi.proxyPort,
-            workerConfigured = reportUi.workerDomain.isNotBlank(),
+            workerConfigured = reportUi.workerDomain.isNotBlank() ||
+                (reportUi.workerPoolSnapshot?.workers?.any { it.enabled } == true),
             workerDomain = reportUi.workerDomain,
+            workerPoolSnapshot = reportUi.workerPoolSnapshot,
+            enrichedRuntimeRoute = runtime,
             cfProxyConfigured = reportUi.cfProxyConfigured,
             maskDomains = reportUi.maskDomains,
             fallbackEnabled = reportUi.fallbackEnabled,
@@ -146,6 +150,8 @@ data class DiagnosticReportUiContext(
     val connectionMode: String,
     val proxyPort: String,
     val workerDomain: String,
+    val workerPoolSnapshot: com.amurcanov.tgwsproxy.worker.WorkerPoolReportSnapshot? = null,
+    val enrichedRuntimeRoute: com.amurcanov.tgwsproxy.RouteRuntimeState? = null,
     val cfProxyConfigured: Boolean,
     val maskDomains: Boolean,
     val fallbackEnabled: Boolean,

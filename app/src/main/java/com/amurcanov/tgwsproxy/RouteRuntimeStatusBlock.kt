@@ -54,6 +54,19 @@ fun RouteRuntimeStatusBlock(
             stringResource(R.string.route_runtime_network),
             routeState.networkTypeLabel(context),
         )
+        if (routeState.currentWorkerId.isNotBlank() ||
+            routeState.currentWorkerName.isNotBlank() ||
+            routeState.currentWorkerDomain.isNotBlank()
+        ) {
+            RouteRuntimeMetricLine(
+                stringResource(R.string.route_runtime_current_worker),
+                routeState.currentWorkerLabel(context),
+            )
+            RouteRuntimeMetricLine(
+                stringResource(R.string.route_runtime_worker_state),
+                routeState.currentWorkerStateLabel(context),
+            )
+        }
     }
 }
 

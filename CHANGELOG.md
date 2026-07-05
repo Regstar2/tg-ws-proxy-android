@@ -2,6 +2,14 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.9.0
+
+- Worker Pool foundation: multiple Worker endpoints with add/edit/delete, enable/disable, and manual selection.
+- Safe migration from legacy single Worker domain to first pool entry on upgrade.
+- Worker WebSocket route uses selected Worker when pool is enabled; legacy single Worker when disabled.
+- Runtime route truth and diagnostic report include Worker Pool summary with masked URLs.
+- Route probe Worker WebSocket checks selected Worker only (no multi-worker probe yet).
+
 ## 1.8.4
 
 - Diagnostic report: copy/share from Route diagnostics screen (runtime route, probe results, config summary, recent logs).
