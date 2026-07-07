@@ -1043,12 +1043,20 @@ func patchInitDC(data []byte, dc int) []byte {
 // ---------------------------------------------------------------------------
 
 type MsgSplitter struct {
-	stream cipher.Stream
+	stream    cipher.Stream
+	proto     uint32
+	cipherBuf []byte
+	plainBuf  []byte
+	disabled  bool
 }
 
 func newMsgSplitter(initData []byte) (*MsgSplitter, error) {
-	if len(initData) < 56 {
+	if len(initData) < 64 {
 		return nil, fmt.Errorf("init data too short")
+	}
+	proto, ok := initProtoFromObfsInit(initData)
+	if !ok {
+		return nil, fmt.Errorf("unsupported init protocol")
 	}
 	stream, err := newAESCTR(initData[8:40], initData[40:56])
 	if err != nil {
@@ -1057,52 +1065,105 @@ func newMsgSplitter(initData []byte) (*MsgSplitter, error) {
 	skip := make([]byte, 64)
 	stream.XORKeyStream(skip, zero64)
 
-	return &MsgSplitter{stream: stream}, nil
+	return &MsgSplitter{stream: stream, proto: proto}, nil
 }
 
 func (s *MsgSplitter) Split(chunk []byte) [][]byte {
-	plain := make([]byte, len(chunk))
-	s.stream.XORKeyStream(plain, chunk)
-
-	var boundaries []int
-	pos := 0
-	plainLen := len(plain)
-
-	for pos < plainLen {
-		first := plain[pos]
-		var msgLen int
-		if first == 0x7f {
-			if pos+4 > plainLen {
-				break
-			}
-			msgLen = int(uint32(plain[pos+1]) | uint32(plain[pos+2])<<8 | uint32(plain[pos+3])<<16)
-			msgLen *= 4
-			pos += 4
-		} else {
-			msgLen = int(first) * 4
-			pos++
-		}
-		if msgLen == 0 || pos+msgLen > plainLen {
-			break
-		}
-		pos += msgLen
-		boundaries = append(boundaries, pos)
+	if len(chunk) == 0 {
+		return nil
 	}
-
-	if len(boundaries) <= 1 {
+	if s.disabled {
 		return [][]byte{chunk}
 	}
 
-	parts := make([][]byte, 0, len(boundaries)+1)
-	prev := 0
-	for _, b := range boundaries {
-		parts = append(parts, chunk[prev:b])
-		prev = b
+	plain := make([]byte, len(chunk))
+	s.stream.XORKeyStream(plain, chunk)
+	s.cipherBuf = append(s.cipherBuf, chunk...)
+	s.plainBuf = append(s.plainBuf, plain...)
+
+	parts := make([][]byte, 0)
+	offset := 0
+	bufLen := len(s.cipherBuf)
+	for offset < bufLen {
+		packetLen, complete, disable := s.nextPacketLen(offset, bufLen-offset)
+		if !complete {
+			break
+		}
+		if disable {
+			parts = append(parts, append([]byte(nil), s.cipherBuf[offset:]...))
+			offset = bufLen
+			s.disabled = true
+			break
+		}
+		parts = append(parts, append([]byte(nil), s.cipherBuf[offset:offset+packetLen]...))
+		offset += packetLen
 	}
-	if prev < len(chunk) {
-		parts = append(parts, chunk[prev:])
+
+	if offset > 0 {
+		s.cipherBuf = append(s.cipherBuf[:0], s.cipherBuf[offset:]...)
+		s.plainBuf = append(s.plainBuf[:0], s.plainBuf[offset:]...)
 	}
 	return parts
+}
+
+func (s *MsgSplitter) Flush() [][]byte {
+	if len(s.cipherBuf) == 0 {
+		return nil
+	}
+	tail := append([]byte(nil), s.cipherBuf...)
+	s.cipherBuf = s.cipherBuf[:0]
+	s.plainBuf = s.plainBuf[:0]
+	return [][]byte{tail}
+}
+
+func (s *MsgSplitter) nextPacketLen(offset int, avail int) (packetLen int, complete bool, disable bool) {
+	if avail <= 0 {
+		return 0, false, false
+	}
+	switch s.proto {
+	case 0xEFEFEFEF:
+		return s.nextAbridgedLen(offset, avail)
+	case 0xEEEEEEEE, 0xDDDDDDDD:
+		return s.nextIntermediateLen(offset, avail)
+	default:
+		return 0, true, true
+	}
+}
+
+func (s *MsgSplitter) nextAbridgedLen(offset int, avail int) (int, bool, bool) {
+	first := s.plainBuf[offset]
+	headerLen := 1
+	payloadLen := int(first&0x7f) * 4
+	if first == 0x7f || first == 0xff {
+		if avail < 4 {
+			return 0, false, false
+		}
+		headerLen = 4
+		payloadLen = int(uint32(s.plainBuf[offset+1])|uint32(s.plainBuf[offset+2])<<8|uint32(s.plainBuf[offset+3])<<16) * 4
+	}
+	if payloadLen <= 0 {
+		return 0, true, true
+	}
+	packetLen := headerLen + payloadLen
+	if avail < packetLen {
+		return 0, false, false
+	}
+	return packetLen, true, false
+}
+
+func (s *MsgSplitter) nextIntermediateLen(offset int, avail int) (int, bool, bool) {
+	if avail < 4 {
+		return 0, false, false
+	}
+	payloadLen := int(binary.LittleEndian.Uint32(s.plainBuf[offset:offset+4]) & 0x7fffffff)
+	if payloadLen <= 0 {
+		return 0, true, true
+	}
+	packetLen := 4 + payloadLen
+	if avail < packetLen {
+		return 0, false, false
+	}
+	return packetLen, true, false
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,7 +1887,10 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 				if splitter != nil {
 					parts := splitter.Split(chunk)
 					partsCount = len(parts)
-					if len(parts) > 1 {
+					if len(parts) == 0 {
+						firstPacket = false
+						continue
+					} else if len(parts) > 1 {
 						logDebug.Printf("[%s] session_id=%s ws_split parts=%d bytes=%d route=%s",
 							label, strings.TrimSpace(meta.sessionID), len(parts), n, meta.route)
 						sendErr = ws.SendBatch(parts)
@@ -1855,6 +1919,19 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 				firstPacket = false
 			}
 			if err != nil {
+				if splitter != nil && errors.Is(err, io.EOF) {
+					tail := splitter.Flush()
+					if len(tail) > 0 {
+						if flushErr := ws.SendBatch(tail); flushErr != nil {
+							primary := closeTracker.Record(formatBridgeCloseReason("client_to_ws_flush", flushErr), true)
+							if primary {
+								logWarn.Printf("[%s] %s bridge first-exit primary dir=client->ws stage=flush dst=%s up=%s/%d down=%s/%d err=%v",
+									label, dcTag, dstTag, humanBytes(upBytes), upPkts, humanBytes(downBytes), downPkts, flushErr)
+							}
+							return
+						}
+					}
+				}
 				primary := closeTracker.Record(formatBridgeCloseReason("client_read", err), true)
 				if primary {
 					logInfo.Printf("[%s] %s bridge first-exit primary dir=client->ws stage=read dst=%s up=%s/%d down=%s/%d err=%v",
