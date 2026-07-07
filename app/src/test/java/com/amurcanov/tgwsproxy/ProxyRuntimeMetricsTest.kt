@@ -1,6 +1,7 @@
 package com.amurcanov.tgwsproxy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,7 +11,9 @@ class ProxyRuntimeMetricsTest {
         val raw = "running=1;mode=auto;route=cf_worker_ws;active_route_kind=cf_worker_ws;transport_type=websocket;" +
             "policy_generation=7;allowed_routes=cf_worker_ws|cf_proxy_ws;preferred_route=cf_worker_ws;" +
             "active=4;bytes_up=100;bytes_down=200;latency_ms=210;last_error=;" +
-            "worker_pool_hits=3;worker_pool_misses=5;worker_pool_idle=2;worker_pool_refill_errors=1;" +
+            "worker_endpoint_pool_hits=3;worker_endpoint_pool_misses=5;" +
+            "worker_ws_preconnect_enabled=0;worker_ws_preconnect_hits=0;worker_ws_preconnect_misses=0;" +
+            "worker_ws_preconnect_idle=0;worker_ws_preconnect_refill_errors=0;" +
             "cf_pool_hits=4;cf_pool_misses=2;cf_pool_idle=1;cf_pool_refill_errors=0"
         val metrics = ProxyRuntimeMetrics.parseStatus(raw)!!
         assertTrue(metrics.running)
@@ -26,10 +29,13 @@ class ProxyRuntimeMetricsTest {
         assertEquals(100, metrics.bytesUp)
         assertEquals(200, metrics.bytesDown)
         assertEquals(210, metrics.lastLatencyMs)
-        assertEquals(3, metrics.workerPoolHits)
-        assertEquals(5, metrics.workerPoolMisses)
-        assertEquals(2, metrics.workerPoolIdle)
-        assertEquals(1, metrics.workerPoolErrors)
+        assertEquals(3, metrics.workerEndpointPoolHits)
+        assertEquals(5, metrics.workerEndpointPoolMisses)
+        assertFalse(metrics.workerWsPreconnectEnabled)
+        assertEquals(0, metrics.workerWsPreconnectHits)
+        assertEquals(0, metrics.workerWsPreconnectMisses)
+        assertEquals(0, metrics.workerWsPreconnectIdle)
+        assertEquals(0, metrics.workerWsPreconnectErrors)
         assertEquals(4, metrics.cfPoolHits)
         assertEquals(2, metrics.cfPoolMisses)
         assertEquals(1, metrics.cfPoolIdle)
@@ -39,10 +45,10 @@ class ProxyRuntimeMetricsTest {
     @Test
     fun parseStatus_defaultsPoolMetricsToZero() {
         val metrics = ProxyRuntimeMetrics.parseStatus("running=1;mode=auto")!!
-        assertEquals(0, metrics.workerPoolHits)
-        assertEquals(0, metrics.workerPoolMisses)
-        assertEquals(0, metrics.workerPoolIdle)
-        assertEquals(0, metrics.workerPoolErrors)
+        assertEquals(0, metrics.workerEndpointPoolHits)
+        assertEquals(0, metrics.workerEndpointPoolMisses)
+        assertFalse(metrics.workerWsPreconnectEnabled)
+        assertEquals(0, metrics.workerWsPreconnectHits)
         assertEquals(0, metrics.cfPoolHits)
         assertEquals(0, metrics.cfPoolMisses)
         assertEquals(0, metrics.cfPoolIdle)
@@ -51,10 +57,10 @@ class ProxyRuntimeMetricsTest {
 
     @Test
     fun parseStatus_ignoresBrokenPoolMetricNumbers() {
-        val raw = "running=1;worker_pool_hits=x;worker_pool_misses=bad;cf_pool_hits=;cf_pool_refill_errors=nope"
+        val raw = "running=1;worker_endpoint_pool_hits=x;worker_endpoint_pool_misses=bad;cf_pool_hits=;cf_pool_refill_errors=nope"
         val metrics = ProxyRuntimeMetrics.parseStatus(raw)!!
-        assertEquals(0, metrics.workerPoolHits)
-        assertEquals(0, metrics.workerPoolMisses)
+        assertEquals(0, metrics.workerEndpointPoolHits)
+        assertEquals(0, metrics.workerEndpointPoolMisses)
         assertEquals(0, metrics.cfPoolHits)
         assertEquals(0, metrics.cfPoolErrors)
     }

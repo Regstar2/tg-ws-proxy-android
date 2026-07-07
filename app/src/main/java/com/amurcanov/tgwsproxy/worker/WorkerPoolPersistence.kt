@@ -25,6 +25,13 @@ class SharedPreferencesWorkerPoolPersistence(
             defaultWorkerNamePattern = prefs.getString(KEY_NAME_PATTERN, "Worker %d") ?: "Worker %d",
             selectionMode = WorkerSelectionMode.fromPref(prefs.getString(KEY_SELECTION_MODE, null))
                 ?: WorkerSelectionMode.SELECTED_ONLY,
+            selectionStrategy = WorkerSelectionStrategy.fromPref(prefs.getString(KEY_SELECTION_STRATEGY, null)),
+            roundRobinCursor = prefs.getString(KEY_ROUND_ROBIN_CURSOR, null)?.takeIf { it.isNotBlank() },
+            lowestLatencyMaxAgeMs = prefs.getLong(
+                KEY_LOWEST_LATENCY_MAX_AGE_MS,
+                WorkerSelectionConfig.DEFAULT_LOWEST_LATENCY_MAX_AGE_MS,
+            ),
+            allowDegradedWorkers = prefs.getBoolean(KEY_ALLOW_DEGRADED_WORKERS, true),
         )
     }
 
@@ -35,6 +42,10 @@ class SharedPreferencesWorkerPoolPersistence(
             .putBoolean(KEY_FALLBACK_LEGACY, config.fallbackToSingleWorkerUrl)
             .putString(KEY_NAME_PATTERN, config.defaultWorkerNamePattern)
             .putString(KEY_SELECTION_MODE, config.selectionMode.prefValue)
+            .putString(KEY_SELECTION_STRATEGY, config.selectionStrategy.prefValue)
+            .putString(KEY_ROUND_ROBIN_CURSOR, config.roundRobinCursor)
+            .putLong(KEY_LOWEST_LATENCY_MAX_AGE_MS, config.lowestLatencyMaxAgeMs)
+            .putBoolean(KEY_ALLOW_DEGRADED_WORKERS, config.allowDegradedWorkers)
             .apply()
     }
 
@@ -74,6 +85,8 @@ class SharedPreferencesWorkerPoolPersistence(
             "lastFailureAt" to worker.lastFailureAt?.toString().orEmpty(),
             "latencyMs" to worker.latencyMs?.toString().orEmpty(),
             "failureCount" to worker.failureCount.toString(),
+            "lastErrorCode" to worker.lastErrorCode.orEmpty(),
+            "lastCheckedAt" to worker.lastCheckedAt?.toString().orEmpty(),
             "createdAt" to worker.createdAt.toString(),
             "updatedAt" to worker.updatedAt.toString(),
         )
@@ -104,6 +117,8 @@ class SharedPreferencesWorkerPoolPersistence(
                 lastFailureAt = fields["lastFailureAt"]?.toLongOrNull(),
                 latencyMs = fields["latencyMs"]?.toLongOrNull(),
                 failureCount = fields["failureCount"]?.toIntOrNull() ?: 0,
+                lastErrorCode = fields["lastErrorCode"]?.takeIf { it.isNotBlank() },
+                lastCheckedAt = fields["lastCheckedAt"]?.toLongOrNull(),
                 createdAt = fields["createdAt"]?.toLongOrNull() ?: 0L,
                 updatedAt = fields["updatedAt"]?.toLongOrNull() ?: 0L,
             )
@@ -124,6 +139,10 @@ class SharedPreferencesWorkerPoolPersistence(
         private const val KEY_FALLBACK_LEGACY = "worker_pool_fallback_legacy_v1"
         private const val KEY_NAME_PATTERN = "worker_pool_name_pattern_v1"
         private const val KEY_SELECTION_MODE = "worker_pool_selection_mode_v1"
+        private const val KEY_SELECTION_STRATEGY = "worker_pool_selection_strategy_v1"
+        private const val KEY_ROUND_ROBIN_CURSOR = "worker_pool_round_robin_cursor_v1"
+        private const val KEY_LOWEST_LATENCY_MAX_AGE_MS = "worker_pool_lowest_latency_max_age_v1"
+        private const val KEY_ALLOW_DEGRADED_WORKERS = "worker_pool_allow_degraded_v1"
         private const val KEY_WORKERS = "worker_pool_workers_v1"
         private const val KEY_MIGRATION_DONE = "worker_pool_migration_done_v1"
     }

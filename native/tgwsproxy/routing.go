@@ -7,8 +7,8 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 	"sync/atomic"
+	"time"
 
 	"tg-ws-proxy/tgwsroute"
 )
@@ -34,9 +34,18 @@ const (
 	routeTCPFallback = tgwsroute.RouteTCPFallback
 )
 
-type workerConfig struct {
+type flowsealMediaFixConfig struct {
 	Enabled bool
-	Domain  string
+	DC      int
+	IP      string
+}
+
+type workerConfig struct {
+	Enabled         bool
+	Domain          string
+	Failover        workerFailoverSettings
+	DestinationMode string
+	MediaFix        flowsealMediaFixConfig
 }
 
 type runtimeSettings struct {
@@ -201,12 +210,12 @@ func workerDomainLooksValid(domain string) bool {
 	return strings.Contains(domain, ".")
 }
 
-func buildWorkerWSPath(dcID int, dcIP string, media bool) string {
-	return tgwsroute.BuildWorkerWSPath(dcID, dcIP, media)
+func buildWorkerWSPath(dcID int, dcIP string, media bool, sessionID string) string {
+	return tgwsroute.BuildWorkerWSPath(dcID, dcIP, media, sessionID)
 }
 
-func buildWorkerWSURL(workerDomain string, dcID int, dcIP string, media bool) string {
-	return tgwsroute.BuildWorkerWSURL(workerDomain, dcID, dcIP, media)
+func buildWorkerWSURL(workerDomain string, dcID int, dcIP string, media bool, sessionID string) string {
+	return tgwsroute.BuildWorkerWSURL(workerDomain, dcID, dcIP, media, sessionID)
 }
 
 func lookupTelegramDC(dst string) (tgwsroute.TelegramDCInfo, bool) {
@@ -329,80 +338,296 @@ func filterRoutesByPolicy(settings runtimeSettings, routes []routeKind, reason s
 // Worker + CF proxy dial
 // ---------------------------------------------------------------------------
 
-func cfWorkerFallback(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter) (bool, string) {
+const cfWorkerModeSocks5Transparent = tgwsroute.WorkerModeSocks5Transparent
+
+func snapshotDcOptMap() map[int]string {
+	dcOptMu.RLock()
+	defer dcOptMu.RUnlock()
+	out := make(map[int]string, len(dcOpt))
+	for dc, ip := range dcOpt {
+		out[dc] = ip
+	}
+	return out
+}
+
+func buildCfWorkerDestinationPlanWithMedia(workerDomain string, session *initSession, parsedDstHost string, settings runtimeSettings, isMedia bool) tgwsroute.WorkerDestinationPlan {
+	return tgwsroute.ResolveCfWorkerDestination(tgwsroute.WorkerDestinationInput{
+		WorkerDomain:  workerDomain,
+		DCID:          session.dc,
+		IsMedia:       isMedia,
+		DCOk:          session.dcOk,
+		ParsedDstHost: parsedDstHost,
+		Mode:          settings.Worker.DestinationMode,
+		DcIPMap:       snapshotDcOptMap(),
+		MediaFix: tgwsroute.FlowsealMediaFixConfig{
+			Enabled: settings.Worker.MediaFix.Enabled,
+			DC:      settings.Worker.MediaFix.DC,
+			IP:      settings.Worker.MediaFix.IP,
+		},
+	})
+}
+
+func buildCfWorkerDestinationPlan(workerDomain string, session *initSession, parsedDstHost string, settings runtimeSettings) tgwsroute.WorkerDestinationPlan {
+	return buildCfWorkerDestinationPlanWithMedia(workerDomain, session, parsedDstHost, settings, session.isMedia)
+}
+
+func buildCfWorkerTransparentWorkerURL(workerDomain string, session *initSession, parsedDstHost string) tgwsroute.CfWorkerTransparentResolve {
+	settings := getRuntimeSettings()
+	return buildCfWorkerDestinationPlan(workerDomain, session, parsedDstHost, settings).CfWorkerTransparentResolve
+}
+
+func shouldConsumeWorkerMediaSuspect(settings runtimeSettings, dc int, isMedia bool) (bool, string) {
+	if isMedia || dc != 2 {
+		return false, ""
+	}
+	if !settings.Worker.MediaFix.Enabled || !tgwsroute.IsExperimentalForceMediaDC4Mode(settings.Worker.DestinationMode) {
+		return false, ""
+	}
+	return consumeWorkerMediaSuspect(dc)
+}
+
+func cfWorkerFallback(ctx context.Context, client net.Conn, session *initSession, label string, dst string, port int) (bool, string) {
 	noteRouteConnectStarted(routeCFWorkerWS)
 	settings := getRuntimeSettings()
+	dc := session.dc
+	isMedia := session.isMedia
+	mTag := mediaTag(isMedia)
+	sessionID := strings.TrimSpace(session.workerSessionID)
+	if sessionID == "" {
+		sessionID = newWorkerSessionID()
+		session.workerSessionID = sessionID
+	}
+
 	if settings.PolicyPresent && !settings.AllowWorker {
-		logWarn.Printf("[%s] DC%d%s Blocked endpoint build route=cf_worker_ws reason=disabled_by_policy allowed=%s",
-			label, dc, mediaTag(isMedia), strings.Join(routeKindStrings(allowedRoutesList(settings)), "|"))
+		logWarn.Printf("[%s] session_id=%s DC%d%s Blocked endpoint build route=cf_worker_ws reason=disabled_by_policy allowed=%s",
+			label, sessionID, dc, mTag, strings.Join(routeKindStrings(allowedRoutesList(settings)), "|"))
 		return false, "disabled_by_policy"
 	}
-	domain := settings.Worker.Domain
-	if !settings.Worker.Enabled || domain == "" {
-		logDebug.Printf("[%s] DC%d skipping Worker route: domain is empty", label, dc)
+	if !settings.Worker.Enabled || settings.Worker.Domain == "" {
+		logDebug.Printf("[%s] session_id=%s DC%d skipping Worker route: domain is empty", label, sessionID, dc)
 		return false, "worker_disabled_or_empty_domain"
 	}
 
-	mTag := mediaTag(isMedia)
-	dstIP := telegramDCTargetIP(dc, "")
-	path := buildWorkerWSPath(dc, dstIP, isMedia)
-	wsURL := buildWorkerWSURL(domain, dc, dstIP, isMedia)
-
-	logDebug.Printf("Worker route enabled domain=%s", domain)
-	logDebug.Printf("[%s] DC%d%s Building Worker endpoint for %s", label, dc, mTag, wsURL)
-	logDebug.Printf("[%s] DC%d%s Trying Worker WS endpoint", label, dc, mTag)
-
-	prefix := fmt.Sprintf("[%s] DC%d%s cfworker", label, dc, mTag)
-	var ws *RawWebSocket
-	var lastErr error
-	poolKey := WorkerPoolKey{DC: dc, WorkerDomain: domain, Dst: dstIP, Media: isMedia}
-
-	ws = workerPool.Get(poolKey)
-	if ws != nil {
-		logDebug.Printf("[%s] DC%d%s Worker pool hit", label, dc, mTag)
-	} else {
-		logDebug.Printf("[%s] DC%d%s cfworker hostname dial start host=%s", label, dc, mTag, domain)
-		ws, lastErr = wsConnect(domain, domain, path, 10)
-		if lastErr != nil {
-			logDomainConnectFailure(prefix, domain, domain, lastErr)
-			resolved, err := resolvePreferredIPs(domain, 10)
-			if err == nil {
-				for _, ip := range resolved.Preferred() {
-					ws, lastErr = wsConnect(ip, domain, path, 10)
-					if lastErr == nil {
-						break
-					}
-					logDomainConnectFailure(prefix, domain, ip, lastErr)
-				}
-			}
-		}
+	parsedDstHost := strings.TrimSpace(dst)
+	workerDomain := settings.Worker.Domain
+	if candidates := settings.Worker.Failover.effectiveCandidates(settings.Worker.Domain); len(candidates) > 0 {
+		workerDomain = candidates[0].Domain
+	}
+	workerInputMedia := session.isMedia
+	mediaPromoteReason := ""
+	if promoted, reason := shouldConsumeWorkerMediaSuspect(settings, dc, workerInputMedia); promoted {
+		workerInputMedia = true
+		mediaPromoteReason = reason
+	}
+	resolved := buildCfWorkerDestinationPlanWithMedia(workerDomain, session, parsedDstHost, settings, workerInputMedia)
+	configuredMode := resolved.ConfiguredDestinationMode
+	if configuredMode == "" {
+		configuredMode = tgwsroute.WorkerDestinationPreserveOriginalDst
+	}
+	effectiveMode := resolved.EffectiveDestinationMode
+	if effectiveMode == "" {
+		effectiveMode = tgwsroute.WorkerDestinationPreserveOriginalDst
+	}
+	effectiveDC := resolved.EffectiveDC
+	if effectiveDC <= 0 {
+		effectiveDC = dc
+	}
+	effectiveMedia := resolved.EffectiveIsMedia
+	audit := resolved.MediaAudit
+	if mediaPromoteReason != "" {
+		logWarn.Printf("[%s] session_id=%s worker_media_suspect_consumed=true reason=%s original_parsed_dst=%s mapped_dc=%d effective_dc=%d worker_dst=%s",
+			label, sessionID, mediaPromoteReason, parsedDstHost, dc, effectiveDC, resolved.WorkerDst)
 	}
 
-	if ws == nil {
-		reason := "worker_ws_connect_failed"
-		if lastErr != nil {
-			reason = fmt.Sprintf("worker_ws_connect_failed: %v", lastErr)
+	if !resolved.OK {
+		if resolved.FailReason == tgwsroute.FailWorkerIPv6Unsupported {
+			mappedDC := "none"
+			if session.dcOk {
+				mappedDC = fmt.Sprintf("%d", dc)
+			}
+			logWarn.Printf("[%s] session_id=%s route_decision=blocked_or_failed reason=%s mapped_dc=%s parsed_dst=%s",
+				label, sessionID, tgwsroute.FailTelegramIPv6UnknownDCNoMapping, mappedDC, session.parsedDst)
+			logWarn.Printf("[%s] session_id=%s cf_worker_ws ipv6 skipped: mapped_dc=%s parsed_dst=%s reason=%s",
+				label, sessionID, mappedDC, session.parsedDst, resolved.FailReason)
 		}
-		logWarn.Printf("[%s] DC%d%s Worker WS failed: %s", label, dc, mTag, reason)
+		noteRouteConnectFailed(routeCFWorkerWS, resolved.FailReason)
+		return false, resolved.FailReason
+	}
+
+	workerDst := resolved.WorkerDst
+
+	if effectiveMode == tgwsroute.WorkerDestinationPreserveOriginalDst &&
+		resolved.DstFamily == tgwsroute.DstFamilyIPv4 && workerDst != parsedDstHost {
+		logError.Printf("[%s] session_id=%s cf_worker_ws transparent dst rewrite detected parsed_dst_host=%s worker_dst=%s preserve_original_dst=true forcing=%s",
+			label, sessionID, parsedDstHost, workerDst, parsedDstHost)
+		workerDst = parsedDstHost
+		resolved.PreserveOriginalDst = true
+		resolved.WorkerDstSource = tgwsroute.WorkerDstSourceParsedHost
+	}
+
+	dcOptMap := snapshotDcOptMap()
+	manualDC2Override := tgwsroute.HasDC2ManualOverride(dcOptMap)
+	manualDC2IP := strings.TrimSpace(dcOptMap[2])
+	selectedDst, _ := selectDC2WorkerDst(dc2WorkerDstSelectInput{
+		DC:                effectiveDC,
+		DestinationMode:   effectiveMode,
+		ParsedDstHost:     parsedDstHost,
+		InitialWorkerDst:  workerDst,
+		DstFamily:         resolved.DstFamily,
+		PreserveOriginal:  resolved.PreserveOriginalDst,
+		WorkerDstSource:   resolved.WorkerDstSource,
+		ManualDC2Override: manualDC2Override,
+		ManualDC2IP:       manualDC2IP,
+	})
+	if selectedDst != "" {
+		workerDst = selectedDst
+	}
+	if resolved.DstFamily == tgwsroute.DstFamilyIPv6 && effectiveDC == 2 &&
+		resolved.WorkerDstSource == tgwsroute.WorkerDstSourceIPv6ToDCIPv4 {
+		logIPv6DC2CandidateSelection(parsedDstHost, workerDst, effectiveMode)
+	}
+
+	workerURL := buildWorkerWSURL(workerDomain, effectiveDC, workerDst, effectiveMedia, sessionID)
+
+	if tgwsroute.WorkerURLContainsRawIPv6Dst(workerURL) {
+		logError.Printf("[%s] session_id=%s raw ipv6 dst leaked into worker_url url=%s parsed_dst=%s",
+			label, sessionID, workerURL, session.parsedDst)
+		noteRouteConnectFailed(routeCFWorkerWS, tgwsroute.FailWorkerIPv6RawDstBlocked)
+		return false, tgwsroute.FailWorkerIPv6RawDstBlocked
+	}
+
+	var reencryptCtx *workerReencryptContext
+	if workerReencryptBridgeEnabled && resolved.FlowsealMediaFixApplied {
+		ctx, err := newWorkerReencryptContext(session.original, effectiveDC, effectiveMedia)
+		if err != nil {
+			logWarn.Printf("[%s] session_id=%s worker_reencrypt_bridge_unavailable=true reason=%v fallback=patched_init",
+				label, sessionID, err)
+		} else {
+			reencryptCtx = ctx
+		}
+	}
+	patchWorkerInit := resolved.FlowsealMediaFixApplied && reencryptCtx == nil
+	firstPacket := session.workerFirstPacketForDestination(effectiveDC, effectiveMedia, patchWorkerInit)
+	if reencryptCtx != nil {
+		firstPacket = reencryptCtx.relayInit
+	}
+	hashBefore := sha256Hex(session.original)
+	hashAfter := sha256Hex(firstPacket)
+	mutated := initPacketMutated(session.original, firstPacket)
+
+	logInfo.Printf("[%s] session_id=%s route_decision=cf_worker_ws configured_destination_mode=%s effective_destination_mode=%s original_parsed_dst=%s mapped_dc=%d is_media=%t worker_dst=%s worker_dst_source=%s flowseal_media_fix_applied=%t",
+		label, sessionID, configuredMode, effectiveMode, parsedDstHost, effectiveDC, effectiveMedia, workerDst, resolved.WorkerDstSource, resolved.FlowsealMediaFixApplied)
+	logInfo.Printf("[%s] session_id=%s media_classification is_media=%t media_reason=%s telegram_class=%s media_fix_eligible=%t media_fix_skip_reason=%s",
+		label, sessionID, audit.IsMedia, audit.MediaReason, audit.TelegramClass, audit.MediaFixEligible, audit.MediaFixSkipReason)
+	if resolved.FlowsealMediaFixApplied {
+		logWarn.Printf("[%s] session_id=%s flowseal_media_tcp_override=true original_parsed_dst=%s logical_dc=%d is_media=%t worker_dst=%s",
+			label, sessionID, parsedDstHost, effectiveDC, effectiveMedia, workerDst)
+	} else if configuredMode == tgwsroute.WorkerDestinationExperimentalForceMediaDC4 {
+		logInfo.Printf("[%s] session_id=%s configured_destination_mode=%s effective_destination_mode=%s flowseal_media_fix_applied=false media_fix_skip_reason=%s",
+			label, sessionID, configuredMode, effectiveMode, audit.MediaFixSkipReason)
+	}
+	logInfo.Printf("[%s] session_id=%s destination_mode=%s worker_url=%s", label, sessionID, effectiveMode, workerURL)
+	logDebug.Printf("[%s] session_id=%s route=cf_worker_ws mode=%s parsed_dst=%s dst_family=%s mapped_dc=%d is_media=%t ipv6_worker_direct=%t worker_dst=%s worker_dst_source=%s preserve_original_dst=%t first_packet_mutated=%t worker_init_patch=%t worker_reencrypt_bridge=%t first_packet_len=%d first_packet_sha256_before=%s first_packet_sha256_after=%s worker_url=%s",
+		label, sessionID, cfWorkerModeSocks5Transparent, session.parsedDst, resolved.DstFamily, effectiveDC, effectiveMedia, resolved.IPv6WorkerDirect, workerDst, resolved.WorkerDstSource, resolved.PreserveOriginalDst, mutated, patchWorkerInit, reencryptCtx != nil, len(firstPacket), hashBefore, hashAfter, workerURL)
+
+	ws, candidate, workerAttempts, failReason, ok := tryWorkerFailoverConnect(settings, label, effectiveDC, effectiveMedia, workerDst, sessionID)
+	if !ok || ws == nil {
+		reason := "worker_ws_connect_failed"
+		if failReason != "" {
+			reason = failReason
+		}
+		logWarn.Printf("[%s] session_id=%s DC%d%s Worker WS failed: %s", label, sessionID, dc, mTag, reason)
 		noteRouteConnectFailed(routeCFWorkerWS, reason)
 		if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
-			recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, reason, 0)
+			recordAdaptiveFailure(routeCFWorkerWS, effectiveDC, effectiveMedia, reason, 0)
 		}
 		return false, reason
 	}
 
-	logInfo.Printf("[%s] DC%d%s Worker WS connected host=%s", label, dc, mTag, domain)
+	domain := candidate.Domain
+	logInfo.Printf("[%s] session_id=%s DC%d%s Worker WS connected host=%s workerId=%s worker_dst=%s attempt=%d",
+		label, sessionID, dc, mTag, domain, candidate.ID, workerDst, workerAttempts)
+
+	sendPacket := firstPacket
+	if initPacketMutated(session.original, sendPacket) && !patchWorkerInit && reencryptCtx == nil {
+		logError.Printf("[%s] session_id=%s cf_worker_ws first packet mutated before send sha256_before=%s sha256_after=%s",
+			label, sessionID, hashBefore, sha256Hex(sendPacket))
+		sendPacket = session.workerFirstPacket()
+	}
+	if reencryptCtx != nil {
+		logInfo.Printf("[%s] session_id=%s worker_reencrypt_bridge=true relay_init_len=%d logical_dc=%d is_media=%t worker_dst=%s",
+			label, sessionID, len(reencryptCtx.relayInit), effectiveDC, effectiveMedia, workerDst)
+	} else {
+		logDebug.Printf("[%s] session_id=%s cf_worker_ws raw stream forwarding enabled", label, sessionID)
+	}
+
+	if err := ws.Send(sendPacket); err != nil {
+		ws.Close()
+		logWarn.Printf("[%s] session_id=%s DC%d%s Worker first write failed; retrying fresh ws host=%s workerId=%s err=%v",
+			label, sessionID, dc, mTag, domain, candidate.ID, err)
+		noteWorkerConnectionAttemptStarted(candidate.ID)
+		retryPath := buildWorkerWSPath(effectiveDC, workerDst, effectiveMedia, sessionID)
+		retryPrefix := fmt.Sprintf("[%s] session_id=%s DC%d%s cfworker retry_first_write", label, sessionID, effectiveDC, mediaTag(effectiveMedia))
+		retryWS, retryErr := dialWorkerCandidate(domain, retryPath, retryPrefix)
+		workerAttempts++
+		if retryErr != nil || retryWS == nil {
+			noteWorkerConnectionAttemptFailed(candidate.ID, "worker_first_write_retry_connect_failed")
+			noteRouteConnectFailed(routeCFWorkerWS, "worker_first_write_retry_connect_failed")
+			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+				recordAdaptiveFailure(routeCFWorkerWS, effectiveDC, effectiveMedia, "worker_first_write_retry_connect_failed", 0)
+			}
+			return false, fmt.Sprintf("worker_first_write_retry_connect_failed: %v", retryErr)
+		}
+		ws = retryWS
+		rtRuntimeWorkerDomain.Store(domain)
+		rtCurrentWorkerDomain.Store(domain)
+		if err := ws.Send(sendPacket); err != nil {
+			ws.Close()
+			noteWorkerConnectionAttemptFailed(candidate.ID, "worker_first_write_retry_failed")
+			noteRouteConnectFailed(routeCFWorkerWS, "worker_first_write_retry_failed")
+			if settings.Mode == modeAuto || settings.Mode == modeDirectWithFallback {
+				recordAdaptiveFailure(routeCFWorkerWS, effectiveDC, effectiveMedia, "worker_first_write_retry_failed", 0)
+			}
+			return false, fmt.Sprintf("worker_first_write_retry_failed: %v", err)
+		}
+		logInfo.Printf("[%s] session_id=%s worker_first_write_retry_success=true host=%s workerId=%s attempt=%d",
+			label, sessionID, domain, candidate.ID, workerAttempts)
+	}
+
+	logInfo.Printf("[%s] session_id=%s first_packet_sent_to_worker=true worker_dst=%s attempt=%d",
+		label, sessionID, workerDst, workerAttempts)
+	noteWorkerConnectionAttemptSuccess(candidate.ID, 0)
 	noteRouteConnectSucceeded(routeCFWorkerWS)
+	logInfo.Printf("[%s] session_id=%s route_success_after_first_write=true", label, sessionID)
 	noteActiveRoute(routeCFWorkerWS)
 	stats.connectionsCfWorker.Add(1)
 
-	if err := ws.Send(init); err != nil {
-		ws.Close()
-		return false, fmt.Sprintf("worker_first_write_failed: %v", err)
+	bridgeSplitter := (*MsgSplitter)(nil)
+	meta := bridgeWSMeta{
+		route:              routeCFWorkerWS,
+		workerHost:         domain,
+		sessionID:          sessionID,
+		configuredDestMode: configuredMode,
+		effectiveDestMode:  effectiveMode,
+		originalParsedDst:  parsedDstHost,
+		workerDst:          workerDst,
+		mappedDC:           effectiveDC,
+		isMedia:            effectiveMedia,
+		mediaFixApplied:    resolved.FlowsealMediaFixApplied,
+	}
+	if reencryptCtx != nil {
+		if splitter, err := newMsgSplitter(reencryptCtx.relayInit); err == nil {
+			bridgeSplitter = splitter
+		} else {
+			logWarn.Printf("[%s] session_id=%s worker_reencrypt_splitter_unavailable=true reason=%v",
+				label, sessionID, err)
+		}
+		meta.upTransform = reencryptCtx.clientToRelay
+		meta.downTransform = reencryptCtx.relayToClient
 	}
 
-	summary := bridgeWS(ctx, client, ws, label, dc, domain, 443, isMedia, splitter)
-	recordAdaptiveSessionSuccess(routeCFWorkerWS, dc, isMedia, 0, summary.String(), settings)
+	summary := bridgeWS(ctx, client, ws, label, effectiveDC, domain, 443, effectiveMedia, bridgeSplitter, meta)
+	recordAdaptiveSessionSuccess(routeCFWorkerWS, effectiveDC, effectiveMedia, 0, summary.String(), settings)
 	return true, summary.String()
 }
 
@@ -511,18 +736,21 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 		return false, fmt.Sprintf("first_client_to_ws_write_failed: %v", err), tgwsroute.CFFailureWebSocket, elapsedMillis(started)
 	}
 
-	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter)
+	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter, bridgeWSMeta{route: routeCFProxyWS})
 	return true, summary.String(), "", elapsedMillis(started)
 }
 
-func runRouteChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter, routes []routeKind) bool {
+func runRouteChain(ctx context.Context, client net.Conn, session *initSession, label string, dst string, port int, routes []routeKind) bool {
 	settings := getRuntimeSettings()
+	dc := session.dc
+	isMedia := session.isMedia
 	mTag := mediaTag(isMedia)
 	target := fallbackTarget(dc, dst)
 	cfFailed := false
 	var lastFailRoute routeKind
 	var lastFailReason string
 
+	routes = filterWorkerRouteCooldown(routes, dc, isMedia)
 	if len(routes) > 0 {
 		noteRouteSelected(routes[0])
 	}
@@ -553,7 +781,7 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 				logInfo.Printf("[%s] DC%d%s Skipping Worker route: domain is empty", label, dc, mTag)
 				continue
 			}
-			if ok, reason := cfWorkerFallback(ctx, client, init, label, dc, isMedia, splitter); ok {
+			if ok, reason := cfWorkerFallback(ctx, client, session, label, dst, port); ok {
 				logInfo.Printf("[%s] DC%d%s Worker closed: reason=%s", label, dc, mTag, reason)
 				noteConnectionClosed(routeCFWorkerWS)
 				return true
@@ -564,7 +792,8 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 				recordAdaptiveFailure(routeCFWorkerWS, dc, isMedia, "worker_failed", 0)
 			}
 		case routeCFProxyWS:
-			ok, cfReason := cfProxyFallbackWithPool(ctx, client, init, label, dc, isMedia, splitter)
+			routeInit, routeSplitter := session.prepareForRoute(routeCFProxyWS)
+			ok, cfReason := cfProxyFallbackWithPool(ctx, client, routeInit, label, dc, isMedia, routeSplitter)
 			if ok {
 				logInfo.Printf("[%s] DC%d%s CF proxy closed: reason=%s", label, dc, mTag, cfReason)
 				noteConnectionClosed(routeCFProxyWS)
@@ -587,7 +816,8 @@ func runRouteChain(ctx context.Context, client net.Conn, init []byte, label stri
 		case routeTCPFallback:
 			noteRouteConnectStarted(routeTCPFallback)
 			logInfo.Printf("[%s] DC%d%s -> TCP fallback to %s", label, dc, mTag, joinAddr(target, port))
-			if tcpFallback(ctx, client, target, port, init, label, dc, isMedia) {
+			routeInit, _ := session.prepareForRoute(routeTCPFallback)
+			if tcpFallback(ctx, client, target, port, routeInit, label, dc, isMedia) {
 				noteRouteConnectSucceeded(routeTCPFallback)
 				noteActiveRoute(routeTCPFallback)
 				recordAdaptiveSessionSuccess(routeTCPFallback, dc, isMedia, 0, "", settings)

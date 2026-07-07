@@ -2,6 +2,65 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.9.8
+
+- **DC2 Worker destination scoring:** per-destination runtime score keyed by `dc + worker_dst + destination_mode` tracks bidirectional vs zero-down sessions, heavy zero-down upload volume, and a 5-minute penalty window after `ws_up_bytes >= 64 KiB` with no downstream data.
+- **DC2 candidate pool:** `149.154.167.41`, `149.154.167.50`, `149.154.167.51`; selection prefers higher-scored candidates, demotes `.50` by default unless DC2 IP is manually overridden, and can switch away from a penalized preserve-original destination.
+- **IPv6→DC2 IPv4 mapping** no longer always picks `149.154.167.51`; uses the same scoring among DC2 candidates.
+- **Early zero-down retry (DC2):** if the first 64 KiB upload gets no downstream packets, the worker session closes once and retries on another DC2 candidate (single retry, no loop).
+- Logs: `dc_candidate_selected`, `dc_candidate_score`, `dc_candidate_penalty`, `zero_down_detected`, `heavy_zero_down_detected`, `worker_dst_penalized`, `retry_with_alternative_dst`, `original_ipv6_dst`, `selected_dc2_candidate`.
+- Cloudflare Worker script unchanged; worker endpoint pool and disabled idle WS preconnect unchanged.
+
+## 1.9.7
+
+- **Worker data-plane correlation:** each `cf_worker_ws` session gets a monotonic `session_id` (`sid` query param on `/apiws`); same id in Android runtime logs and Cloudflare Worker `console.log` for end-to-end tracing.
+- Logs: `configured_destination_mode` vs `effective_destination_mode` (no misleading `EXPERIMENTAL_FORCE_MEDIA_DC4` when media fix was skipped), `media_classification` audit (`media_reason`, `telegram_class`, `media_fix_eligible`, `media_fix_skip_reason`), `worker_session_result` (`bidirectional` / `zero_down` / `no_payload`).
+- Proxy status destination metrics extended per profile: `original_parsed_dst`, `worker_dst`, `mapped_dc`, `is_media`, `flowseal_media_fix_applied`, `sessions_bidirectional`, `sessions_zero_down`, `up_bytes_total`, `down_bytes_total`.
+- Cloudflare Worker script: reads `sid` and includes it in all relay log points.
+
+## 1.9.6
+
+- **Safe Flowseal media fix scope:** default `socks5_transparent` destination mode is `PRESERVE_ORIGINAL_DST`; original SOCKS5 destination is kept for media/CDN unless you explicitly enable experimental media DC4 fix.
+- Destination modes: `PRESERVE_ORIGINAL_DST`, `FLOWSEAL_DC_MAP`, `EXPERIMENTAL_FORCE_MEDIA_DC4` (legacy pref `flowseal_media_dc4_fix`); fix applies only with `@flowseal_media_fix_enabled=1` on classified media routes.
+- Flowseal DC→IP preset sets `FLOWSEAL_DC_MAP` only (no automatic media DC4 rewrite).
+- Unknown Telegram IPv6/CDN without DC mapping: `route_decision=blocked_or_failed` (`telegram_ipv6_unknown_dc_no_mapping`); no silent DC4 bootstrap; TCP passthrough only when policy allows `tcp_fallback`.
+- Logs: `experimental_flowseal_dc4_force=true`, `warning=transparent_dst_rewrite_may_break_media`.
+- Proxy status A/B metrics: `destination_mode_stats` per mode (sessions, zero_down, avg_duration_ms, close_reason, media_fix_applied).
+
+## 1.9.5
+
+- **Flowseal DC/IP override mode:** `cf_worker_ws` destination modes — `PRESERVE_ORIGINAL_DST`, `FLOWSEAL_DC_MAP`, `FLOWSEAL_MEDIA_DC4_FIX` (media/CDN routes use configurable DC4 IP, default `149.154.167.220`).
+- Unknown Telegram-like CDN destinations bootstrap to Worker instead of TCP passthrough when media DC4 fix is enabled.
+- Worker Pool settings: destination mode selector and Flowseal media fix DC/IP fields; runtime tokens `@worker_destination_mode`, `@flowseal_media_fix_*`.
+- Logs: `destination_mode`, `original_parsed_dst`, `flowseal_media_fix_applied`, `worker_dst_source=flowseal_media_dc4_fix`.
+
+## 1.9.4
+
+- **Worker Endpoint Pool without idle WS preconnect:** Worker Pool still selects/failovers between worker endpoints (manual, priority, failover, round-robin, lowest latency). Pre-opened idle `/apiws` WebSocket pool is disabled for `cf_worker_ws` / `socks5_transparent` — each SOCKS5 CONNECT reads `first_packet`, selects endpoint, opens a fresh WebSocket, sends `first_packet`, then marks route success.
+- Runtime logs: `Worker endpoint selected`, `Worker WS preconnect disabled reason=cf_worker_ws_requires_first_payload`, `opening_worker_ws_after_first_packet=true`, `first_packet_sent_to_worker=true`, `route_success_after_first_write=true`.
+- Metrics split: `worker_endpoint_pool_hits/misses` (endpoint selection/failover) vs `worker_ws_preconnect_*` (disabled for cf_worker_ws).
+- Worker Pool UI polish: structured screen with summary, strategy, runtime state, and readable worker cards.
+- Selected vs runtime worker markers, health states, empty/warning/invalid config states, and improved add/edit/delete flows.
+- Main screen and Diagnostics show compact Worker Pool summary with link to Worker Pool settings.
+
+## 1.9.3
+
+- Worker selection strategies: Manual, Priority, Failover (default), Round-robin, and Lowest latency (cached health check data).
+- Strategy is saved in Worker Pool settings; ordered candidates feed existing failover for new connections only.
+- Runtime Route Truth, Diagnostics, and Diagnostic Report show active strategy, candidate order, and selection reason.
+
+## 1.9.2
+
+- Worker failover: when the selected worker fails, the app tries other enabled workers for new connections (does not change user-selected worker).
+- Runtime Route Truth shows selected worker vs runtime worker, failover reason, and attempt count.
+- Diagnostic report and Diagnostics screen include Worker Failover summary; persistent logs record failover attempt chain.
+
+## 1.9.1
+
+- Worker health check: per-worker and check-all diagnostics (DNS, TCP, TLS, WebSocket handshake, latency, timeout).
+- Worker Pool UI shows state, latency, last checked, failures, and last error; health check does not change selected worker or active route.
+- Diagnostic report and Diagnostics screen include Worker Pool health summary; persistent logs record health check events.
+
 ## 1.9.0
 
 - Worker Pool foundation: multiple Worker endpoints with add/edit/delete, enable/disable, and manual selection.

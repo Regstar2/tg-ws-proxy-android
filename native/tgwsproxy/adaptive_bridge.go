@@ -40,6 +40,7 @@ func applyAdaptiveProfile(settings runtimeSettings) {
 
 func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool, dc int, isMedia bool) []routeKind {
 	base := filterRoutesByPolicy(settings, tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect), "adaptive_base")
+	base = filterWorkerRouteCooldown(base, dc, isMedia)
 	if mode != modeAuto && mode != modeDirectWithFallback {
 		return base
 	}

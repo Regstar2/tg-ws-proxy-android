@@ -34,20 +34,46 @@ Create your own Worker. Do not use random public Worker domains from other peopl
 
 ## Worker Code
 
+Deployable source: [scripts/cloudflare-worker/worker.js](../../scripts/cloudflare-worker/worker.js)
+
+The Worker uses **lazy TCP connect**: it accepts the WebSocket upgrade immediately, waits for the first client frame, then opens the Telegram TCP socket and writes that frame. This avoids Telegram closing an idle TCP connection opened before the MTProto init packet arrives.
+
 ```javascript
 import { connect } from "cloudflare:sockets";
 
-function toBytes(data) {
+async function toBytes(data) {
     if (data instanceof ArrayBuffer) {
         return new Uint8Array(data);
+    }
+    if (Array.isArray(data)) {
+        return new Uint8Array(data);
+    }
+    if (data instanceof Uint8Array) {
+        return data;
     }
     if (typeof data === "string") {
         return new TextEncoder().encode(data);
     }
     if (data && typeof data.arrayBuffer === "function") {
-        return data.arrayBuffer().then((ab) => new Uint8Array(ab));
+        const ab = await data.arrayBuffer();
+        return new Uint8Array(ab);
     }
     return new Uint8Array();
+}
+
+function createWriteQueue(writer) {
+    let chain = Promise.resolve();
+    return (chunk) => {
+        chain = chain
+            .then(() => writer.write(chunk))
+            .catch((error) => {
+                console.error("write queue failed", {
+                    error: error?.message ?? String(error),
+                });
+                throw error;
+            });
+        return chain;
+    };
 }
 
 export default {
@@ -66,60 +92,185 @@ export default {
             return new Response("Missing dst", { status: 400 });
         }
 
+        const dc = url.searchParams.get("dc") ?? "?";
+        const media = url.searchParams.get("media") ?? "?";
+        console.log("apiws accepted", { dst, dc, media });
+
+        const requestedProtocols = (request.headers.get("Sec-WebSocket-Protocol") || "")
+            .split(",")
+            .map((value) => value.trim().toLowerCase());
+        const useBinaryProtocol = requestedProtocols.includes("binary");
+
         const pair = new WebSocketPair();
         const client = pair[0];
         const server = pair[1];
         server.accept();
 
-        const socket = connect({ hostname: dst, port: 443 });
-        const tcpReader = socket.readable.getReader();
-        const tcpWriter = socket.writable.getWriter();
+        let socket = null;
+        let tcpReader = null;
+        let tcpWriter = null;
+        let enqueueWrite = null;
+        let readyPromise = null;
+        let wsToTcpBytes = 0;
+        let tcpToWsBytes = 0;
+        let tcpToWsLoopStarted = false;
+        let relayClosed = false;
 
-        server.addEventListener("message", async (event) => {
-            try {
-                await tcpWriter.write(await toBytes(event.data));
-            } catch {
-                try {
-                    server.close(1011, "tcp write failed");
-                } catch {}
+        const closeRelay = (reason) => {
+            if (relayClosed) {
+                return;
             }
-        });
-
-        server.addEventListener("close", async () => {
+            relayClosed = true;
+            console.log("relay close", {
+                reason,
+                dst,
+                wsToTcpBytes,
+                tcpToWsBytes,
+            });
             try {
-                await tcpWriter.close();
+                server.close();
             } catch {}
-            try {
-                socket.close();
-            } catch {}
-        });
-
-        (async () => {
-            try {
-                while (true) {
-                    const { value, done } = await tcpReader.read();
-                    if (done) {
-                        break;
-                    }
-                    if (value) {
-                        server.send(value);
-                    }
-                }
-            } catch {
-            } finally {
-                try {
-                    server.close();
-                } catch {}
-                try {
-                    tcpReader.releaseLock();
-                } catch {}
+            if (socket) {
                 try {
                     socket.close();
                 } catch {}
             }
-        })();
+        };
 
-        return new Response(null, { status: 101, webSocket: client });
+        const writeWsToTcp = async (chunk) => {
+            await enqueueWrite(chunk);
+            wsToTcpBytes += chunk.byteLength;
+            console.log("ws->tcp packet", {
+                dst,
+                bytes: chunk.byteLength,
+                total: wsToTcpBytes,
+            });
+        };
+
+        const startTcpToWsLoop = () => {
+            if (tcpToWsLoopStarted) {
+                return;
+            }
+            tcpToWsLoopStarted = true;
+            console.log("relay start", { dst });
+
+            (async () => {
+                try {
+                    while (true) {
+                        const { value, done } = await tcpReader.read();
+                        if (done) {
+                            break;
+                        }
+                        if (!value || value.byteLength === 0) {
+                            continue;
+                        }
+                        tcpToWsBytes += value.byteLength;
+                        console.log("tcp->ws packet", {
+                            dst,
+                            bytes: value.byteLength,
+                            total: tcpToWsBytes,
+                        });
+                        server.send(value);
+                    }
+                } catch (error) {
+                    console.error("tcp->ws read failed", {
+                        dst,
+                        error: error?.message ?? String(error),
+                    });
+                } finally {
+                    console.log("tcp closed", { dst });
+                    try {
+                        tcpReader.releaseLock();
+                    } catch {}
+                    closeRelay("tcp_read_done");
+                }
+            })();
+        };
+
+        const initTcp = async (firstChunk) => {
+            console.log("ws first packet", { dst, bytes: firstChunk.byteLength });
+            console.log("tcp connect start", { dst });
+
+            socket = connect(
+                { hostname: dst, port: 443 },
+                { secureTransport: "off", allowHalfOpen: true },
+            );
+            tcpReader = socket.readable.getReader();
+            tcpWriter = socket.writable.getWriter();
+            enqueueWrite = createWriteQueue(tcpWriter);
+
+            socket.opened
+                .then(() => console.log("tcp opened", { dst }))
+                .catch((error) =>
+                    console.error("tcp open failed", {
+                        dst,
+                        error: error?.message ?? String(error),
+                    }),
+                );
+
+            try {
+                await socket.opened;
+                await writeWsToTcp(firstChunk);
+                startTcpToWsLoop();
+            } catch (error) {
+                console.error("lazy tcp init failed", {
+                    dst,
+                    error: error?.message ?? String(error),
+                });
+                closeRelay("tcp_init_failed");
+                throw error;
+            }
+        };
+
+        server.addEventListener("message", async (event) => {
+            try {
+                const chunk = await toBytes(event.data);
+                if (!chunk || chunk.byteLength === 0) {
+                    return;
+                }
+
+                if (!readyPromise) {
+                    readyPromise = initTcp(chunk);
+                    await readyPromise;
+                    return;
+                }
+
+                await readyPromise;
+                await writeWsToTcp(chunk);
+            } catch (error) {
+                console.error("ws->tcp failed", {
+                    dst,
+                    error: error?.message ?? String(error),
+                });
+                closeRelay("ws_to_tcp_failed");
+            }
+        });
+
+        server.addEventListener("close", () => {
+            if (!readyPromise) {
+                closeRelay("ws_closed_before_first_packet");
+                return;
+            }
+            (async () => {
+                try {
+                    await tcpWriter?.close();
+                } catch {}
+                try {
+                    socket?.close();
+                } catch {}
+                closeRelay("ws_closed");
+            })();
+        });
+
+        server.addEventListener("error", () => {
+            closeRelay("ws_error");
+        });
+
+        const headers = useBinaryProtocol
+            ? { "Sec-WebSocket-Protocol": "binary" }
+            : undefined;
+
+        return new Response(null, { status: 101, webSocket: client, headers });
     },
 };
 ```

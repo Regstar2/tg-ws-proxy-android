@@ -140,10 +140,64 @@ class WorkerPoolRepository(
         saveWorkerPoolConfig(config.copy(enabled = enabled))
     }
 
+    fun setSelectionStrategy(strategy: WorkerSelectionStrategy) {
+        val config = getWorkerPoolConfig()
+        if (config.selectionStrategy == strategy) {
+            return
+        }
+        saveWorkerPoolConfig(config.copy(selectionStrategy = strategy))
+        Log.i(TAG, "Worker selection strategy changed: ${strategy.name}")
+    }
+
+    @Synchronized
+    fun resolveSelectionForConnection(): WorkerSelectionResult {
+        val config = getWorkerPoolConfig()
+        val workers = getWorkers()
+        val result = WorkerSelectionResolver.resolveCandidates(
+            config = config,
+            workers = workers,
+            advanceRoundRobin = true,
+        )
+        if (result is WorkerSelectionResult.Success &&
+            config.selectionStrategy == WorkerSelectionStrategy.ROUND_ROBIN &&
+            result.roundRobinNextCursor != null &&
+            result.roundRobinNextCursor != config.roundRobinCursor
+        ) {
+            saveWorkerPoolConfig(config.copy(roundRobinCursor = result.roundRobinNextCursor))
+        }
+        return result
+    }
+
+    fun previewSelection(): WorkerSelectionPreview {
+        return WorkerSelectionResolver.preview(getWorkerPoolConfig(), getWorkers())
+    }
+
     fun isMigrationCompleted(): Boolean = persistence.isMigrationCompleted()
 
     fun markMigrationCompleted() {
         persistence.markMigrationCompleted()
+    }
+
+    fun applyHealthUpdate(worker: WorkerEndpoint): Result<WorkerEndpoint> {
+        val workers = getWorkers().toMutableList()
+        val index = workers.indexOfFirst { it.id == worker.id }
+        if (index < 0) {
+            return Result.failure(WorkerPoolOperationException(WorkerPoolError.SELECTED_WORKER_NOT_FOUND))
+        }
+        workers[index] = worker
+        if (!persistWorkers(workers)) {
+            return Result.failure(WorkerPoolOperationException(WorkerPoolError.WORKER_POOL_STORAGE_ERROR))
+        }
+        return Result.success(worker)
+    }
+
+    fun restoreSelectedWorkerId(selectedWorkerId: String?) {
+        val config = getWorkerPoolConfig()
+        if (config.selectedWorkerId == selectedWorkerId) {
+            return
+        }
+        saveWorkerPoolConfig(config.copy(selectedWorkerId = selectedWorkerId))
+        Log.w(TAG, "Selected worker restored after health check: id=${selectedWorkerId ?: "NONE"}")
     }
 
     fun buildReportSnapshot(legacyWorkerDomain: String, maskDomains: Boolean): WorkerPoolReportSnapshot {

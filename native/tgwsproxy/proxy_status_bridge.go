@@ -34,6 +34,7 @@ func resetProxyRouteDisplayState() {
 	lastMetricsTransport.Store("")
 	lastMetricsError.Store("")
 	resetRouteRuntimeState()
+	resetDestinationModeMetrics()
 }
 
 func noteActiveRoute(route routeKind) {
@@ -126,7 +127,7 @@ func exportProxyStatus() string {
 	}
 
 	base := fmt.Sprintf(
-		"running=%d;mode=%s;route=%s;active_route_kind=%s;transport_type=%s;policy_generation=%d;allowed_routes=%s;preferred_route=%s;active=%d;bytes_up=%d;bytes_down=%d;latency_ms=%d;last_error=%s;worker_pool_hits=%d;worker_pool_misses=%d;worker_pool_idle=%d;worker_pool_refill_errors=%d;worker_pool_err=%d;cf_pool_hits=%d;cf_pool_misses=%d;cf_pool_idle=%d;cf_pool_refill_errors=%d;cf_pool_err=%d",
+		"running=%d;mode=%s;route=%s;active_route_kind=%s;transport_type=%s;policy_generation=%d;allowed_routes=%s;preferred_route=%s;active=%d;bytes_up=%d;bytes_down=%d;latency_ms=%d;last_error=%s;worker_endpoint_pool_hits=%d;worker_endpoint_pool_misses=%d;worker_ws_preconnect_enabled=%d;worker_ws_preconnect_hits=%d;worker_ws_preconnect_misses=%d;worker_ws_preconnect_idle=%d;worker_ws_preconnect_refill_errors=%d;cf_pool_hits=%d;cf_pool_misses=%d;cf_pool_idle=%d;cf_pool_refill_errors=%d;cf_pool_err=%d",
 		running,
 		settings.Mode,
 		activeRoute,
@@ -140,11 +141,13 @@ func exportProxyStatus() string {
 		stats.bytesDown.Load(),
 		lastMetricsLatency.Load(),
 		escapeStatusField(lastErr),
-		stats.workerPoolHits.Load(),
-		stats.workerPoolMisses.Load(),
+		stats.workerEndpointPoolHits.Load(),
+		stats.workerEndpointPoolMisses.Load(),
+		boolInt(workerWsPreconnectEnabled),
+		stats.workerWsPreconnectHits.Load(),
+		stats.workerWsPreconnectMisses.Load(),
 		workerPool.IdleCount(),
-		stats.workerPoolRefillErrors.Load(),
-		stats.workerPoolRefillErrors.Load(),
+		stats.workerWsPreconnectRefillErr.Load(),
 		stats.cfPoolHits.Load(),
 		stats.cfPoolMisses.Load(),
 		0,
@@ -153,11 +156,22 @@ func exportProxyStatus() string {
 	)
 	parts := strings.Split(base, ";")
 	parts = appendRouteRuntimeStatusFields(parts)
+	parts = appendWorkerFailoverStatusFields(parts)
+	if destStats := exportDestinationModeMetrics(); destStats != "" {
+		parts = append(parts, "destination_mode_stats="+destStats)
+	}
 	return strings.Join(parts, ";")
 }
 
 func escapeStatusField(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, ";", ","), "\n", " ")
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 //export GetProxyStatus

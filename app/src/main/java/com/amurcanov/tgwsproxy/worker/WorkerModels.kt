@@ -51,6 +51,8 @@ data class WorkerEndpoint(
     val lastFailureAt: Long? = null,
     val latencyMs: Long? = null,
     val failureCount: Int = 0,
+    val lastErrorCode: String? = null,
+    val lastCheckedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
 ) {
@@ -61,6 +63,7 @@ data class WorkerEndpoint(
             name: String,
             url: String,
             enabled: Boolean = true,
+            priority: Int = 0,
             nowMs: Long = System.currentTimeMillis(),
         ): WorkerEndpoint {
             return WorkerEndpoint(
@@ -68,6 +71,7 @@ data class WorkerEndpoint(
                 name = name.trim(),
                 url = url.trim(),
                 enabled = enabled,
+                priority = priority,
                 state = if (enabled) WorkerHealthState.UNKNOWN else WorkerHealthState.DISABLED,
                 createdAt = nowMs,
                 updatedAt = nowMs,
@@ -82,6 +86,10 @@ data class WorkerPoolConfig(
     val fallbackToSingleWorkerUrl: Boolean = true,
     val defaultWorkerNamePattern: String = "Worker %d",
     val selectionMode: WorkerSelectionMode = WorkerSelectionMode.SELECTED_ONLY,
+    val selectionStrategy: WorkerSelectionStrategy = WorkerSelectionStrategy.FAILOVER,
+    val roundRobinCursor: String? = null,
+    val lowestLatencyMaxAgeMs: Long = WorkerSelectionConfig.DEFAULT_LOWEST_LATENCY_MAX_AGE_MS,
+    val allowDegradedWorkers: Boolean = true,
 )
 
 data class WorkerPoolReportSnapshot(

@@ -136,7 +136,7 @@ class WorkerUrlSanitizerTest {
     }
 }
 
-private class InMemoryWorkerPoolPersistence : WorkerPoolPersistence {
+internal class InMemoryWorkerPoolPersistence : WorkerPoolPersistence {
     private var config = WorkerPoolConfig()
     private var workers: List<WorkerEndpoint> = emptyList()
     private var migrated = false

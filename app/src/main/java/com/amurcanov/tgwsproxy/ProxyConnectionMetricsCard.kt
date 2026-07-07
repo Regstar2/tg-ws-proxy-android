@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 fun ProxyConnectionMetricsCard(
     ui: ProxyUiMetrics,
     showMetrics: Boolean,
+    workerPoolCompact: com.amurcanov.tgwsproxy.worker.WorkerPoolCompactUiModel? = null,
+    onOpenWorkerPool: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!showMetrics) {
@@ -77,6 +79,35 @@ fun ProxyConnectionMetricsCard(
             MetricLine(stringResource(R.string.metrics_speed), speed)
             MetricLine(stringResource(R.string.metrics_route), routeLabel)
             MetricLine(stringResource(R.string.metrics_connections), connections)
+            workerPoolCompact?.let { compact ->
+                val healthLabel = compact.runtimeHealthLabelRes?.let { stringResource(it) }
+                if (healthLabel != null) {
+                    MetricLine(
+                        stringResource(R.string.worker_pool_metrics_title),
+                        stringResource(
+                            R.string.worker_pool_main_compact_worker,
+                            compact.runtimeWorkerName,
+                            healthLabel,
+                        ),
+                    )
+                } else {
+                    MetricLine(
+                        stringResource(R.string.worker_pool_metrics_title),
+                        compact.runtimeWorkerName,
+                    )
+                }
+                onOpenWorkerPool?.let { open ->
+                    Text(
+                        stringResource(R.string.worker_pool_main_open),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = open)
+                            .padding(top = 4.dp),
+                    )
+                }
+            }
             Text(
                 text = if (detailsExpanded) {
                     stringResource(R.string.metrics_hide_details)
@@ -100,7 +131,7 @@ fun ProxyConnectionMetricsCard(
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        stringResource(R.string.worker_pool_metrics_title),
+                        stringResource(R.string.worker_endpoint_pool_metrics_title),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -108,18 +139,39 @@ fun ProxyConnectionMetricsCard(
                         stringResource(R.string.pool_metrics_hits_misses_label),
                         stringResource(
                             R.string.pool_metrics_hits_misses,
-                            ui.runtime.workerPoolHits,
-                            ui.runtime.workerPoolMisses,
+                            ui.runtime.workerEndpointPoolHits,
+                            ui.runtime.workerEndpointPoolMisses,
                         ),
                     )
-                    MetricLine(
-                        stringResource(R.string.pool_metrics_idle_label),
-                        ui.runtime.workerPoolIdle.toString(),
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        stringResource(R.string.worker_ws_preconnect_pool_metrics_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                    MetricLine(
-                        stringResource(R.string.pool_metrics_errors_label),
-                        ui.runtime.workerPoolErrors.toString(),
-                    )
+                    if (ui.runtime.workerWsPreconnectEnabled) {
+                        MetricLine(
+                            stringResource(R.string.pool_metrics_hits_misses_label),
+                            stringResource(
+                                R.string.pool_metrics_hits_misses,
+                                ui.runtime.workerWsPreconnectHits,
+                                ui.runtime.workerWsPreconnectMisses,
+                            ),
+                        )
+                        MetricLine(
+                            stringResource(R.string.pool_metrics_idle_label),
+                            ui.runtime.workerWsPreconnectIdle.toString(),
+                        )
+                        MetricLine(
+                            stringResource(R.string.pool_metrics_errors_label),
+                            ui.runtime.workerWsPreconnectErrors.toString(),
+                        )
+                    } else {
+                        MetricLine(
+                            stringResource(R.string.pool_metrics_status_label),
+                            stringResource(R.string.worker_ws_preconnect_disabled),
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                     Text(
                         stringResource(R.string.cf_pool_metrics_title),

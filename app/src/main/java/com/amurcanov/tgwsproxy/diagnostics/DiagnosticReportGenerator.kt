@@ -69,6 +69,12 @@ object DiagnosticReportGenerator {
             appendLine("[Worker Pool]")
             formatWorkerPoolSection(input)?.let { append(it) }
             appendLine()
+            appendLine("[Worker Failover]")
+            formatWorkerFailoverSection(input)?.let { append(it) } ?: appendLine("Worker failover not active.")
+            appendLine()
+            appendLine("[Worker Selection]")
+            formatWorkerSelectionSection(input)?.let { append(it) } ?: appendLine("Worker selection not configured.")
+            appendLine()
             appendLine("[Route Probes]")
             if (probes.isEmpty()) {
                 appendLine("No probe results available.")
@@ -128,29 +134,127 @@ object DiagnosticReportGenerator {
         return DiagnosticReportSanitizer.sanitize(report)
     }
 
+    private fun formatWorkerFailoverSection(input: DiagnosticReportContext): String? {
+        val runtime = input.enrichedRuntimeRoute ?: return null
+        if (runtime.selectedWorkerId.isBlank() && runtime.currentWorkerId.isBlank()) {
+            return null
+        }
+        val snapshot = input.workerPoolSnapshot
+        return buildString {
+            appendLine(
+                "Selected worker: ${runtime.selectedWorkerName.ifBlank { runtime.selectedWorkerId.ifBlank { "NONE" } }}",
+            )
+            appendLine(
+                "Runtime worker: ${runtime.currentWorkerName.ifBlank { runtime.currentWorkerId.ifBlank { "NONE" } }}",
+            )
+            appendLine(
+                "Last successful worker: ${runtime.lastSuccessfulWorkerName.ifBlank { runtime.lastSuccessfulWorkerId.ifBlank { "NONE" } }}",
+            )
+            appendLine(
+                "Last failed worker: ${runtime.lastFailedWorkerName.ifBlank { runtime.lastFailedWorkerId.ifBlank { "NONE" } }}",
+            )
+            appendLine("Failover active: ${DiagnosticReportSanitizer.yesNo(runtime.workerFailoverActive)}")
+            appendLine("Failover reason: ${runtime.workerFailoverReason.ifBlank { "NONE" }}")
+            appendLine("Attempts: ${runtime.workerFailoverAttemptCount}")
+            snapshot?.workers?.let { workers ->
+                appendLine("Enabled workers: ${workers.count { it.enabled }}")
+                appendLine("Candidates skipped by backoff: ${runtime.workerFailoverSkippedBackoff}")
+                workers.forEach { worker ->
+                    val attempted = worker.id == runtime.lastFailedWorkerId ||
+                        worker.id == runtime.lastSuccessfulWorkerId ||
+                        worker.id == runtime.currentWorkerId
+                    appendLine("- ${worker.name}:")
+                    appendLine("  enabled=${worker.enabled}")
+                    appendLine("  state=${worker.state.name}")
+                    appendLine("  failureCount=${worker.failureCount}")
+                    worker.lastErrorCode?.let { appendLine("  lastErrorCode=$it") }
+                    appendLine("  wasAttemptedInLastFailover=${DiagnosticReportSanitizer.yesNo(attempted)}")
+                    appendLine(
+                        "  maskedUrl=${WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun formatWorkerSelectionSection(input: DiagnosticReportContext): String? {
+        val preview = input.workerSelectionPreview ?: return null
+        val runtime = input.enrichedRuntimeRoute
+        return buildString {
+            appendLine("Strategy: ${preview.strategy.name}")
+            appendLine("Selection reason: ${preview.reason.wireValue}")
+            appendLine("Candidate count: ${preview.candidateCount}")
+            runtime?.let { route ->
+                appendLine(
+                    "Selected worker: ${route.selectedWorkerName.ifBlank { route.selectedWorkerId.ifBlank { "NONE" } }}",
+                )
+                appendLine(
+                    "Runtime worker: ${route.currentWorkerName.ifBlank { route.currentWorkerId.ifBlank { "NONE" } }}",
+                )
+            }
+            preview.roundRobinCursor?.let { appendLine("Round-robin cursor: $it") }
+            appendLine("Lowest latency max age: ${preview.lowestLatencyMaxAgeMs / 60_000} min")
+            preview.candidates.forEachIndexed { index, candidate ->
+                val latency = candidate.latencyMs?.let { "$it ms" } ?: "N/A"
+                appendLine("${index + 1}. ${candidate.workerName} — ${candidate.state.name}, $latency")
+            }
+        }
+    }
+
     private fun formatWorkerPoolSection(input: DiagnosticReportContext): String? {
         val snapshot = input.workerPoolSnapshot ?: return null
+        val workers = snapshot.workers
         return buildString {
             appendLine("Enabled: ${DiagnosticReportSanitizer.yesNo(snapshot.enabled)}")
-            appendLine("Workers count: ${snapshot.workers.size}")
-            appendLine(
-                "Selected worker: ${snapshot.selectedWorker?.name ?: "NONE"}",
-            )
-            appendLine("Enabled workers: ${snapshot.workers.count { it.enabled }}")
-            appendLine("Disabled workers: ${snapshot.workers.count { !it.enabled }}")
+            appendLine("Workers count: ${workers.size}")
+            appendLine("Selected worker: ${snapshot.selectedWorker?.name ?: "NONE"}")
+            snapshot.selectedWorker?.let { worker ->
+                appendLine("Selected worker state: ${worker.state.name}")
+                worker.latencyMs?.let { appendLine("Selected worker latency: ${it} ms") }
+            }
+            appendLine("Healthy workers count: ${workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.HEALTHY }}")
+            appendLine("Degraded workers count: ${workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEGRADED }}")
+            appendLine("Dead workers count: ${workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEAD }}")
+            appendLine("Disabled workers count: ${workers.count { !it.enabled }}")
+            appendLine("Worker Pool UI selected worker missing: ${DiagnosticReportSanitizer.yesNo(input.workerPoolUiSelectedWorkerMissing)}")
+            appendLine("Worker Pool UI no enabled workers: ${DiagnosticReportSanitizer.yesNo(input.workerPoolUiNoEnabledWorkers)}")
+            appendLine("Worker Pool UI invalid config: ${DiagnosticReportSanitizer.yesNo(input.workerPoolUiInvalidConfig)}")
+            input.workerHealthLastCheckAtMs?.let { at ->
+                val formatted = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.getDefault())
+                    .format(Date(at))
+                appendLine("Last health check time: $formatted")
+            }
             snapshot.selectedWorker?.let { worker ->
                 appendLine(
                     "Selected worker URL: ${WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)}",
                 )
             }
-            snapshot.workers.forEach { worker ->
+            workers.forEach { worker ->
+                appendLine("- ${worker.name}:")
+                appendLine("  enabled=${worker.enabled}")
+                appendLine("  state=${worker.state.name}")
+                worker.latencyMs?.let { appendLine("  latencyMs=$it") }
+                appendLine("  failureCount=${worker.failureCount}")
+                worker.lastSuccessAt?.let {
+                    appendLine("  lastSuccessAt=${formatReportTimestamp(it)}")
+                }
+                worker.lastFailureAt?.let {
+                    appendLine("  lastFailureAt=${formatReportTimestamp(it)}")
+                }
+                worker.lastErrorCode?.let { appendLine("  lastErrorCode=$it") }
+                worker.lastCheckedAt?.let {
+                    appendLine("  lastCheckedAt=${formatReportTimestamp(it)}")
+                }
                 appendLine(
-                    "- ${worker.name}: enabled=${worker.enabled}, state=${worker.state.name}, url=${
-                        WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)
-                    }",
+                    "  maskedUrl=${WorkerUrlSanitizer.maskForDisplay(worker.url, input.maskDomains)}",
                 )
             }
         }
+    }
+
+    private fun formatReportTimestamp(epochMs: Long): String {
+        return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.getDefault())
+            .format(Date(epochMs))
     }
 
     private fun networkTypeLabel(context: android.content.Context, input: DiagnosticReportContext): String {

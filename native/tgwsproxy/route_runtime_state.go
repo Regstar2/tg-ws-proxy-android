@@ -31,12 +31,14 @@ func initRouteRuntimeState() {
 	rtCurrentWorkerDomain.Store(empty)
 	rtNetworkType.Store(empty)
 	rtLastUpdatedAtMs.Store(0)
+	initWorkerFailoverRuntimeState()
 }
 
 func syncRouteRuntimeFromSettings() {
 	settings := getRuntimeSettings()
 	rtConfiguredMode.Store(string(settings.Mode))
 	rtCurrentWorkerDomain.Store(settings.Worker.Domain)
+	syncWorkerFailoverFromSettings(settings.Worker.Failover)
 	net := settings.NetworkProfileType
 	if net == "" {
 		net = settings.NetworkProfileID

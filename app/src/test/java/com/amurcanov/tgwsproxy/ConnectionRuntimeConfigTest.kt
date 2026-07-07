@@ -6,6 +6,46 @@ import org.junit.Test
 
 class ConnectionRuntimeConfigTest {
     @Test
+    fun buildRuntimeTokens_experimentalMediaFixRequiresExplicitFlag() {
+        val raw = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = listOf("4:149.154.167.220"),
+            mode = ConnectionMode.WorkerFirst,
+            cfProxyEnabled = true,
+            cfProxyPriority = false,
+            cfProxyOnly = false,
+            cfDomain = "",
+            workerEnabled = true,
+            workerDomain = "example.username.workers.dev",
+            workerDestinationMode = com.amurcanov.tgwsproxy.worker.WorkerDestinationMode.FLOWSEAL_MEDIA_DC4_FIX,
+            flowsealMediaFixEnabled = false,
+        )
+        assertTrue(raw.contains("@worker_destination_mode=flowseal_media_dc4_fix"))
+        assertTrue(raw.contains("@flowseal_media_fix_enabled=0"))
+    }
+
+    @Test
+    fun buildRuntimeTokens_includesFlowsealDestinationMode() {
+        val raw = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = listOf("4:149.154.167.220"),
+            mode = ConnectionMode.WorkerFirst,
+            cfProxyEnabled = true,
+            cfProxyPriority = false,
+            cfProxyOnly = false,
+            cfDomain = "",
+            workerEnabled = true,
+            workerDomain = "example.username.workers.dev",
+            workerDestinationMode = com.amurcanov.tgwsproxy.worker.WorkerDestinationMode.FLOWSEAL_MEDIA_DC4_FIX,
+            flowsealMediaFixEnabled = true,
+            flowsealMediaFixDc = 4,
+            flowsealMediaFixIp = "149.154.167.220",
+        )
+        assertTrue(raw.contains("@worker_destination_mode=flowseal_media_dc4_fix"))
+        assertTrue(raw.contains("@flowseal_media_fix_enabled=1"))
+        assertTrue(raw.contains("@flowseal_media_fix_dc=4"))
+        assertTrue(raw.contains("@flowseal_media_fix_ip=149.154.167.220"))
+    }
+
+    @Test
     fun buildRuntimeTokens_workerFirst() {
         val raw = ConnectionRuntimeConfig.buildRuntimeTokens(
             dcEntries = listOf("2:149.154.167.220"),

@@ -1,6 +1,10 @@
 package tgwsroute
 
-import "testing"
+import (
+	"net/url"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeWorkerDomain(t *testing.T) {
 	cases := []struct {
@@ -20,15 +24,86 @@ func TestNormalizeWorkerDomain(t *testing.T) {
 }
 
 func TestBuildWorkerWSURL(t *testing.T) {
-	got := BuildWorkerWSURL("example.username.workers.dev", 2, "149.154.167.50", false)
-	want := "wss://example.username.workers.dev/apiws?dst=149.154.167.50&dc=2&media=0"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
+	got := BuildWorkerWSURL("example.username.workers.dev", 2, "149.154.167.50", false, "")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
 	}
-	gotMedia := BuildWorkerWSURL("example.username.workers.dev", 2, "149.154.167.50", true)
-	wantMedia := "wss://example.username.workers.dev/apiws?dst=149.154.167.50&dc=2&media=1"
-	if gotMedia != wantMedia {
-		t.Fatalf("media got %q want %q", gotMedia, wantMedia)
+	q := u.Query()
+	if u.Scheme != "wss" || u.Host != "example.username.workers.dev" || u.Path != "/apiws" {
+		t.Fatalf("unexpected url parts: %s", got)
+	}
+	if q.Get("dst") != "149.154.167.50" || q.Get("dc") != "2" || q.Get("media") != "0" {
+		t.Fatalf("query=%v want dst=149.154.167.50 dc=2 media=0", q)
+	}
+	if q.Get("sid") != "" {
+		t.Fatalf("sid should be omitted when empty, got %q", q.Get("sid"))
+	}
+
+	gotWithSid := BuildWorkerWSURL("example.username.workers.dev", 2, "149.154.167.50", false, "a1b2c3d4")
+	uSid, err := url.Parse(gotWithSid)
+	if err != nil {
+		t.Fatalf("parse sid url: %v", err)
+	}
+	if uSid.Query().Get("sid") != "a1b2c3d4" {
+		t.Fatalf("sid query=%v", uSid.Query())
+	}
+
+	gotMedia := BuildWorkerWSURL("example.username.workers.dev", 2, "149.154.167.50", true, "")
+	uMedia, err := url.Parse(gotMedia)
+	if err != nil {
+		t.Fatalf("parse media url: %v", err)
+	}
+	if uMedia.Query().Get("media") != "1" {
+		t.Fatalf("media query=%v", uMedia.Query())
+	}
+}
+
+func TestCfWorkerTransparentWorkerURL_PreservesParsedDstDC2(t *testing.T) {
+	info, ok := LookupTelegramDC("149.154.167.41")
+	if !ok || info.DC != 2 {
+		t.Fatalf("expected mapped_dc=2 for 149.154.167.41, got %+v ok=%t", info, ok)
+	}
+
+	resolved := BuildCfWorkerTransparentWorkerURL("example.workers.dev", 2, false, true, "149.154.167.41")
+	if !resolved.OK {
+		t.Fatalf("expected ok, got %s", resolved.FailReason)
+	}
+	if resolved.WorkerDst != "149.154.167.41" {
+		t.Fatalf("workerDst=%q want 149.154.167.41", resolved.WorkerDst)
+	}
+	if !strings.Contains(resolved.WorkerURL, "dst=149.154.167.41") {
+		t.Fatalf("workerURL missing parsed dst: %s", resolved.WorkerURL)
+	}
+	if !strings.Contains(resolved.WorkerURL, "dc=2") {
+		t.Fatalf("workerURL missing dc=2: %s", resolved.WorkerURL)
+	}
+	if strings.Contains(resolved.WorkerURL, "dst=149.154.167.51") {
+		t.Fatalf("workerURL must not contain canonical DC2 IP: %s", resolved.WorkerURL)
+	}
+}
+
+func TestCfWorkerTransparentWorkerURL_PreservesParsedDstDC1(t *testing.T) {
+	info, ok := LookupTelegramDC("149.154.175.53")
+	if !ok || info.DC != 1 {
+		t.Fatalf("expected mapped_dc=1 for 149.154.175.53, got %+v ok=%t", info, ok)
+	}
+
+	resolved := BuildCfWorkerTransparentWorkerURL("example.workers.dev", 1, false, true, "149.154.175.53")
+	if !resolved.OK {
+		t.Fatalf("expected ok, got %s", resolved.FailReason)
+	}
+	if resolved.WorkerDst != "149.154.175.53" {
+		t.Fatalf("workerDst=%q want 149.154.175.53", resolved.WorkerDst)
+	}
+	if !strings.Contains(resolved.WorkerURL, "dst=149.154.175.53") {
+		t.Fatalf("workerURL missing parsed dst: %s", resolved.WorkerURL)
+	}
+	if !strings.Contains(resolved.WorkerURL, "dc=1") {
+		t.Fatalf("workerURL missing dc=1: %s", resolved.WorkerURL)
+	}
+	if strings.Contains(resolved.WorkerURL, "dst=149.154.175.50") {
+		t.Fatalf("workerURL must not contain canonical DC1 IP: %s", resolved.WorkerURL)
 	}
 }
 

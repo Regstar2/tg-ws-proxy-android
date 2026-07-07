@@ -16,15 +16,27 @@ data class ProxyRuntimeMetrics(
     val bytesDown: Long = 0,
     val lastLatencyMs: Long = 0,
     val lastError: String = "",
+    val workerEndpointPoolHits: Int = 0,
+    val workerEndpointPoolMisses: Int = 0,
+    val workerWsPreconnectEnabled: Boolean = false,
+    val workerWsPreconnectHits: Int = 0,
+    val workerWsPreconnectMisses: Int = 0,
+    val workerWsPreconnectIdle: Int = 0,
+    val workerWsPreconnectErrors: Int = 0,
+    /** @deprecated Legacy alias of [workerWsPreconnectHits]; prefer [workerEndpointPoolHits] for endpoint selection. */
     val workerPoolHits: Int = 0,
+    /** @deprecated Legacy alias of [workerWsPreconnectMisses]. */
     val workerPoolMisses: Int = 0,
+    /** @deprecated Legacy alias of [workerWsPreconnectIdle]. */
     val workerPoolIdle: Int = 0,
+    /** @deprecated Legacy alias of [workerWsPreconnectErrors]. */
     val workerPoolErrors: Int = 0,
     val cfPoolHits: Int = 0,
     val cfPoolMisses: Int = 0,
     val cfPoolIdle: Int = 0,
     val cfPoolErrors: Int = 0,
     val routeRuntime: RouteRuntimeState = RouteRuntimeState(),
+    val destinationModeStats: List<DestinationModeStatsEntry> = emptyList(),
     val updatedAtMs: Long = System.currentTimeMillis(),
 ) {
     val currentRouteKind: String
@@ -52,6 +64,13 @@ data class ProxyRuntimeMetrics(
             }
             val activeRoute = map["active_route_kind"].orEmpty().ifBlank { map["route"].orEmpty() }
             val routeRuntime = RouteRuntimeState.fromStatusMap(map)
+            val workerEndpointHits = map.safeInt("worker_endpoint_pool_hits")
+            val workerEndpointMisses = map.safeInt("worker_endpoint_pool_misses")
+            val wsPreconnectEnabled = map["worker_ws_preconnect_enabled"] == "1"
+            val wsPreconnectHits = map.safeInt("worker_ws_preconnect_hits", "worker_pool_hits")
+            val wsPreconnectMisses = map.safeInt("worker_ws_preconnect_misses", "worker_pool_misses")
+            val wsPreconnectIdle = map.safeInt("worker_ws_preconnect_idle", "worker_pool_idle")
+            val wsPreconnectErrors = map.safeInt("worker_ws_preconnect_refill_errors", "worker_pool_refill_errors", "worker_pool_err")
             return ProxyRuntimeMetrics(
                 running = map["running"] == "1",
                 mode = map["mode"].orEmpty(),
@@ -66,15 +85,23 @@ data class ProxyRuntimeMetrics(
                 bytesDown = map["bytes_down"]?.toLongOrNull() ?: 0,
                 lastLatencyMs = map["latency_ms"]?.toLongOrNull() ?: 0,
                 lastError = map["last_error"].orEmpty(),
-                workerPoolHits = map.safeInt("worker_pool_hits"),
-                workerPoolMisses = map.safeInt("worker_pool_misses"),
-                workerPoolIdle = map.safeInt("worker_pool_idle"),
-                workerPoolErrors = map.safeInt("worker_pool_refill_errors", "worker_pool_err"),
+                workerEndpointPoolHits = workerEndpointHits,
+                workerEndpointPoolMisses = workerEndpointMisses,
+                workerWsPreconnectEnabled = wsPreconnectEnabled,
+                workerWsPreconnectHits = wsPreconnectHits,
+                workerWsPreconnectMisses = wsPreconnectMisses,
+                workerWsPreconnectIdle = wsPreconnectIdle,
+                workerWsPreconnectErrors = wsPreconnectErrors,
+                workerPoolHits = wsPreconnectHits,
+                workerPoolMisses = wsPreconnectMisses,
+                workerPoolIdle = wsPreconnectIdle,
+                workerPoolErrors = wsPreconnectErrors,
                 cfPoolHits = map.safeInt("cf_pool_hits"),
                 cfPoolMisses = map.safeInt("cf_pool_misses"),
                 cfPoolIdle = map.safeInt("cf_pool_idle"),
                 cfPoolErrors = map.safeInt("cf_pool_refill_errors", "cf_pool_err"),
                 routeRuntime = routeRuntime,
+                destinationModeStats = DestinationModeStatsParser.parse(map["destination_mode_stats"]),
             )
         }
 

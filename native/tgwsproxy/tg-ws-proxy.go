@@ -31,6 +31,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
@@ -50,14 +51,15 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	defaultPort          = 1081
-	tcpNodelay           = true
-	defaultRecvBuf       = 256 * 1024
-	defaultSendBuf       = 256 * 1024
-	defaultPoolSz        = 4
-	defaultCfProxyDomain = ""
-	wsPoolMaxAge         = 60.0
-	wsBridgeIdle         = 120.0
+	defaultPort           = 1081
+	tcpNodelay            = true
+	defaultRecvBuf        = 256 * 1024
+	defaultSendBuf        = 256 * 1024
+	defaultPoolSz         = 4
+	defaultCfProxyDomain  = ""
+	wsPoolMaxAge          = 60.0
+	wsBridgeIdle          = 120.0
+	bridgeSlowOpThreshold = 750 * time.Millisecond
 
 	dcFailCooldown       = 30.0
 	wsFailTimeout        = 2.0
@@ -149,24 +151,26 @@ var (
 // ---------------------------------------------------------------------------
 
 type Stats struct {
-	connectionsTotal       atomic.Int64
-	connectionsWs          atomic.Int64
-	connectionsCfProxy     atomic.Int64
-	connectionsCfWorker    atomic.Int64
-	connectionsTcpFallback atomic.Int64
-	connectionsHttpReject  atomic.Int64
-	connectionsPassthrough atomic.Int64
-	wsErrors               atomic.Int64
-	bytesUp                atomic.Int64
-	bytesDown              atomic.Int64
-	poolHits               atomic.Int64
-	poolMisses             atomic.Int64
-	workerPoolHits         atomic.Int64
-	workerPoolMisses       atomic.Int64
-	workerPoolRefillErrors atomic.Int64
-	cfPoolHits             atomic.Int64
-	cfPoolMisses           atomic.Int64
-	cfPoolRefillErrors     atomic.Int64
+	connectionsTotal            atomic.Int64
+	connectionsWs               atomic.Int64
+	connectionsCfProxy          atomic.Int64
+	connectionsCfWorker         atomic.Int64
+	connectionsTcpFallback      atomic.Int64
+	connectionsHttpReject       atomic.Int64
+	connectionsPassthrough      atomic.Int64
+	wsErrors                    atomic.Int64
+	bytesUp                     atomic.Int64
+	bytesDown                   atomic.Int64
+	poolHits                    atomic.Int64
+	poolMisses                  atomic.Int64
+	workerEndpointPoolHits      atomic.Int64
+	workerEndpointPoolMisses    atomic.Int64
+	workerWsPreconnectHits      atomic.Int64
+	workerWsPreconnectMisses    atomic.Int64
+	workerWsPreconnectRefillErr atomic.Int64
+	cfPoolHits                  atomic.Int64
+	cfPoolMisses                atomic.Int64
+	cfPoolRefillErrors          atomic.Int64
 }
 
 func (s *Stats) Summary() string {
@@ -201,9 +205,11 @@ func (s *Stats) Reset() {
 	s.bytesDown.Store(0)
 	s.poolHits.Store(0)
 	s.poolMisses.Store(0)
-	s.workerPoolHits.Store(0)
-	s.workerPoolMisses.Store(0)
-	s.workerPoolRefillErrors.Store(0)
+	s.workerEndpointPoolHits.Store(0)
+	s.workerEndpointPoolMisses.Store(0)
+	s.workerWsPreconnectHits.Store(0)
+	s.workerWsPreconnectMisses.Store(0)
+	s.workerWsPreconnectRefillErr.Store(0)
 	s.cfPoolHits.Store(0)
 	s.cfPoolMisses.Store(0)
 	s.cfPoolRefillErrors.Store(0)
@@ -481,13 +487,13 @@ func fallbackTarget(dc int, dst string) string {
 	return dst
 }
 
-func runFallbackChain(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, dst string, port int, splitter *MsgSplitter, fallbackReason string) bool {
+func runFallbackChain(ctx context.Context, client net.Conn, session *initSession, label string, dst string, port int, fallbackReason string) bool {
 	settings := getRuntimeSettings()
-	routes := adaptiveRoutesForMode(settings.Mode, settings, true, dc, isMedia)
+	routes := adaptiveRoutesForMode(settings.Mode, settings, true, session.dc, session.isMedia)
 	if len(routes) > 0 && strings.TrimSpace(fallbackReason) != "" {
 		noteFallbackActivated(routes[0], fallbackReason)
 	}
-	return runRouteChain(ctx, client, init, label, dc, isMedia, dst, port, splitter, routes)
+	return runRouteChain(ctx, client, session, label, dst, port, routes)
 }
 
 func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSocket, string, resolvedIPs, error) {
@@ -646,6 +652,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 	if err != nil {
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
+	setSockOpts(rawConn)
 
 	tlsConn := tls.Client(rawConn, tlsCfg)
 	_ = tlsConn.SetDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
@@ -654,8 +661,6 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 		return nil, &wsStageError{Stage: "tls_handshake", Err: err}
 	}
 	_ = tlsConn.SetDeadline(time.Time{})
-
-	setSockOpts(tlsConn)
 
 	wsKeyBytes := make([]byte, 16)
 	_, _ = rand.Read(wsKeyBytes)
@@ -1365,14 +1370,83 @@ func (p *WsPool) CloseAll() {
 var wsPool = newWsPool()
 
 // ---------------------------------------------------------------------------
-// WorkerWsPool
+// WorkerWsPool — idle /apiws preconnect pool for cf_worker_ws.
 // ---------------------------------------------------------------------------
+
+var workerWsPreconnectEnabled = false
+
+const workerWsPreconnectMaxPerKey = 2
+
+func workerWsPreconnectTargetSize() int {
+	if poolSize <= 0 {
+		return 0
+	}
+	if poolSize < workerWsPreconnectMaxPerKey {
+		return poolSize
+	}
+	return workerWsPreconnectMaxPerKey
+}
 
 type WorkerPoolKey struct {
 	DC           int
 	WorkerDomain string
 	Dst          string
 	Media        bool
+}
+
+type workerWarmupTarget struct {
+	DC  int
+	Dst string
+}
+
+func workerWarmupDomains(settings runtimeSettings) []string {
+	candidates := settings.Worker.Failover.effectiveCandidates(settings.Worker.Domain)
+	if len(candidates) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		domain := NormalizeWorkerDomain(candidate.Domain)
+		if domain == "" {
+			continue
+		}
+		if _, ok := seen[domain]; ok {
+			continue
+		}
+		seen[domain] = struct{}{}
+		out = append(out, domain)
+	}
+	return out
+}
+
+func workerWarmupTargets(dcOptMap map[int]string) []workerWarmupTarget {
+	seen := make(map[string]struct{})
+	out := make([]workerWarmupTarget, 0, 10)
+	add := func(dc int, dst string) {
+		dst = strings.TrimSpace(dst)
+		if dc <= 0 || dst == "" {
+			return
+		}
+		key := fmt.Sprintf("%d|%s", dc, dst)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, workerWarmupTarget{DC: dc, Dst: dst})
+	}
+
+	for _, dc := range []int{1, 2, 3, 4, 5, 203} {
+		add(dc, telegramDCTargetIP(dc, ""))
+		if dcOptMap != nil {
+			add(dc, dcOptMap[dc])
+		}
+	}
+	for _, candidate := range tgwsroute.DC2WorkerCandidates {
+		add(2, candidate)
+	}
+	add(tgwsroute.DefaultFlowsealMediaFixDC, tgwsroute.DefaultFlowsealMediaFixIP)
+	return out
 }
 
 type workerPoolDialer interface {
@@ -1382,7 +1456,7 @@ type workerPoolDialer interface {
 type defaultWorkerPoolDialer struct{}
 
 func (defaultWorkerPoolDialer) DialWorker(key WorkerPoolKey) (*RawWebSocket, error) {
-	path := buildWorkerWSPath(key.DC, key.Dst, key.Media)
+	path := buildWorkerWSPath(key.DC, key.Dst, key.Media, "")
 	ws, err := wsConnect(key.WorkerDomain, key.WorkerDomain, path, 10)
 	if err == nil {
 		return ws, nil
@@ -1420,12 +1494,12 @@ func newWorkerWsPool(dialer workerPoolDialer) *WorkerWsPool {
 		refilling: make(map[WorkerPoolKey]bool),
 		dialer:    dialer,
 		now:       monoNow,
-		maxAge:    120.0,
+		maxAge:    100.0,
 	}
 }
 
 func (p *WorkerWsPool) Get(key WorkerPoolKey) *RawWebSocket {
-	if poolSize <= 0 || key.WorkerDomain == "" || key.Dst == "" {
+	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || key.WorkerDomain == "" || key.Dst == "" {
 		return nil
 	}
 
@@ -1445,18 +1519,18 @@ func (p *WorkerWsPool) Get(key WorkerPoolKey) *RawWebSocket {
 			continue
 		}
 
-		stats.workerPoolHits.Add(1)
+		stats.workerWsPreconnectHits.Add(1)
 		p.scheduleRefillLocked(key)
 		return entry.ws
 	}
 
-	stats.workerPoolMisses.Add(1)
+	stats.workerWsPreconnectMisses.Add(1)
 	p.scheduleRefillLocked(key)
 	return nil
 }
 
 func (p *WorkerWsPool) scheduleRefillLocked(key WorkerPoolKey) {
-	if poolSize <= 0 || p.refilling[key] {
+	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || p.refilling[key] {
 		return
 	}
 	p.refilling[key] = true
@@ -1471,7 +1545,7 @@ func (p *WorkerWsPool) refill(key WorkerPoolKey) {
 	}()
 
 	p.mu.Lock()
-	needed := poolSize - len(p.idle[key])
+	needed := workerWsPreconnectTargetSize() - len(p.idle[key])
 	p.mu.Unlock()
 	if needed <= 0 {
 		return
@@ -1480,7 +1554,7 @@ func (p *WorkerWsPool) refill(key WorkerPoolKey) {
 	for i := 0; i < needed; i++ {
 		ws, err := p.dialer.DialWorker(key)
 		if err != nil || ws == nil {
-			stats.workerPoolRefillErrors.Add(1)
+			stats.workerWsPreconnectRefillErr.Add(1)
 			continue
 		}
 		p.mu.Lock()
@@ -1489,30 +1563,35 @@ func (p *WorkerWsPool) refill(key WorkerPoolKey) {
 	}
 }
 
-func (p *WorkerWsPool) Warmup(dcOptMap map[int]string, workerDomain string) {
-	if poolSize <= 0 || workerDomain == "" {
+func (p *WorkerWsPool) Warmup(dcOptMap map[int]string, workerDomains []string) {
+	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || len(workerDomains) == 0 {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	started := 0
-	for _, dc := range []int{2, 4} {
-		dst := telegramDCTargetIP(dc, dcOptMap[dc])
-		if dst == "" {
+	for _, workerDomain := range workerDomains {
+		workerDomain = NormalizeWorkerDomain(workerDomain)
+		if workerDomain == "" {
 			continue
 		}
-		for _, media := range []bool{false, true} {
-			key := WorkerPoolKey{DC: dc, WorkerDomain: workerDomain, Dst: dst, Media: media}
+		for _, target := range workerWarmupTargets(dcOptMap) {
+			key := WorkerPoolKey{
+				DC:           target.DC,
+				WorkerDomain: workerDomain,
+				Dst:          target.Dst,
+				Media:        false,
+			}
 			p.scheduleRefillLocked(key)
 			started++
 		}
 	}
 	if started > 0 {
-		logInfo.Printf("Worker pool warmup scheduled for %d target(s)", started)
+		logInfo.Printf("Worker pool warmup scheduled for %d target(s) across %d worker(s)", started, len(workerDomains))
 	}
 }
 
-func (p *WorkerWsPool) Maintain(ctx context.Context, dcOptMap map[int]string, workerDomain string) {
+func (p *WorkerWsPool) Maintain(ctx context.Context, dcOptMap map[int]string, workerDomains []string) {
 	ticker := time.NewTicker(poolMaintainInterval * time.Second)
 	defer ticker.Stop()
 	for {
@@ -1520,12 +1599,12 @@ func (p *WorkerWsPool) Maintain(ctx context.Context, dcOptMap map[int]string, wo
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			p.maintainOnce(dcOptMap, workerDomain)
+			p.maintainOnce(dcOptMap, workerDomains)
 		}
 	}
 }
 
-func (p *WorkerWsPool) maintainOnce(dcOptMap map[int]string, workerDomain string) {
+func (p *WorkerWsPool) maintainOnce(dcOptMap map[int]string, workerDomains []string) {
 	now := p.now()
 	p.mu.Lock()
 	for key, bucket := range p.idle {
@@ -1540,7 +1619,7 @@ func (p *WorkerWsPool) maintainOnce(dcOptMap map[int]string, workerDomain string
 		p.idle[key] = fresh
 	}
 	p.mu.Unlock()
-	p.Warmup(dcOptMap, workerDomain)
+	p.Warmup(dcOptMap, workerDomains)
 }
 
 func (p *WorkerWsPool) IdleCount() int {
@@ -1617,8 +1696,27 @@ func socks5Reply(status byte) []byte {
 // ---------------------------------------------------------------------------
 
 type bridgeCloseSummary struct {
-	Reason  string
-	Primary bool
+	Reason      string
+	Primary     bool
+	UpBytes     int64
+	DownBytes   int64
+	UpPackets   int64
+	DownPackets int64
+}
+
+type bridgeWSMeta struct {
+	route              routeKind
+	workerHost         string
+	sessionID          string
+	configuredDestMode string
+	effectiveDestMode  string
+	originalParsedDst  string
+	workerDst          string
+	mappedDC           int
+	isMedia            bool
+	mediaFixApplied    bool
+	upTransform        func([]byte) []byte
+	downTransform      func([]byte) []byte
 }
 
 type bridgeCloseTracker struct {
@@ -1666,10 +1764,18 @@ func formatBridgeCloseReason(prefix string, err error) string {
 
 func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 	label string, dc int, dst string, port int, isMedia bool,
-	splitter *MsgSplitter) bridgeCloseSummary {
+	splitter *MsgSplitter, meta bridgeWSMeta) bridgeCloseSummary {
 
 	dcTag := fmt.Sprintf("DC%d%s", dc, mediaTag(isMedia))
 	dstTag := joinAddr(dst, port)
+	sessionIDForLog := strings.TrimSpace(meta.sessionID)
+	if sessionIDForLog == "" {
+		sessionIDForLog = "-"
+	}
+	routeLabelForLog := string(meta.route)
+	if routeLabelForLog == "" {
+		routeLabelForLog = string(routeDirectWS)
+	}
 
 	var upBytes, downBytes, upPkts, downPkts int64
 	startTime := time.Now()
@@ -1698,23 +1804,42 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 		buf := make([]byte, 65536)
 		firstPacket := true
 		for {
+			readStart := time.Now()
 			n, err := conn.Read(buf)
+			readWait := time.Since(readStart)
 			if n > 0 {
 				chunk := buf[:n]
 				stats.bytesUp.Add(int64(n))
 				upBytes += int64(n)
 				upPkts++
+				if readWait >= bridgeSlowOpThreshold {
+					logInfo.Printf("[%s] session_id=%s bridge_slow_op route=%s dir=client->ws op=client_read_wait duration_ms=%d bytes=%d packet=%d dst=%s",
+						label, sessionIDForLog, routeLabelForLog, readWait.Milliseconds(), n, upPkts, dstTag)
+				}
+				if meta.upTransform != nil {
+					chunk = meta.upTransform(chunk)
+				}
 
 				var sendErr error
+				partsCount := 1
+				sendStart := time.Now()
 				if splitter != nil {
 					parts := splitter.Split(chunk)
+					partsCount = len(parts)
 					if len(parts) > 1 {
+						logDebug.Printf("[%s] session_id=%s ws_split parts=%d bytes=%d route=%s",
+							label, strings.TrimSpace(meta.sessionID), len(parts), n, meta.route)
 						sendErr = ws.SendBatch(parts)
 					} else {
 						sendErr = ws.Send(parts[0])
 					}
 				} else {
 					sendErr = ws.Send(chunk)
+				}
+				sendDuration := time.Since(sendStart)
+				if sendDuration >= bridgeSlowOpThreshold {
+					logWarn.Printf("[%s] session_id=%s bridge_slow_op route=%s dir=client->ws op=ws_send duration_ms=%d bytes=%d parts=%d packet=%d dst=%s",
+						label, sessionIDForLog, routeLabelForLog, sendDuration.Milliseconds(), n, partsCount, upPkts, dstTag)
 				}
 				if sendErr != nil {
 					primary := closeTracker.Record(formatBridgeCloseReason("client_to_ws_write", sendErr), true)
@@ -1746,7 +1871,9 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 		defer cancel()
 		firstPacket := true
 		for {
+			recvStart := time.Now()
 			data, err := ws.Recv()
+			recvWait := time.Since(recvStart)
 			if err != nil || data == nil {
 				if err != nil {
 					primary := closeTracker.Record(formatBridgeCloseReason("ws_read", err), true)
@@ -1766,6 +1893,14 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 			stats.bytesDown.Add(int64(n))
 			downBytes += int64(n)
 			downPkts++
+			if meta.downTransform != nil {
+				data = meta.downTransform(data)
+			}
+			if recvWait >= bridgeSlowOpThreshold {
+				logInfo.Printf("[%s] session_id=%s bridge_slow_op route=%s dir=ws->client op=ws_read_wait duration_ms=%d bytes=%d packet=%d dst=%s",
+					label, sessionIDForLog, routeLabelForLog, recvWait.Milliseconds(), n, downPkts, dstTag)
+			}
+			writeStart := time.Now()
 			if _, err := conn.Write(data); err != nil {
 				primary := closeTracker.Record(formatBridgeCloseReason("ws_to_client_write", err), true)
 				if firstPacket && primary {
@@ -1777,22 +1912,75 @@ func bridgeWS(ctx context.Context, conn net.Conn, ws *RawWebSocket,
 				}
 				return
 			}
+			writeDuration := time.Since(writeStart)
+			if writeDuration >= bridgeSlowOpThreshold {
+				logWarn.Printf("[%s] session_id=%s bridge_slow_op route=%s dir=ws->client op=client_write duration_ms=%d bytes=%d packet=%d dst=%s",
+					label, sessionIDForLog, routeLabelForLog, writeDuration.Milliseconds(), n, downPkts, dstTag)
+			}
 			firstPacket = false
 		}
 	}()
 
 	wg.Wait()
 
-	summary := closeTracker.Summary()
+	tracked := closeTracker.Summary()
+	summary := bridgeCloseSummary{
+		Reason:      tracked.Reason,
+		Primary:     tracked.Primary,
+		UpBytes:     upBytes,
+		DownBytes:   downBytes,
+		UpPackets:   upPkts,
+		DownPackets: downPkts,
+	}
 	if summary.Reason == "" {
 		summary.Reason = "unknown"
 	}
-	elapsed := time.Since(startTime).Seconds()
-	logInfo.Printf("[%s] %s (%s) WS session closed: ^%s (%d pkts) v%s (%d pkts) in %.1fs reason=%s",
-		label, dcTag, dstTag,
+	durationMs := time.Since(startTime).Milliseconds()
+	routeLabel := string(meta.route)
+	if routeLabel == "" {
+		routeLabel = string(routeDirectWS)
+	}
+	workerHost := meta.workerHost
+	if workerHost == "" {
+		workerHost = "-"
+	}
+	sessionID := strings.TrimSpace(meta.sessionID)
+	if sessionID == "" {
+		sessionID = "-"
+	}
+	result := workerSessionResult(upBytes, downBytes)
+	logInfo.Printf("[%s] session_id=%s %s (%s) WS session closed route=%s worker_host=%s worker_session_result=%s ws_up_bytes=%d ws_up_packets=%d ws_down_bytes=%d ws_down_packets=%d duration_ms=%d close_reason=%s (^%s/%d pkts v%s/%d pkts)",
+		label, sessionID, dcTag, dstTag,
+		routeLabel, workerHost, result,
+		upBytes, upPkts, downBytes, downPkts,
+		durationMs, summary.String(),
 		humanBytes(upBytes), upPkts,
-		humanBytes(downBytes), downPkts,
-		elapsed, summary.String())
+		humanBytes(downBytes), downPkts)
+	if meta.effectiveDestMode != "" {
+		noteWorkerDestinationSession(workerDestinationSessionNote{
+			effectiveDestinationMode: meta.effectiveDestMode,
+			originalParsedDst:        meta.originalParsedDst,
+			workerDst:                meta.workerDst,
+			mappedDC:                 meta.mappedDC,
+			isMedia:                  meta.isMedia,
+			mediaFixApplied:          meta.mediaFixApplied,
+			upBytes:                  upBytes,
+			downBytes:                downBytes,
+			durationMs:               durationMs,
+			closeReason:              summary.String(),
+		})
+		noteWorkerDstSessionOutcome(workerDstSessionOutcome{
+			DC:              meta.mappedDC,
+			WorkerDst:       meta.workerDst,
+			DestinationMode: meta.effectiveDestMode,
+			SessionID:       sessionID,
+			Route:           meta.route,
+			IsMedia:         meta.isMedia,
+			UpBytes:         upBytes,
+			DownBytes:       downBytes,
+			DurationMs:      durationMs,
+		})
+	}
 	return summary
 }
 
@@ -1987,8 +2175,10 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	}
 	port := int(binary.BigEndian.Uint16(portBuf))
 
-	logDebug.Printf("[%s] SOCKS5 CONNECT raw_atyp=0x%02x raw_dst=%s parsed_dst=%s",
-		label, atyp, rawDst, joinAddr(dst, port))
+	workerSessionID := newWorkerSessionID()
+
+	logDebug.Printf("[%s] session_id=%s SOCKS5 CONNECT raw_atyp=0x%02x raw_dst=%s parsed_dst=%s",
+		label, workerSessionID, atyp, rawDst, joinAddr(dst, port))
 
 	settings := getRuntimeSettings()
 	cfg := settings.CF
@@ -2010,6 +2200,9 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	// -- Non-Telegram IP -> direct passthrough --
 	if !telegramLike {
 		stats.connectionsPassthrough.Add(1)
+		workerAllowed := !settings.PolicyPresent || settings.AllowWorker
+		logDebug.Printf("[%s] route_decision=passthrough reason=non_telegram_ip parsed_dst=%s raw_dst=%s mapped_dc=none worker_available=%t worker_allowed=%t worker_skip_reason=destination_not_telegram mode=%s policy_generation=%d",
+			label, joinAddr(dst, port), rawDst, settings.workerRouteAvailable(), workerAllowed, effectiveMode, settings.PolicyGen)
 		logDebug.Printf("[%s] passthrough raw_dst=%s parsed_dst=%s mapped_dc=none",
 			label, rawDst, joinAddr(dst, port))
 
@@ -2060,53 +2253,50 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// -- Extract DC ID --
-	dc, isMedia, dcOk := dcFromInit(init)
-	initPatched := false
+	// -- Resolve DC from init (read-only); route-specific init patching happens later --
+	session := newInitSession(init, dst, port, rawDst)
+	session.workerSessionID = workerSessionID
+	dc := session.dc
+	isMedia := session.isMedia
+	dcOk := session.dcOk
 	var isMediaPtr *bool
 	if dcOk {
 		isMediaPtr = &isMedia
-	}
-
-	// Android with useSecret=0 has random dc_id bytes - patch it.
-	if !dcOk {
-		if info, found := lookupTelegramDC(dst); found {
-			dc = info.DC
-			isMedia = info.Media
-			isMediaPtr = &isMedia
-			dcOk = true
-
-			dcOptMu.RLock()
-			_, hasDC := dcOpt[dc]
-			dcOptMu.RUnlock()
-
-			if hasDC || cfg.Only {
-				// dcFromInit treats negative dc_id as media and positive as non-media.
-				signedDC := dc
-				if isMedia {
-					signedDC = -dc
-				}
-				init = patchInitDC(init, signedDC)
-				logDebug.Printf("[%s] patched init fallback via ipToDC: dc=%d is_media=%t signed_dc=%d",
-					label, dc, isMedia, signedDC)
-				initPatched = true
-			}
-		}
 	}
 
 	dcOptMu.RLock()
 	_, dcConfigured := dcOpt[dc]
 	dcOptMu.RUnlock()
 
-	var splitter *MsgSplitter
-	if initPatched {
-		splitter, _ = newMsgSplitter(init)
-	}
-
 	if !dcOk {
-		logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d configured=%t -> TCP passthrough",
-			label, rawDst, joinAddr(dst, port), dc, dcConfigured)
-		logDebug.Printf("[%s] unknown DC%d for %s:%d -> TCP passthrough", label, dc, dst, port)
+		if tgwsroute.IsUnknownTelegramWithoutDCMapping(dst) {
+			reason := tgwsroute.FailTelegramIPv6UnknownDCNoMapping
+			if addr, err := netip.ParseAddr(dst); err == nil && addr.Is4() {
+				reason = "telegram_unknown_cdn_no_mapping"
+			}
+			logWarn.Printf("[%s] route_decision=blocked_or_failed reason=%s parsed_dst=%s raw_dst=%s",
+				label, reason, joinAddr(dst, port), rawDst)
+			tcpAllowed := !settings.PolicyPresent || settings.AllowTCP
+			if blocksDirectPassthrough(effectiveMode, dst, false) || !tcpAllowed {
+				_ = conn.Close()
+				return
+			}
+			logInfo.Printf("[%s] unknown DC for %s -> TCP passthrough (tcp_fallback allowed)", label, joinAddr(dst, port))
+			tcpFallback(ctx, conn, dst, port, session.original, label, 0, false)
+			return
+		}
+		workerAllowed := !settings.PolicyPresent || settings.AllowWorker
+		workerSkipReason := "dc_unresolved"
+		if !settings.workerRouteAvailable() {
+			workerSkipReason = "worker_route_unavailable"
+		} else if !workerAllowed {
+			workerSkipReason = "worker_disabled_by_policy"
+		}
+		logDebug.Printf("[%s] route_decision=passthrough reason=unknown_dc parsed_dst=%s raw_dst=%s mapped_dc=none worker_available=%t worker_allowed=%t worker_skip_reason=%s mode=%s policy_generation=%d blocks_passthrough=%t",
+			label, joinAddr(dst, port), rawDst, settings.workerRouteAvailable(), workerAllowed, workerSkipReason, effectiveMode, settings.PolicyGen, blocksDirectPassthrough(effectiveMode, dst, false))
+		logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=none configured=%t -> TCP passthrough",
+			label, rawDst, joinAddr(dst, port), dcConfigured)
+		logInfo.Printf("[%s] unknown DC for %s -> TCP passthrough", label, joinAddr(dst, port))
 		if blocksDirectPassthrough(effectiveMode, dst, false) {
 			if atyp == 4 {
 				logWarn.Printf("[%s] telegram IPv6 destination is not mapped, mode=%s blocks direct passthrough dst=%s",
@@ -2118,7 +2308,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			_ = conn.Close()
 			return
 		}
-		tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
+		tcpFallback(ctx, conn, dst, port, session.original, label, dc, isMedia)
 		return
 	}
 
@@ -2137,7 +2327,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			label, rawDst, joinAddr(dst, port), dc)
 		logInfo.Printf("[%s] DC%d%s not in config -> fallback",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "dc_not_configured")
+		runFallbackChain(ctx, conn, session, label, dst, port, "dc_not_configured")
 		return
 	}
 
@@ -2145,7 +2335,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if settings.PolicyPresent && !settings.AllowDirect {
 		logInfo.Printf("[%s] DC%d%s direct_ws disabled by policy -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "direct_disabled_by_policy")
+		runFallbackChain(ctx, conn, session, label, dst, port, "direct_disabled_by_policy")
 		return
 	}
 
@@ -2157,21 +2347,21 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if blacklisted {
 		logInfo.Printf("[%s] DC%d%s fallback reason=ws_blacklisted -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "ws_blacklisted")
+		runFallbackChain(ctx, conn, session, label, dst, port, "ws_blacklisted")
 		return
 	}
 
 	if settings.Mode == modeCFOnly || settings.Mode == modeWorkerOnly || cfg.Only {
 		logInfo.Printf("[%s] DC%d%s fallback reason=restricted_mode mode=%s -> route chain",
 			label, dc, mTag, settings.Mode)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "restricted_mode")
+		runFallbackChain(ctx, conn, session, label, dst, port, "restricted_mode")
 		return
 	}
 
 	if pre := primaryRoutesBeforeDirectWS(settings.Mode, settings); len(pre) > 0 {
 		logInfo.Printf("[%s] DC%d%s trying primary routes before direct WS mode=%s",
 			label, dc, mTag, settings.Mode)
-		if runRouteChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, pre) {
+		if runRouteChain(ctx, conn, session, label, dst, port, pre) {
 			return
 		}
 		noteFallbackActivated(routeDirectWS, "primary_routes_exhausted")
@@ -2180,7 +2370,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	if shouldSkipDirectWSAdaptive(dcKey, settings.Mode) {
 		logInfo.Printf("[%s] DC%d%s skipping direct WS (mode=%s cooldown/active)",
 			label, dc, mTag, settings.Mode)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "direct_ws_cooldown")
+		runFallbackChain(ctx, conn, session, label, dst, port, "direct_ws_cooldown")
 		return
 	}
 
@@ -2320,7 +2510,7 @@ func handleClient(ctx context.Context, conn net.Conn) {
 		noteRouteConnectFailed(routeDirectWS, "ws_unavailable")
 		logInfo.Printf("[%s] DC%d%s fallback reason=ws_unavailable -> fallback chain",
 			label, dc, mTag)
-		runFallbackChain(ctx, conn, init, label, dc, isMedia, dst, port, splitter, "ws_unavailable")
+		runFallbackChain(ctx, conn, session, label, dst, port, "ws_unavailable")
 		return
 	}
 
@@ -2334,17 +2524,19 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	noteActiveRoute(routeDirectWS)
 
 	// Send init packet
-	if err := ws.Send(init); err != nil {
+	routeInit, splitter := session.prepareForRoute(routeDirectWS)
+	if err := ws.Send(routeInit); err != nil {
 		logWarn.Printf("[%s] DC%d%s first client->ws write failed for %s: %v",
 			label, dc, mTag, joinAddr(dst, port), err)
 		logDebug.Printf("[%s] reconnecting via TCP fallback (WS broken): %v", label, err)
 		ws.Close()
-		tcpFallback(ctx, conn, dst, port, init, label, dc, isMedia)
+		fallbackInit, _ := session.prepareForRoute(routeTCPFallback)
+		tcpFallback(ctx, conn, dst, port, fallbackInit, label, dc, isMedia)
 		return
 	}
 
 	// Bidirectional bridge
-	summary := bridgeWS(ctx, conn, ws, label, dc, dst, port, isMedia, splitter)
+	summary := bridgeWS(ctx, conn, ws, label, dc, dst, port, isMedia, splitter, bridgeWSMeta{route: routeDirectWS})
 	recordAdaptiveSessionSuccess(routeDirectWS, dc, isMedia, 0, summary.String(), settings)
 }
 
@@ -2432,17 +2624,14 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		// Periodic pool maintenance
 		go wsPool.Maintain(srvCtx, dcOptMap)
 	}
-	workerWarmup := false
-	if settings.PolicyPresent {
-		workerWarmup = settings.AllowWorker && settings.Worker.Enabled && settings.Worker.Domain != "" && poolSize > 0
+	workerDomains := workerWarmupDomains(settings)
+	if settings.workerRouteAvailable() && workerWsPreconnectEnabled && len(workerDomains) > 0 {
+		workerPool.Warmup(dcOptMap, workerDomains)
+		go workerPool.Maintain(srvCtx, dcOptMap, workerDomains)
+		logInfo.Printf("  Worker WS preconnect enabled domains=%d", len(workerDomains))
 	} else {
-		workerWarmup = settings.workerRouteAvailable() && poolSize > 0
-	}
-	if workerWarmup {
-		workerPool.Warmup(dcOptMap, settings.Worker.Domain)
-		go workerPool.Maintain(srvCtx, dcOptMap, settings.Worker.Domain)
-	} else {
-		logInfo.Printf("  Worker pool warmup skipped (worker disabled or unavailable)")
+		logInfo.Printf("  Worker WS preconnect skipped enabled=%t route_available=%t domains=%d",
+			workerWsPreconnectEnabled, settings.workerRouteAvailable(), len(workerDomains))
 	}
 
 	// Track active connections for graceful shutdown
@@ -2530,7 +2719,12 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 		Mode: "",
 		CF:   cfg,
 		Worker: workerConfig{
-			Enabled: false,
+			Enabled:         false,
+			DestinationMode: tgwsroute.WorkerDestinationPreserveOriginalDst,
+			MediaFix: flowsealMediaFixConfig{
+				DC: tgwsroute.DefaultFlowsealMediaFixDC,
+				IP: tgwsroute.DefaultFlowsealMediaFixIP,
+			},
 		},
 	}
 
@@ -2585,6 +2779,40 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
 					settings.Worker.Enabled = true
 				}
+			case "worker_failover_enabled":
+				settings.Worker.Failover.Enabled = parseBoolValue(val)
+			case "worker_selected_id":
+				settings.Worker.Failover.SelectedID = strings.TrimSpace(val)
+			case "worker_failover_max_attempts":
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n > 0 {
+					settings.Worker.Failover.MaxAttempts = n
+				}
+			case "worker_failover_candidates":
+				settings.Worker.Failover.Candidates = parseWorkerFailoverCandidates(val)
+			case "worker_failover_skipped_backoff":
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {
+					settings.Worker.Failover.SkippedBackoff = n
+				}
+			case "worker_selection_strategy":
+				settings.Worker.Failover.SelectionStrategy = strings.TrimSpace(val)
+			case "worker_selection_reason":
+				settings.Worker.Failover.SelectionReason = strings.TrimSpace(val)
+			case "worker_candidate_count":
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {
+					settings.Worker.Failover.CandidateCount = n
+				}
+			case "worker_round_robin_cursor":
+				settings.Worker.Failover.RoundRobinCursor = strings.TrimSpace(val)
+			case "worker_destination_mode":
+				settings.Worker.DestinationMode = strings.TrimSpace(val)
+			case "flowseal_media_fix_enabled":
+				settings.Worker.MediaFix.Enabled = parseBoolValue(val)
+			case "flowseal_media_fix_dc":
+				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n > 0 {
+					settings.Worker.MediaFix.DC = n
+				}
+			case "flowseal_media_fix_ip":
+				settings.Worker.MediaFix.IP = strings.TrimSpace(val)
 			case "network_profile_id":
 				settings.NetworkProfileID = val
 			case "network_profile_type":
@@ -2633,6 +2861,13 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 	}
 	if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
 		settings.Worker.Enabled = true
+	}
+
+	if settings.Worker.MediaFix.DC <= 0 {
+		settings.Worker.MediaFix.DC = tgwsroute.DefaultFlowsealMediaFixDC
+	}
+	if strings.TrimSpace(settings.Worker.MediaFix.IP) == "" {
+		settings.Worker.MediaFix.IP = tgwsroute.DefaultFlowsealMediaFixIP
 	}
 
 	// Enforce policy as absolute filter when present.
@@ -2727,6 +2962,7 @@ func StopProxy() C.int {
 
 	wsPool.CloseAll()
 	workerPool.CloseAll()
+	resetWorkerRouteCooldowns()
 	resetProxyRouteDisplayState()
 
 	return 0

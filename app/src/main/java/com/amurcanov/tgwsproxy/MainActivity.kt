@@ -58,13 +58,24 @@ import com.amurcanov.tgwsproxy.diagnostics.DiagnosticReportEvent
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticReportUiContext
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsScreen
 import com.amurcanov.tgwsproxy.diagnostics.DiagnosticsViewModel
+import com.amurcanov.tgwsproxy.diagnostics.RuntimeRouteUiModel
 import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
+import com.amurcanov.tgwsproxy.worker.FlowsealDcPreset
+import com.amurcanov.tgwsproxy.worker.DcIpTexts
+import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
 import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
+import com.amurcanov.tgwsproxy.worker.WorkerFailoverConfigBuilder
+import com.amurcanov.tgwsproxy.worker.WorkerRuntimeFailureRecorder
+import com.amurcanov.tgwsproxy.worker.WorkerHealthRepository
 import com.amurcanov.tgwsproxy.worker.WorkerPoolMigration
 import com.amurcanov.tgwsproxy.worker.WorkerPoolRepository
 import com.amurcanov.tgwsproxy.worker.WorkerRouteResolver
 import com.amurcanov.tgwsproxy.worker.WorkerRuntimeTruth
+import com.amurcanov.tgwsproxy.worker.WorkerPoolUiInput
+import com.amurcanov.tgwsproxy.worker.WorkerPoolUiLogger
+import com.amurcanov.tgwsproxy.worker.WorkerPoolUiState
+import com.amurcanov.tgwsproxy.worker.WorkerPoolUiStateMapper
 import com.amurcanov.tgwsproxy.worker.WorkerPoolOperationException
 import com.amurcanov.tgwsproxy.worker.WorkerPoolError
 import com.amurcanov.tgwsproxy.worker.WorkerValidationError
@@ -275,6 +286,12 @@ private fun ProxyScreen(
     val workerPoolRepository = remember {
         WorkerPoolRepository(SharedPreferencesWorkerPoolPersistence(prefs))
     }
+    val workerHealthRepository = remember(workerPoolRepository) {
+        WorkerHealthRepository(workerPoolRepository)
+    }
+    val workerRuntimeFailureRecorder = remember(workerPoolRepository) {
+        WorkerRuntimeFailureRecorder(workerPoolRepository)
+    }
 
     LaunchedEffect(Unit) {
         RouteDefaultsMigration.applyIfNeeded(
@@ -304,10 +321,20 @@ private fun ProxyScreen(
         mutableStateOf(!prefs.getBoolean("onboarding_completed", false))
     }
     var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
-    var dc1Text by remember { mutableStateOf(prefs.getString("dc1", "149.154.167.220") ?: "149.154.167.220") }
-    var dc2Text by remember { mutableStateOf(prefs.getString("dc2", "149.154.167.220") ?: "149.154.167.220") }
-    var dc4Text by remember { mutableStateOf(prefs.getString("dc4", "149.154.167.220") ?: "149.154.167.220") }
-    var dc203Text by remember { mutableStateOf(prefs.getString("dc203", "149.154.167.220") ?: "149.154.167.220") }
+    var flowsealDcOnlyEnabled by remember {
+        mutableStateOf(prefs.getBoolean(FlowsealDcPreset.PREF_ENABLED, false))
+    }
+    val initialDcTexts = remember {
+        if (flowsealDcOnlyEnabled) {
+            FlowsealDcPreset.flowsealTexts()
+        } else {
+            FlowsealDcPreset.loadTexts(prefs)
+        }
+    }
+    var dc1Text by remember { mutableStateOf(initialDcTexts.dc1) }
+    var dc2Text by remember { mutableStateOf(initialDcTexts.dc2) }
+    var dc4Text by remember { mutableStateOf(initialDcTexts.dc4) }
+    var dc203Text by remember { mutableStateOf(initialDcTexts.dc203) }
     var portText by remember { mutableStateOf(prefs.getString("port", "1081") ?: "1081") }
     var selectedPoolSize by remember { mutableStateOf(prefs.getInt("pool", 4)) }
     var cfProxyEnabled by remember { mutableStateOf(prefs.getBoolean("cfproxy_enabled", true)) }
@@ -340,6 +367,28 @@ private fun ProxyScreen(
     }
     var workerEnabled by remember { mutableStateOf(prefs.getBoolean("worker_enabled", false)) }
     var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
+    var workerDestinationMode by remember {
+        mutableStateOf(WorkerDestinationMode.fromPref(prefs.getString(ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE, null)))
+    }
+    var flowsealMediaFixEnabled by remember {
+        mutableStateOf(prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_ENABLED, false))
+    }
+    var flowsealMediaFixDcText by remember {
+        mutableStateOf(
+            prefs.getInt(
+                ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_DC,
+                WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
+            ).toString(),
+        )
+    }
+    var flowsealMediaFixIpText by remember {
+        mutableStateOf(
+            prefs.getString(
+                ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_IP,
+                WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
+            ) ?: WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
+        )
+    }
     var workerPoolEnabled by remember {
         mutableStateOf(workerPoolRepository.getWorkerPoolConfig().enabled)
     }
@@ -349,6 +398,11 @@ private fun ProxyScreen(
     var workerPoolSelectedWorker by remember {
         mutableStateOf(workerPoolRepository.getSelectedWorker())
     }
+    var workerPoolSelectionStrategy by remember {
+        mutableStateOf(workerPoolRepository.getWorkerPoolConfig().selectionStrategy)
+    }
+    var checkingWorkerIds by remember { mutableStateOf(setOf<String>()) }
+    var isCheckingAllWorkers by remember { mutableStateOf(false) }
     var diagStatusText by remember { mutableStateOf(prefs.getString("diag_last_status", "") ?: "") }
     var isDiagRunning by remember { mutableStateOf(false) }
     var cfUpstreamState by remember { mutableStateOf(cfDomainListRepository.state()) }
@@ -422,17 +476,105 @@ private fun ProxyScreen(
         reconfigureStatus = status
     }
 
-    fun currentDcEntries(): List<String> = buildList {
-        if (dc1Text.isNotBlank()) add("1:${dc1Text.trim()}")
-        if (dc2Text.isNotBlank()) add("2:${dc2Text.trim()}")
-        if (dc4Text.isNotBlank()) add("4:${dc4Text.trim()}")
-        if (dc203Text.isNotBlank()) add("203:${dc203Text.trim()}")
+    fun currentDcEntries(): List<String> =
+        FlowsealDcPreset.dcEntries(
+            DcIpTexts(dc1Text, dc2Text, dc4Text, dc203Text),
+            flowsealDcOnlyEnabled,
+        )
+
+    fun applyDcTexts(texts: DcIpTexts) {
+        dc1Text = texts.dc1
+        dc2Text = texts.dc2
+        dc4Text = texts.dc4
+        dc203Text = texts.dc203
     }
 
     fun refreshWorkerPoolState() {
         workerPoolEnabled = workerPoolRepository.getWorkerPoolConfig().enabled
         workerPoolWorkers = workerPoolRepository.getWorkers()
         workerPoolSelectedWorker = workerPoolRepository.getSelectedWorker()
+        workerPoolSelectionStrategy = workerPoolRepository.getWorkerPoolConfig().selectionStrategy
+    }
+
+    fun runWorkerHealthCheck(workerId: String) {
+        if (checkingWorkerIds.contains(workerId)) return
+        checkingWorkerIds = checkingWorkerIds + workerId
+        coroutineScope.launch {
+            try {
+                workerHealthRepository.checkWorker(
+                    context = context,
+                    workerId = workerId,
+                    maskDomains = maskDomainsInReport,
+                    force = true,
+                )
+                refreshWorkerPoolState()
+            } catch (_: Exception) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.worker_health_check_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } finally {
+                checkingWorkerIds = checkingWorkerIds - workerId
+            }
+        }
+    }
+
+    fun runWorkerHealthCheckAll() {
+        if (isCheckingAllWorkers) return
+        val enabledCount = workerPoolWorkers.count { it.enabled }
+        if (enabledCount == 0) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.worker_health_no_enabled_workers),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        isCheckingAllWorkers = true
+        coroutineScope.launch {
+            try {
+                val summary = workerHealthRepository.checkAllEnabledWorkers(
+                    context = context,
+                    maskDomains = maskDomainsInReport,
+                    force = true,
+                )
+                refreshWorkerPoolState()
+                Toast.makeText(
+                    context,
+                    context.getString(
+                        R.string.worker_health_check_all_finished,
+                        summary.healthyCount,
+                        summary.degradedCount,
+                        summary.deadCount,
+                        summary.skippedCount,
+                    ),
+                    Toast.LENGTH_LONG,
+                ).show()
+            } catch (_: Exception) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.worker_health_check_failed),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } finally {
+                isCheckingAllWorkers = false
+            }
+        }
+    }
+
+    fun buildWorkerPoolHealthSummary(): com.amurcanov.tgwsproxy.diagnostics.WorkerPoolHealthSummaryUi {
+        val workers = workerPoolWorkers
+        return com.amurcanov.tgwsproxy.diagnostics.WorkerPoolHealthSummaryUi(
+            workersCount = workers.size,
+            healthyCount = workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.HEALTHY },
+            degradedCount = workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEGRADED },
+            deadCount = workers.count { it.enabled && it.state == com.amurcanov.tgwsproxy.worker.WorkerHealthState.DEAD },
+            disabledCount = workers.count { !it.enabled },
+            selectedWorkerState = workerPoolSelectedWorker?.state,
+            lastHealthCheckAtMs = workerHealthRepository.getLastAllCheckAtMs()
+                ?: workers.mapNotNull { it.lastCheckedAt }.maxOrNull(),
+        )
     }
 
     fun enrichedRuntimeRoute(): RouteRuntimeState {
@@ -441,6 +583,73 @@ private fun ProxyScreen(
             repository = workerPoolRepository,
             legacyWorkerDomain = workerDomainText,
             maskDomains = maskDomainsInReport,
+        )
+    }
+
+    fun buildWorkerFailoverSnapshot(): com.amurcanov.tgwsproxy.worker.WorkerFailoverRuntimeSnapshot {
+        return WorkerRuntimeTruth.buildFailoverSnapshot(
+            routeState = uiMetrics.runtime.routeRuntime,
+            repository = workerPoolRepository,
+            legacyWorkerDomain = workerDomainText,
+            maskDomains = maskDomainsInReport,
+        )
+    }
+
+    fun buildWorkerPoolUiInput(): WorkerPoolUiInput {
+        return WorkerPoolUiInput(
+            poolEnabled = workerPoolEnabled,
+            config = workerPoolRepository.getWorkerPoolConfig(),
+            workers = workerPoolWorkers,
+            selectedWorker = workerPoolSelectedWorker,
+            failoverSnapshot = if (workerPoolEnabled) buildWorkerFailoverSnapshot() else null,
+            routeState = enrichedRuntimeRoute(),
+            maskDomains = maskDomainsInReport,
+            lastHealthCheckAtMs = workerHealthRepository.getLastAllCheckAtMs()
+                ?: workerPoolWorkers.mapNotNull { it.lastCheckedAt }.maxOrNull(),
+            isProxyRunning = isRunning,
+            isDiagRunning = isDiagRunning,
+            checkingWorkerIds = checkingWorkerIds,
+            isCheckingAllWorkers = isCheckingAllWorkers,
+        )
+    }
+
+    fun buildWorkerPoolUiState(): WorkerPoolUiState {
+        return WorkerPoolUiStateMapper.map(buildWorkerPoolUiInput(), context)
+    }
+
+    fun buildWorkerPoolCompactUi(): com.amurcanov.tgwsproxy.worker.WorkerPoolCompactUiModel? {
+        return WorkerPoolUiStateMapper.mapCompact(buildWorkerPoolUiInput(), context)
+    }
+
+    fun buildWorkerSelectionSummary(): com.amurcanov.tgwsproxy.diagnostics.WorkerSelectionSummaryUi? {
+        if (!workerPoolEnabled) return null
+        val preview = workerPoolRepository.previewSelection()
+        val snapshot = buildWorkerFailoverSnapshot()
+        return com.amurcanov.tgwsproxy.diagnostics.WorkerSelectionSummaryUi(
+            strategy = preview.strategy,
+            selectionReason = preview.reason.wireValue,
+            candidateCount = preview.candidateCount,
+            candidateNames = preview.candidates.map { it.workerName.ifBlank { it.workerId } },
+            runtimeWorkerName = snapshot.runtimeWorkerName,
+            roundRobinCursor = preview.roundRobinCursor,
+            lowestLatencyMaxAgeMs = preview.lowestLatencyMaxAgeMs,
+        )
+    }
+
+    fun buildWorkerFailoverSummary(): com.amurcanov.tgwsproxy.diagnostics.WorkerFailoverSummaryUi? {
+        if (!workerPoolEnabled) return null
+        val snapshot = buildWorkerFailoverSnapshot()
+        val preview = workerPoolRepository.previewSelection()
+        return com.amurcanov.tgwsproxy.diagnostics.WorkerFailoverSummaryUi(
+            enabledWorkersCount = snapshot.enabledWorkersCount,
+            candidateCount = preview.candidateCount,
+            selectedWorkerName = snapshot.selectedWorkerName,
+            runtimeWorkerName = snapshot.runtimeWorkerName,
+            lastSuccessfulWorkerName = snapshot.lastSuccessfulWorkerName,
+            lastFailedWorkerName = snapshot.lastFailedWorkerName,
+            failoverReason = snapshot.failoverReason.wireValue,
+            failoverActive = snapshot.failoverActive,
+            attemptCount = snapshot.attemptCount,
         )
     }
 
@@ -458,6 +667,15 @@ private fun ProxyScreen(
             workerDomainProvider = {
                 WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText)
             },
+            workerFailoverPayloadProvider = {
+                WorkerFailoverConfigBuilder.build(workerPoolRepository)
+            },
+            workerDestinationModeProvider = { workerDestinationMode },
+            flowsealMediaFixEnabledProvider = { flowsealMediaFixEnabled },
+            flowsealMediaFixDcProvider = {
+                flowsealMediaFixDcText.toIntOrNull() ?: WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC
+            },
+            flowsealMediaFixIpProvider = { flowsealMediaFixIpText },
             dcEntriesProvider = { currentDcEntries() },
             poolSizeProvider = { selectedPoolSize },
             portProvider = { portText.toIntOrNull() },
@@ -609,6 +827,12 @@ private fun ProxyScreen(
             currentPage = ProxyScreenPage.Main
             activity.intent?.removeExtra(MainActivity.EXTRA_OPEN_STATUS)
         }
+    }
+
+    LaunchedEffect(uiMetrics.runtime.routeRuntime.lastUpdatedAtMs, uiMetrics.runtime.routeRuntime.lastFailedWorkerId, uiMetrics.runtime.routeRuntime.lastSuccessfulWorkerId) {
+        if (!isRunning) return@LaunchedEffect
+        workerRuntimeFailureRecorder.onRouteRuntimeUpdate(enrichedRuntimeRoute())
+        refreshWorkerPoolState()
     }
 
     LaunchedEffect(currentPage) {
@@ -851,6 +1075,7 @@ private fun ProxyScreen(
             @Suppress("DEPRECATION")
             packageInfo.versionCode
         }
+        val poolUiState = if (workerPoolEnabled) buildWorkerPoolUiState() else null
         return DiagnosticReportUiContext(
             versionName = packageInfo.versionName ?: "unknown",
             versionCode = versionCode,
@@ -862,7 +1087,16 @@ private fun ProxyScreen(
                 legacyWorkerDomain = workerDomainText,
                 maskDomains = maskDomainsInReport,
             ),
+            workerHealthLastCheckAtMs = workerHealthRepository.getLastAllCheckAtMs()
+                ?: workerPoolWorkers.mapNotNull { it.lastCheckedAt }.maxOrNull(),
+            workerSelectionPreview = if (workerPoolEnabled) workerPoolRepository.previewSelection() else null,
             enrichedRuntimeRoute = enrichedRuntimeRoute(),
+            workerPoolSelectedWorkerMissing = poolUiState?.configWarning ==
+                com.amurcanov.tgwsproxy.worker.WorkerPoolConfigWarning.SELECTED_NOT_FOUND,
+            workerPoolNoEnabledWorkers = poolUiState?.contentState ==
+                com.amurcanov.tgwsproxy.worker.WorkerPoolContentState.NO_ENABLED,
+            workerPoolInvalidConfig = poolUiState?.contentState ==
+                com.amurcanov.tgwsproxy.worker.WorkerPoolContentState.INVALID_CONFIG,
             cfProxyConfigured = manualCfDomains.isNotEmpty() || cfUpstreamState.domains.isNotEmpty(),
             maskDomains = maskDomainsInReport,
             fallbackEnabled = routePolicySnapshot.policy.allowFallback,
@@ -1240,6 +1474,16 @@ private fun ProxyScreen(
                                 },
                             ),
                             showMetrics = true,
+                            workerPoolCompact = buildWorkerPoolCompactUi(),
+                            onOpenWorkerPool = if (workerPoolEnabled) {
+                                {
+                                    currentPage = ProxyScreenPage.Settings
+                                    settingsPage = SettingsPage.CLOUDFLARE
+                                    cloudflareSettingsPage = CloudflareSettingsPage.WORKER_POOL
+                                }
+                            } else {
+                                null
+                            },
                         )
                     }
 
@@ -1301,7 +1545,9 @@ private fun ProxyScreen(
 
                 } else if (currentPage == ProxyScreenPage.Diagnostics) {
                     DiagnosticsScreen(
-                        state = diagnosticsScreenState,
+                        state = diagnosticsScreenState.copy(
+                            runtimeRoute = RuntimeRouteUiModel.from(enrichedRuntimeRoute()),
+                        ),
                         onCheckAll = ::runDiagnosticsAll,
                         onCheckDirect = ::runDiagnosticsDirect,
                         onCheckWorker = ::runDiagnosticsWorker,
@@ -1310,6 +1556,21 @@ private fun ProxyScreen(
                         onCheckTelegram = ::runDiagnosticsTelegram,
                         onCopyReport = ::runDiagnosticsCopyReport,
                         onShareReport = ::runDiagnosticsShareReport,
+                        workerPoolHealth = if (workerPoolEnabled) buildWorkerPoolHealthSummary() else null,
+                        isCheckingWorkerHealth = isCheckingAllWorkers,
+                        onCheckAllWorkers = if (workerPoolEnabled) ::runWorkerHealthCheckAll else null,
+                        workerPoolUiState = if (workerPoolEnabled) buildWorkerPoolUiState() else null,
+                        onOpenWorkerPool = if (workerPoolEnabled) {
+                            {
+                                currentPage = ProxyScreenPage.Settings
+                                settingsPage = SettingsPage.CLOUDFLARE
+                                cloudflareSettingsPage = CloudflareSettingsPage.WORKER_POOL
+                            }
+                        } else {
+                            null
+                        },
+                        workerFailoverSummary = if (workerPoolEnabled) buildWorkerFailoverSummary() else null,
+                        workerSelectionSummary = if (workerPoolEnabled) buildWorkerSelectionSummary() else null,
                     )
                 } else {
                 if (isRunning) {
@@ -1596,6 +1857,8 @@ private fun ProxyScreen(
                             workerPoolEnabled = workerPoolEnabled,
                             workerPoolWorkers = workerPoolWorkers,
                             workerPoolSelectedWorker = workerPoolSelectedWorker,
+                            workerPoolSelectionStrategy = workerPoolSelectionStrategy,
+                            workerPoolUiState = buildWorkerPoolUiState(),
                             maskDomainsInSettings = maskDomainsInReport,
                             onWorkerDomainChange = { value ->
                                 workerDomainText = value
@@ -1623,19 +1886,93 @@ private fun ProxyScreen(
                                 prefs.edit().putBoolean("worker_enabled", enabled).apply()
                             },
                             onWorkerPoolEnabledChange = { enabled ->
+                                WorkerPoolUiLogger.poolEnabledChanged(enabled)
                                 workerPoolRepository.setPoolEnabled(enabled)
                                 refreshWorkerPoolState()
                             },
+                            workerDestinationMode = workerDestinationMode,
+                            flowsealMediaFixEnabled = flowsealMediaFixEnabled,
+                            flowsealMediaFixDcText = flowsealMediaFixDcText,
+                            flowsealMediaFixIpText = flowsealMediaFixIpText,
+                            flowsealDcOnlyEnabled = flowsealDcOnlyEnabled,
+                            onFlowsealDcOnlyEnabledChange = { enabled ->
+                                flowsealDcOnlyEnabled = enabled
+                                val texts = if (enabled) {
+                                    FlowsealDcPreset.enable(
+                                        prefs,
+                                        DcIpTexts(dc1Text, dc2Text, dc4Text, dc203Text),
+                                    )
+                                } else {
+                                    FlowsealDcPreset.disable(prefs)
+                                }
+                                applyDcTexts(texts)
+                                if (enabled) {
+                                    workerDestinationMode = WorkerDestinationMode.FLOWSEAL_DC_MAP
+                                    prefs.edit()
+                                        .putString(
+                                            ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE,
+                                            WorkerDestinationMode.FLOWSEAL_DC_MAP.prefValue,
+                                        )
+                                        .apply()
+                                }
+                                if (isRunning) {
+                                    runNetworkReconfigure(NetworkProfileProvider.current(context))
+                                }
+                            },
+                            onWorkerDestinationModeChange = { mode ->
+                                workerDestinationMode = mode
+                                prefs.edit()
+                                    .putString(ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE, mode.prefValue)
+                                    .apply()
+                            },
+                            onFlowsealMediaFixEnabledChange = { enabled ->
+                                flowsealMediaFixEnabled = enabled
+                                prefs.edit()
+                                    .putBoolean(ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_ENABLED, enabled)
+                                    .apply()
+                            },
+                            onFlowsealMediaFixDcChange = { flowsealMediaFixDcText = it },
+                            onFlowsealMediaFixIpChange = { flowsealMediaFixIpText = it },
+                            onFlowsealDestinationSettingsBlur = {
+                                prefs.edit()
+                                    .putInt(
+                                        ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_DC,
+                                        flowsealMediaFixDcText.toIntOrNull()
+                                            ?: WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
+                                    )
+                                    .putString(
+                                        ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_IP,
+                                        flowsealMediaFixIpText.trim().ifBlank {
+                                            WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP
+                                        },
+                                    )
+                                    .apply()
+                            },
+                            onSelectionStrategyChange = { strategy ->
+                                val previous = workerPoolSelectionStrategy
+                                workerPoolRepository.setSelectionStrategy(strategy)
+                                if (previous != strategy) {
+                                    WorkerPoolUiLogger.strategyChanged(previous, strategy)
+                                }
+                                refreshWorkerPoolState()
+                            },
                             onSelectWorker = { id ->
+                                WorkerPoolUiLogger.workerSelected(id)
                                 workerPoolRepository.selectWorker(id)
                                 refreshWorkerPoolState()
                             },
-                            onAddWorker = { name, url, enabled ->
+                            onAddWorker = { name, url, enabled, priority ->
                                 val result = workerPoolRepository.addWorker(
-                                    WorkerEndpoint.create(name = name, url = url, enabled = enabled),
+                                    WorkerEndpoint.create(
+                                        name = name,
+                                        url = url,
+                                        enabled = enabled,
+                                        priority = priority,
+                                    ),
                                 )
                                 if (result.isSuccess) {
                                     val created = result.getOrThrow()
+                                    WorkerPoolUiLogger.workerSaved(created.id)
                                     if (workerPoolRepository.getWorkerPoolConfig().selectedWorkerId.isNullOrBlank()) {
                                         workerPoolRepository.selectWorker(created.id)
                                     }
@@ -1651,6 +1988,7 @@ private fun ProxyScreen(
                             onUpdateWorker = { worker ->
                                 val result = workerPoolRepository.updateWorker(worker)
                                 if (result.isSuccess) {
+                                    WorkerPoolUiLogger.workerSaved(worker.id)
                                     refreshWorkerPoolState()
                                     null
                                 } else {
@@ -1658,13 +1996,27 @@ private fun ProxyScreen(
                                 }
                             },
                             onDeleteWorker = { id ->
+                                WorkerPoolUiLogger.workerDeleted(id)
                                 workerPoolRepository.removeWorker(id)
                                 refreshWorkerPoolState()
                             },
                             onSetWorkerEnabled = { id, enabled ->
+                                if (enabled) {
+                                    WorkerPoolUiLogger.workerEnabled(id)
+                                } else {
+                                    WorkerPoolUiLogger.workerDisabled(id)
+                                }
                                 workerPoolRepository.setWorkerEnabled(id, enabled)
                                 refreshWorkerPoolState()
                             },
+                            onCheckWorker = ::runWorkerHealthCheck,
+                            onCheckAllWorkers = ::runWorkerHealthCheckAll,
+                            onWorkerPoolScreenOpened = { WorkerPoolUiLogger.screenOpened() },
+                            onOpenDiagnosticsFromWorkerPool = {
+                                currentPage = ProxyScreenPage.Diagnostics
+                            },
+                            checkingWorkerIds = checkingWorkerIds,
+                            isCheckingAllWorkers = isCheckingAllWorkers,
                             onTestWorker = {
                                 val probeDomain = if (workerPoolEnabled) {
                                     WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText)
@@ -2522,25 +2874,30 @@ private fun ProxyScreen(
 
     if (showIpSetupModal) {
         IpSetupDialog(
+            flowsealDcOnlyEnabled = flowsealDcOnlyEnabled,
             dc1Text = dc1Text,
             onDc1Change = {
+                if (flowsealDcOnlyEnabled) return@IpSetupDialog
                 dc1Text = it
-                prefs.edit().putString("dc1", it).apply()
+                prefs.edit().putString(DcIpTexts.KEY_DC1, it).apply()
             },
             dc2Text = dc2Text,
-            onDc2Change = { 
+            onDc2Change = {
+                if (flowsealDcOnlyEnabled) return@IpSetupDialog
                 dc2Text = it
-                prefs.edit().putString("dc2", it).apply()
+                prefs.edit().putString(DcIpTexts.KEY_DC2, it).apply()
             },
             dc4Text = dc4Text,
-            onDc4Change = { 
+            onDc4Change = {
+                if (flowsealDcOnlyEnabled) return@IpSetupDialog
                 dc4Text = it
-                prefs.edit().putString("dc4", it).apply()
+                prefs.edit().putString(DcIpTexts.KEY_DC4, it).apply()
             },
             dc203Text = dc203Text,
-            onDc203Change = { 
+            onDc203Change = {
+                if (flowsealDcOnlyEnabled) return@IpSetupDialog
                 dc203Text = it
-                prefs.edit().putString("dc203", it).apply()
+                prefs.edit().putString(DcIpTexts.KEY_DC203, it).apply()
             },
             onDismiss = { showIpSetupModal = false }
         )
@@ -2615,6 +2972,7 @@ private fun cfDomainStatusLabel(context: Context, status: CfDomainStatus): Strin
 
 @Composable
 fun IpSetupDialog(
+    flowsealDcOnlyEnabled: Boolean = false,
     dc1Text: String, onDc1Change: (String) -> Unit,
     dc2Text: String, onDc2Change: (String) -> Unit,
     dc4Text: String, onDc4Change: (String) -> Unit,
@@ -2628,11 +2986,12 @@ fun IpSetupDialog(
     }
 
     @Composable
-    fun dcInput(label: String, value: String, update: (String) -> Unit) {
+    fun dcInput(label: String, value: String, update: (String) -> Unit, enabled: Boolean = true) {
         OutlinedTextField(
             value = value,
             onValueChange = { onIpChange(it, update) },
             label = { Text(label) },
+            enabled = enabled,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier
@@ -2660,11 +3019,20 @@ fun IpSetupDialog(
                     modifier = Modifier.padding(bottom = 20.dp),
                     fontWeight = FontWeight.SemiBold
                 )
+
+                if (flowsealDcOnlyEnabled) {
+                    Text(
+                        text = stringResource(R.string.flowseal_dc_only_ip_dialog_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
                 
-                dcInput("DC1", dc1Text, onDc1Change)
-                dcInput("DC2", dc2Text, onDc2Change)
-                dcInput("DC4", dc4Text, onDc4Change)
-                dcInput("DC203", dc203Text, onDc203Change)
+                dcInput("DC1", dc1Text, onDc1Change, enabled = !flowsealDcOnlyEnabled)
+                dcInput("DC2", dc2Text, onDc2Change, enabled = !flowsealDcOnlyEnabled)
+                dcInput("DC4", dc4Text, onDc4Change, enabled = !flowsealDcOnlyEnabled)
+                dcInput("DC203", dc203Text, onDc203Change, enabled = !flowsealDcOnlyEnabled)
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 

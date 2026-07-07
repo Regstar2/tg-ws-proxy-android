@@ -59,18 +59,62 @@ object WorkerRuntimeTruth {
         if (!config.enabled) {
             return routeState
         }
-        val worker = repository.getSelectedWorker() ?: return routeState.copy(
-            currentWorkerId = "",
-            currentWorkerName = "",
-            currentWorkerUrlMasked = "",
-            currentWorkerState = WorkerHealthState.UNKNOWN,
-        )
+        val selected = repository.getSelectedWorker()
+        val runtimeWorker = routeState.currentWorkerId.takeIf { it.isNotBlank() }
+            ?.let { id -> repository.getWorker(id) }
+        val selectedWorker = selected
         return routeState.copy(
-            currentWorkerId = worker.id,
-            currentWorkerName = worker.name,
-            currentWorkerUrlMasked = WorkerUrlSanitizer.maskForDisplay(worker.url, maskDomains),
-            currentWorkerState = worker.state,
-            currentWorkerDomain = worker.normalizedDomain().ifBlank { routeState.currentWorkerDomain },
+            selectedWorkerId = selectedWorker?.id.orEmpty(),
+            selectedWorkerName = selectedWorker?.name.orEmpty(),
+            currentWorkerId = runtimeWorker?.id ?: routeState.currentWorkerId,
+            currentWorkerName = runtimeWorker?.name ?: routeState.currentWorkerName,
+            currentWorkerUrlMasked = (runtimeWorker ?: selectedWorker)?.let { worker ->
+                WorkerUrlSanitizer.maskForDisplay(worker.url, maskDomains)
+            }.orEmpty().ifBlank { routeState.currentWorkerUrlMasked },
+            currentWorkerState = (runtimeWorker ?: selectedWorker)?.state ?: routeState.currentWorkerState,
+            currentWorkerDomain = (runtimeWorker ?: selectedWorker)?.normalizedDomain()
+                ?.ifBlank { routeState.currentWorkerDomain }
+                ?: routeState.currentWorkerDomain,
+            lastSuccessfulWorkerName = routeState.lastSuccessfulWorkerId.takeIf { it.isNotBlank() }
+                ?.let { id -> repository.getWorker(id)?.name }.orEmpty(),
+            lastFailedWorkerName = routeState.lastFailedWorkerId.takeIf { it.isNotBlank() }
+                ?.let { id -> repository.getWorker(id)?.name }.orEmpty(),
+        )
+    }
+
+    fun buildFailoverSnapshot(
+        routeState: com.amurcanov.tgwsproxy.RouteRuntimeState,
+        repository: WorkerPoolRepository,
+        legacyWorkerDomain: String,
+        maskDomains: Boolean,
+    ): WorkerFailoverRuntimeSnapshot {
+        val config = repository.getWorkerPoolConfig()
+        val enriched = enrichRouteState(routeState, repository, legacyWorkerDomain, maskDomains)
+        val preview = repository.previewSelection()
+        return WorkerFailoverRuntimeSnapshot(
+            selectedWorkerId = enriched.selectedWorkerId,
+            selectedWorkerName = enriched.selectedWorkerName,
+            runtimeWorkerId = enriched.currentWorkerId,
+            runtimeWorkerName = enriched.currentWorkerName,
+            lastSuccessfulWorkerId = enriched.lastSuccessfulWorkerId,
+            lastSuccessfulWorkerName = enriched.lastSuccessfulWorkerName,
+            lastFailedWorkerId = enriched.lastFailedWorkerId,
+            lastFailedWorkerName = enriched.lastFailedWorkerName,
+            failoverReason = WorkerFailoverReason.fromWire(enriched.workerFailoverReason),
+            attemptCount = enriched.workerFailoverAttemptCount,
+            failoverActive = enriched.workerFailoverActive,
+            enabledWorkersCount = repository.getWorkers().count { it.enabled },
+            skippedBackoffCount = enriched.workerFailoverSkippedBackoff,
+            selectionStrategy = if (enriched.workerSelectionStrategy.isNotBlank()) {
+                WorkerSelectionStrategy.fromPref(enriched.workerSelectionStrategy)
+            } else {
+                config.selectionStrategy
+            },
+            selectionReason = if (enriched.workerSelectionReason.isNotBlank()) {
+                WorkerSelectionReason.fromWire(enriched.workerSelectionReason)
+            } else {
+                preview.reason
+            },
         )
     }
 }

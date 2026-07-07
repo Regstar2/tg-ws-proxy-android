@@ -57,7 +57,15 @@ func testWorkerKey() WorkerPoolKey {
 	return WorkerPoolKey{DC: 2, WorkerDomain: "worker.example", Dst: "149.154.167.51", Media: false}
 }
 
+func withWorkerWsPreconnect(t *testing.T, enabled bool) {
+	t.Helper()
+	previous := workerWsPreconnectEnabled
+	workerWsPreconnectEnabled = enabled
+	t.Cleanup(func() { workerWsPreconnectEnabled = previous })
+}
+
 func TestWorkerPoolGetMissSchedulesRefill(t *testing.T) {
+	withWorkerWsPreconnect(t, true)
 	withPoolSize(t, 1)
 	stats.Reset()
 	dialer := &fakeWorkerDialer{}
@@ -78,6 +86,7 @@ func TestWorkerPoolGetMissSchedulesRefill(t *testing.T) {
 }
 
 func TestWorkerPoolHitReusesIdleConnection(t *testing.T) {
+	withWorkerWsPreconnect(t, true)
 	withPoolSize(t, 1)
 	stats.Reset()
 	pool := newWorkerWsPool(&fakeWorkerDialer{})
@@ -88,12 +97,13 @@ func TestWorkerPoolHitReusesIdleConnection(t *testing.T) {
 	if got := pool.Get(key); got != ws {
 		t.Fatal("expected idle websocket to be reused")
 	}
-	if stats.workerPoolHits.Load() != 1 {
-		t.Fatalf("worker pool hit counter = %d, want 1", stats.workerPoolHits.Load())
+	if stats.workerWsPreconnectHits.Load() != 1 {
+		t.Fatalf("worker ws preconnect hit counter = %d, want 1", stats.workerWsPreconnectHits.Load())
 	}
 }
 
 func TestWorkerPoolDropsExpiredConnection(t *testing.T) {
+	withWorkerWsPreconnect(t, true)
 	withPoolSize(t, 1)
 	stats.Reset()
 	pool := newWorkerWsPool(&fakeWorkerDialer{fail: true})
@@ -108,8 +118,8 @@ func TestWorkerPoolDropsExpiredConnection(t *testing.T) {
 	if got := pool.Get(key); got != nil {
 		t.Fatal("expired websocket should not be returned")
 	}
-	if stats.workerPoolHits.Load() != 0 {
-		t.Fatalf("worker pool hit counter = %d, want 0", stats.workerPoolHits.Load())
+	if stats.workerWsPreconnectHits.Load() != 0 {
+		t.Fatalf("worker ws preconnect hit counter = %d, want 0", stats.workerWsPreconnectHits.Load())
 	}
 }
 
@@ -136,6 +146,40 @@ func TestWorkerPoolDoesNotRefillWhenPoolSizeZero(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	if dialer.count.Load() != 0 {
 		t.Fatalf("dial count = %d, want 0", dialer.count.Load())
+	}
+}
+
+func TestWorkerPoolCapsPreconnectPerKey(t *testing.T) {
+	withWorkerWsPreconnect(t, true)
+	withPoolSize(t, 8)
+	dialer := &fakeWorkerDialer{}
+	pool := newWorkerWsPool(dialer)
+
+	pool.refill(testWorkerKey())
+
+	if got := pool.IdleCount(); got != workerWsPreconnectMaxPerKey {
+		t.Fatalf("idle count = %d, want %d", got, workerWsPreconnectMaxPerKey)
+	}
+	if got := dialer.count.Load(); got != workerWsPreconnectMaxPerKey {
+		t.Fatalf("dial count = %d, want %d", got, workerWsPreconnectMaxPerKey)
+	}
+}
+
+func TestWorkerWsPreconnectDisabledByDefault(t *testing.T) {
+	if workerWsPreconnectEnabled {
+		t.Fatal("worker ws preconnect should be disabled by default for cf_worker_ws")
+	}
+	withPoolSize(t, 1)
+	stats.Reset()
+	pool := newWorkerWsPool(&fakeWorkerDialer{})
+	key := testWorkerKey()
+	pool.idle[key] = []poolEntry{{ws: newFakeWebSocket(), created: pool.now()}}
+
+	if got := pool.Get(key); got != nil {
+		t.Fatal("disabled preconnect pool must not return idle websocket")
+	}
+	if stats.workerWsPreconnectHits.Load() != 0 {
+		t.Fatalf("hits = %d, want 0", stats.workerWsPreconnectHits.Load())
 	}
 }
 

@@ -3,6 +3,7 @@ package tgwsroute
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -101,16 +102,30 @@ func NormalizeWorkerDomain(raw string) string {
 	return s
 }
 
-func BuildWorkerWSPath(dcID int, dcIP string, media bool) string {
-	mediaVal := 0
+func BuildWorkerWSPath(dcID int, dcIP string, media bool, sessionID string) string {
+	mediaVal := "0"
 	if media {
-		mediaVal = 1
+		mediaVal = "1"
 	}
-	return fmt.Sprintf("/apiws?dst=%s&dc=%d&media=%d", dcIP, dcID, mediaVal)
+	q := url.Values{}
+	q.Set("dst", dcIP)
+	q.Set("dc", strconv.Itoa(dcID))
+	q.Set("media", mediaVal)
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		q.Set("sid", sid)
+	}
+	return "/apiws?" + q.Encode()
 }
 
-func BuildWorkerWSURL(workerDomain string, dcID int, dcIP string, media bool) string {
-	return fmt.Sprintf("wss://%s%s", workerDomain, BuildWorkerWSPath(dcID, dcIP, media))
+func BuildWorkerWSURL(workerDomain string, dcID int, dcIP string, media bool, sessionID string) string {
+	return fmt.Sprintf("wss://%s%s", workerDomain, BuildWorkerWSPath(dcID, dcIP, media, sessionID))
+}
+
+const WorkerModeSocks5Transparent = "socks5_transparent"
+
+// BuildCfWorkerTransparentWorkerURL builds a Worker WebSocket URL for SOCKS5 transparent relay.
+func BuildCfWorkerTransparentWorkerURL(workerDomain string, dcID int, isMedia, dcOk bool, parsedDstHost string) CfWorkerTransparentResolve {
+	return ResolveCfWorkerTransparentWorker(workerDomain, dcID, isMedia, dcOk, parsedDstHost)
 }
 
 func RoutesForMode(mode ConnectionMode, settings RouteSettings, skipDirect bool) []RouteKind {

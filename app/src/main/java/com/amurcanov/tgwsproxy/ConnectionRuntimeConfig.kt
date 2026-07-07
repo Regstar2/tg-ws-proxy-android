@@ -1,5 +1,8 @@
 package com.amurcanov.tgwsproxy
 
+import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
+import com.amurcanov.tgwsproxy.worker.WorkerFailoverPayload
+
 object ConnectionRuntimeConfig {
     private val defaultDcIps = mapOf(
         1 to "149.154.175.50",
@@ -25,6 +28,11 @@ object ConnectionRuntimeConfig {
         adaptiveRouteStats: String = "",
         autoStrategy: AutoStrategy = AutoStrategy.BALANCED,
         routePolicy: NetworkRoutePolicy? = null,
+        workerFailover: WorkerFailoverPayload? = null,
+        workerDestinationMode: WorkerDestinationMode = WorkerDestinationMode.PRESERVE_ORIGINAL_DST,
+        flowsealMediaFixEnabled: Boolean = false,
+        flowsealMediaFixDc: Int = WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
+        flowsealMediaFixIp: String = WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
     ): String {
         val effectiveMode = if (routePolicy != null) {
             NetworkRoutePolicyMapper.toLegacyConnectionMode(routePolicy)
@@ -82,7 +90,8 @@ object ConnectionRuntimeConfig {
             if (cachedDomains.isNotEmpty()) {
                 add("@cf_cached_domains=${cachedDomains.joinToString("|")}")
             }
-            val normalizedWorker = WorkerDomain.normalize(workerDomain)
+            val normalizedWorker = workerFailover?.primaryDomain?.takeIf { it.isNotBlank() }
+                ?: WorkerDomain.normalize(workerDomain)
             val workerOn = if (routePolicy != null) {
                 RouteKind.WORKER_WS in routePolicy.enabledRoutes
             } else {
@@ -94,6 +103,28 @@ object ConnectionRuntimeConfig {
             if (normalizedWorker.isNotBlank()) {
                 add("@worker_domain=$normalizedWorker")
             }
+            workerFailover?.takeIf { it.enabled && it.candidates.isNotEmpty() }?.let { payload ->
+                add("@worker_failover_enabled=1")
+                if (payload.selectedWorkerId.isNotBlank()) {
+                    add("@worker_selected_id=${payload.selectedWorkerId}")
+                }
+                add("@worker_failover_max_attempts=${payload.maxAttempts}")
+                add("@worker_failover_candidates=${payload.encodeCandidatesToken()}")
+                add("@worker_selection_strategy=${payload.selectionStrategy.prefValue}")
+                add("@worker_selection_reason=${payload.selectionReason.wireValue}")
+                add("@worker_candidate_count=${payload.candidateCount}")
+                payload.roundRobinCursor?.takeIf { it.isNotBlank() }?.let { cursor ->
+                    add("@worker_round_robin_cursor=$cursor")
+                }
+                if (payload.skippedBackoffCount > 0) {
+                    add("@worker_failover_skipped_backoff=${payload.skippedBackoffCount}")
+                }
+            }
+            add("@worker_destination_mode=${workerDestinationMode.prefValue}")
+            add("@flowseal_media_fix_enabled=${if (flowsealMediaFixEnabled) 1 else 0}")
+            add("@flowseal_media_fix_dc=${flowsealMediaFixDc.coerceAtLeast(1)}")
+            val mediaFixIp = flowsealMediaFixIp.trim().ifBlank { WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP }
+            add("@flowseal_media_fix_ip=$mediaFixIp")
             networkProfile?.let { profile ->
                 add("@network_profile_id=${profile.id}")
                 add("@network_profile_type=${profile.type.prefValue}")
