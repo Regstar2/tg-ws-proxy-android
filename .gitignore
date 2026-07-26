@@ -3,6 +3,7 @@
 local.properties
 app/build/
 artifacts/
+external/upstreams/
 app/src/main/jniLibs/**/*.so
 *.jks
 *.keystore

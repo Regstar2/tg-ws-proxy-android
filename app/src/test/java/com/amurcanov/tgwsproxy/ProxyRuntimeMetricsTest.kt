@@ -56,6 +56,31 @@ class ProxyRuntimeMetricsTest {
     }
 
     @Test
+    fun fromMtProtoStatus_mapsRouteAndConnectionsForNotification() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;host=127.0.0.1;port=1443;" +
+                "outbound=MTPROTO_ROUTE_CHAIN_READY;selected_backend=cf_proxy_ws;" +
+                "actual_backend=cf_proxy_ws;fallback_used=false;route_reason=connected;" +
+                "active=3;total=9;last_error=none;secret_fingerprint=abcdef123456",
+        )
+
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+
+        assertTrue(metrics.running)
+        assertEquals("mtproto", metrics.mode)
+        assertEquals("cf_proxy_ws", metrics.activeRouteKind)
+        assertEquals("mtproto", metrics.routeRuntime.configuredMode)
+        assertEquals("cf_proxy_ws", metrics.routeRuntime.selectedRoute)
+        assertEquals("cf_proxy_ws", metrics.routeRuntime.activeRoute)
+        assertEquals("cf_proxy_ws", metrics.routeRuntime.lastSuccessfulRoute)
+        assertEquals("", metrics.routeRuntime.fallbackReason)
+        assertEquals("websocket", metrics.transportType)
+        assertEquals(3L, metrics.activeConnections)
+        assertEquals(9L, metrics.totalConnections)
+        assertEquals("", metrics.lastError)
+    }
+
+    @Test
     fun parseStatus_ignoresBrokenPoolMetricNumbers() {
         val raw = "running=1;worker_endpoint_pool_hits=x;worker_endpoint_pool_misses=bad;cf_pool_hits=;cf_pool_refill_errors=nope"
         val metrics = ProxyRuntimeMetrics.parseStatus(raw)!!
@@ -82,6 +107,11 @@ class ProxyRuntimeMetricsTest {
     fun transportLabelRes_knownTransports() {
         assertEquals(R.string.route_display_transport_websocket, RouteDisplayNames.transportLabelRes("websocket"))
         assertEquals(R.string.route_display_transport_tcp, RouteDisplayNames.transportLabelRes("tcp"))
+    }
+
+    @Test
+    fun modeLabelRes_includesMtProto() {
+        assertEquals(R.string.proxy_frontend_mtproto_title, RouteDisplayNames.modeLabelRes("mtproto"))
     }
 
     @Test

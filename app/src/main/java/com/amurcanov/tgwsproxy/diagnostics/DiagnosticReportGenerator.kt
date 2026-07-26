@@ -52,6 +52,7 @@ object DiagnosticReportGenerator {
             appendLine("Metered: ${input.isMetered?.let { DiagnosticReportSanitizer.yesNo(it) } ?: "UNKNOWN"}")
             appendLine("Transport: ${input.activeTransport.ifBlank { "UNKNOWN" }}")
             appendLine()
+            append(formatFrontendDiagnosticsSections(input.frontendDiagnostics))
             appendLine("[Runtime Route]")
             appendLine("Configured mode: ${labelOrUnknown(context, runtime.configuredMode) { ctx, raw -> RouteDisplayNames.modeLabel(ctx, raw) }}")
             appendLine("Selected route: ${labelOrUnknown(context, runtime.selectedRoute) { ctx, raw -> RouteDisplayNames.routeLabel(ctx, raw) }}")
@@ -93,6 +94,9 @@ object DiagnosticReportGenerator {
                 "Worker domain: ${DiagnosticReportSanitizer.maskWorkerHost(input.workerDomain, input.maskDomains)}",
             )
             appendLine("Cloudflare proxy configured: ${DiagnosticReportSanitizer.yesNo(input.cfProxyConfigured)}")
+            input.mtProtoConfigLines.forEach { line ->
+                appendLine(line)
+            }
             appendLine("Diagnostics enabled: ${DiagnosticReportSanitizer.yesNo(input.diagnosticsEnabled)}")
             appendLine("Persistent logs enabled: ${DiagnosticReportSanitizer.yesNo(input.persistentLogs.enabled)}")
             appendLine(
@@ -132,6 +136,99 @@ object DiagnosticReportGenerator {
             appendLine("- Sensitive values are masked; verify before sharing externally.")
         }
         return DiagnosticReportSanitizer.sanitize(report)
+    }
+
+    internal fun formatFrontendDiagnosticsSections(snapshot: FrontendDiagnosticsSnapshot): String {
+        return buildString {
+            appendLine("[SOCKS5 / WebSocket frontend]")
+            appendLine("Frontend kind: SOCKS5")
+            appendLine("Stable: YES")
+            appendLine("Default: NO")
+            appendLine("Listener status: ${snapshot.socks5ListenerStatus}")
+            appendLine("Current route support: ${snapshot.socks5RouteSupport.name}")
+            appendLine("Selected route: ${snapshot.socks5SelectedRoute.ifBlank { "NONE" }}")
+            appendLine("Active route: ${snapshot.socks5ActiveRoute.ifBlank { "NONE" }}")
+            appendLine()
+            appendLine("[MTProto frontend]")
+            appendLine("Frontend kind: MTPROTO")
+            appendLine("Default: YES")
+            appendLine("Mode enabled: ${DiagnosticReportSanitizer.yesNo(snapshot.mtProtoEnabled)}")
+            appendLine("Listen host: ${snapshot.mtProtoHost.ifBlank { "UNKNOWN" }}")
+            appendLine("Listen port: ${snapshot.mtProtoPort.takeIf { it > 0 } ?: "UNKNOWN"}")
+            appendLine("Secret status: ${snapshot.mtProtoSecretStatus}")
+            appendLine(
+                "Secret fingerprint: ${snapshot.mtProtoSecretFingerprint.ifBlank { "UNAVAILABLE" }}",
+            )
+            appendLine("Local listener status: ${snapshot.mtProtoListenerStatus}")
+            appendLine("Outbound support status: ${snapshot.mtProtoOutboundStatus}")
+            appendLine("Route integration status: ${snapshot.mtProtoRouteSupport.name}")
+            appendLine("Telegram proxy link support: ${snapshot.mtProtoProxyLinkSupport.name}")
+            appendLine("Selected backend: ${snapshot.mtProtoSelectedBackend.ifBlank { "NONE" }}")
+            appendLine("Actual backend: ${snapshot.mtProtoActualBackend.ifBlank { "NONE" }}")
+            appendLine("Last error code: ${snapshot.mtProtoLastErrorCode}")
+            appendLine("Fake TLS enabled: ${DiagnosticReportSanitizer.yesNo(snapshot.mtProtoFakeTlsEnabled)}")
+            appendLine(
+                "Fake TLS masking passthrough: " +
+                    DiagnosticReportSanitizer.yesNo(snapshot.mtProtoMaskingPassthrough),
+            )
+            appendLine("Fake TLS accepted: ${snapshot.mtProtoFakeTlsAccepted}")
+            appendLine("Fake TLS rejected: ${snapshot.mtProtoFakeTlsRejected}")
+            appendLine("Fake TLS redirected: ${snapshot.mtProtoFakeTlsRedirected}")
+            appendLine("Fake TLS probes: ${snapshot.mtProtoFakeTlsProbe}")
+            appendLine("Fake TLS passthrough: ${snapshot.mtProtoFakeTlsPassthrough}")
+            appendLine("Fake TLS last error: ${snapshot.mtProtoFakeTlsLastError.ifBlank { "NONE" }}")
+            snapshot.lastSuccessfulStartAtMs?.let {
+                appendLine("Last successful start time: ${formatReportTimestamp(it)}")
+            }
+            appendLine()
+            appendLine("[Route backend]")
+            appendLine("Configured frontend: ${snapshot.configuredFrontendKind}")
+            appendLine("Runtime frontend: ${snapshot.runtimeFrontendKind}")
+            appendLine("Route support: ${snapshot.runtimeRouteSupport.name}")
+            appendLine("Selected backend: ${snapshot.selectedBackend.ifBlank { "NONE" }}")
+            appendLine("Actual backend: ${snapshot.actualBackend.ifBlank { "NONE" }}")
+            appendLine(
+                "Fallback used: ${snapshot.fallbackUsed?.let(DiagnosticReportSanitizer::yesNo) ?: "UNKNOWN"}",
+            )
+            appendLine("Route reason: ${snapshot.routeReason.ifBlank { "NONE" }}")
+            appendLine()
+            appendLine("[Worker pool / future worker pool]")
+            appendLine("Pool enabled: ${DiagnosticReportSanitizer.yesNo(snapshot.workerPoolEnabled)}")
+            appendLine("Workers configured: ${snapshot.workerPoolWorkersCount}")
+            appendLine("Workers enabled: ${snapshot.workerPoolEnabledWorkersCount}")
+            appendLine(
+                "Selected worker: ${snapshot.workerPoolSelectedWorkerName.ifBlank { "NONE" }}",
+            )
+            appendLine("MTProto worker pool integration: ${snapshot.mtProtoWorkerPoolSupport.name}")
+            appendLine()
+            appendLine("[Runtime route truth]")
+            appendLine("Frontend: ${snapshot.runtimeFrontendKind}")
+            appendLine("Listener: ${runtimeListenerStatus(snapshot)}")
+            appendLine("Selected backend: ${snapshot.selectedBackend.ifBlank { "NONE" }}")
+            appendLine("Actual backend: ${snapshot.actualBackend.ifBlank { "NONE" }}")
+            appendLine(
+                "Fallback used: ${snapshot.fallbackUsed?.let(DiagnosticReportSanitizer::yesNo) ?: "UNKNOWN"}",
+            )
+            appendLine("Reason: ${snapshot.routeReason.ifBlank { "NONE" }}")
+            appendLine("Last error code: ${snapshot.lastErrorCode}")
+            appendLine()
+            appendLine("[SOCKS5/WS vs MTProto]")
+            appendLine("SOCKS5/WS stability: STABLE")
+            appendLine("SOCKS5/WS default: NO")
+            appendLine("SOCKS5/WS current route support: ${snapshot.socks5RouteSupport.name}")
+            appendLine("MTProto default: YES")
+            appendLine("MTProto Telegram proxy link support: ${snapshot.mtProtoProxyLinkSupport.name}")
+            appendLine("MTProto route support: ${snapshot.mtProtoRouteSupport.name}")
+            appendLine()
+        }
+    }
+
+    private fun runtimeListenerStatus(snapshot: FrontendDiagnosticsSnapshot): String {
+        return when (snapshot.runtimeFrontendKind) {
+            "MTPROTO" -> snapshot.mtProtoListenerStatus
+            "SOCKS5" -> snapshot.socks5ListenerStatus
+            else -> "STOPPED"
+        }
     }
 
     private fun formatWorkerFailoverSection(input: DiagnosticReportContext): String? {

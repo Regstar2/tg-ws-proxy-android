@@ -271,6 +271,15 @@ private fun ProxyScreen(
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
+    val localProxyFrontendRepository = remember {
+        LocalProxyFrontendRepository(prefs)
+    }
+    val mtProtoProxyConfigRepository = remember {
+        MtProtoProxyConfigRepository(prefs)
+    }
+    val mtProtoRuntimeAdapter = remember {
+        NativeMtProtoRuntimeAdapter()
+    }
     val cfDomainListRepository = remember {
         CfDomainListRepository(SharedPreferencesCfDomainListPersistence(prefs))
     }
@@ -309,6 +318,15 @@ private fun ProxyScreen(
     }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
+    var localProxyFrontendType by remember {
+        mutableStateOf(localProxyFrontendRepository.load())
+    }
+    var mtProtoProxyConfig by remember {
+        mutableStateOf(mtProtoProxyConfigRepository.load())
+    }
+    var mtProtoRuntimeState by remember {
+        mutableStateOf(mtProtoRuntimeAdapter.getState())
+    }
     val routeDiagnosticsRepository = remember { RouteDiagnosticsRepository() }
     val diagnosticsViewModel = remember(routeDiagnosticsRepository) {
         DiagnosticsViewModel(routeDiagnosticsRepository)
@@ -335,7 +353,25 @@ private fun ProxyScreen(
     var dc2Text by remember { mutableStateOf(initialDcTexts.dc2) }
     var dc4Text by remember { mutableStateOf(initialDcTexts.dc4) }
     var dc203Text by remember { mutableStateOf(initialDcTexts.dc203) }
-    var portText by remember { mutableStateOf(prefs.getString("port", "1081") ?: "1081") }
+    val initialProxyPortText = remember {
+        val saved = prefs.getString("port", null)?.takeIf { it.isNotBlank() }
+        val migrationDone = prefs.getBoolean(LOCAL_PROXY_PORT_DEFAULT_MIGRATION_KEY, false)
+        val shouldMigrateLegacyDefault = !migrationDone &&
+            (saved == null || saved == LEGACY_DEFAULT_LOCAL_PROXY_PORT.toString())
+        val normalized = if (shouldMigrateLegacyDefault) {
+            DEFAULT_LOCAL_PROXY_PORT.toString()
+        } else {
+            saved ?: DEFAULT_LOCAL_PROXY_PORT.toString()
+        }
+        if (shouldMigrateLegacyDefault || !migrationDone || saved == null) {
+            prefs.edit()
+                .putString("port", normalized)
+                .putBoolean(LOCAL_PROXY_PORT_DEFAULT_MIGRATION_KEY, true)
+                .apply()
+        }
+        normalized
+    }
+    var portText by remember { mutableStateOf(initialProxyPortText) }
     var selectedPoolSize by remember { mutableStateOf(prefs.getInt("pool", 4)) }
     var cfProxyEnabled by remember { mutableStateOf(prefs.getBoolean("cfproxy_enabled", true)) }
     var cfProxyPriority by remember { mutableStateOf(prefs.getBoolean("cfproxy_priority", true)) }
@@ -428,7 +464,7 @@ private fun ProxyScreen(
     var includeDomainsInLogExport by remember {
         mutableStateOf(prefs.getBoolean("include_domains_in_log_export", false))
     }
-    var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", true)) }
+    var logsEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("logs_enabled", false)) }
     var showRuntimeLogsDialog by remember { mutableStateOf(false) }
     var workerNormalizeHint by remember { mutableStateOf<String?>(null) }
     var showInfoModal by remember { mutableStateOf(false) }
@@ -474,6 +510,82 @@ private fun ProxyScreen(
     fun saveReconfigureStatus(status: ReconfigureStatus) {
         ReconfigureStatusStore.save(prefs, status)
         reconfigureStatus = status
+    }
+
+    fun refreshMtProtoRuntimeState() {
+        mtProtoRuntimeState = mtProtoRuntimeAdapter.getState()
+    }
+
+    fun mtProtoConfigFromInput(): MtProtoProxyConfig {
+        return mtProtoProxyConfig.copy(
+            port = portText.toIntOrNull() ?: 0,
+        )
+    }
+
+    fun mtProtoSafeConfigFromInput(): MtProtoProxyConfig {
+        val candidate = mtProtoConfigFromInput()
+        return if (MtProtoProxyConfigValidator.validate(candidate).isValid) {
+            candidate
+        } else {
+            mtProtoProxyConfig
+        }
+    }
+
+    fun saveMtProtoConfig(config: MtProtoProxyConfig) {
+        mtProtoProxyConfig = mtProtoProxyConfigRepository.save(config)
+    }
+
+    fun selectLocalProxyFrontend(type: LocalProxyFrontendType) {
+        if (isRunning) return
+        localProxyFrontendType = type
+        localProxyFrontendRepository.save(type)
+        val mtProtoEnabled = type == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL
+        saveMtProtoConfig(
+            mtProtoSafeConfigFromInput().copy(
+                enabled = mtProtoEnabled,
+                experimentalAcknowledged = mtProtoProxyConfig.experimentalAcknowledged || mtProtoEnabled,
+            ),
+        )
+        refreshMtProtoRuntimeState()
+    }
+
+    fun updateProxyPort(raw: String) {
+        if (raw.any { !it.isDigit() } || raw.length > 5) {
+            return
+        }
+        portText = raw
+        prefs.edit().putString("port", raw).apply()
+        val port = raw.toIntOrNull()
+        if (port != null && port in 1..65535) {
+            mtProtoProxyConfig = mtProtoProxyConfigRepository.save(
+                mtProtoProxyConfig.copy(port = port),
+            )
+        }
+    }
+
+    fun updateMtProtoFakeTlsDomain(raw: String) {
+        val normalizedDomain = MtProtoFakeTlsDomain.normalize(raw)
+        val candidate = mtProtoProxyConfig.copy(
+            fakeTlsDomain = raw,
+            fakeTlsPassthrough = mtProtoProxyConfig.fakeTlsPassthrough &&
+                MtProtoFakeTlsDomain.isValid(normalizedDomain),
+        )
+        mtProtoProxyConfig = candidate
+        if (MtProtoProxyConfigValidator.validate(candidate).isValid) {
+            mtProtoProxyConfig = mtProtoProxyConfigRepository.save(candidate)
+        }
+    }
+
+    fun updateMtProtoFakeTlsPassthrough(enabled: Boolean) {
+        saveMtProtoConfig(
+            mtProtoSafeConfigFromInput().copy(fakeTlsPassthrough = enabled),
+        )
+    }
+
+    fun regenerateMtProtoSecret() {
+        saveMtProtoConfig(
+            mtProtoSafeConfigFromInput().copy(secret = MtProtoSecretGenerator.generate()),
+        )
     }
 
     fun currentDcEntries(): List<String> =
@@ -854,6 +966,27 @@ private fun ProxyScreen(
         }
     }
 
+    LaunchedEffect(
+        isRunning,
+        localProxyFrontendType,
+        currentPage,
+        workerPoolEnabled,
+        workerPoolWorkers,
+    ) {
+        if (localProxyFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            refreshMtProtoRuntimeState()
+        }
+        if (currentPage == ProxyScreenPage.Diagnostics) {
+            diagnosticsViewModel.refreshFrontendDiagnostics(
+                context = context,
+                workerPoolSnapshot = workerPoolRepository.buildReportSnapshot(
+                    legacyWorkerDomain = workerDomainText,
+                    maskDomains = maskDomainsInReport,
+                ),
+            )
+        }
+    }
+
     LaunchedEffect(Unit) {
         diagnosticsViewModel.reportEvents.collect { event ->
             when (event) {
@@ -1032,6 +1165,43 @@ private fun ProxyScreen(
     }
 
     val startProxyAction by rememberUpdatedState {
+        if (localProxyFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            val candidate = mtProtoConfigFromInput().copy(
+                enabled = true,
+                experimentalAcknowledged = true,
+            )
+            val validation = MtProtoProxyConfigValidator.validate(candidate)
+            if (!validation.isValid) {
+                Toast.makeText(
+                    context,
+                    mtProtoValidationMessage(context, validation.errors),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@rememberUpdatedState
+            }
+            val normalizedCandidate = candidate.normalized()
+            saveMtProtoConfig(normalizedCandidate)
+            localProxyFrontendRepository.save(LocalProxyFrontendType.MTPROTO_EXPERIMENTAL)
+            Log.i(
+                "TgWsProxy",
+                "MTProto frontend start requested host=${normalizedCandidate.host} " +
+                    "port=${normalizedCandidate.port} " +
+                    "secret=${MtProtoSecretMasking.mask(candidate.secret)} " +
+                    "fake_tls=${normalizedCandidate.fakeTlsDomain.isNotBlank()} " +
+                    "fake_tls_passthrough=${normalizedCandidate.fakeTlsPassthrough}",
+            )
+            val startIntent = Intent(context, ProxyService::class.java).apply {
+                action = ProxyService.ACTION_START
+                putExtra(ProxyService.EXTRA_PORT, normalizedCandidate.port)
+                runtimeConfigFactory().build(context)?.let { routeConfig ->
+                    putExtra(ProxyService.EXTRA_IPS, routeConfig.ips)
+                    putExtra(ProxyService.EXTRA_POOL_SIZE, routeConfig.poolSize)
+                }
+            }
+            ContextCompat.startForegroundService(context, startIntent)
+            return@rememberUpdatedState
+        }
+
         if (portText.toIntOrNull() == null) {
             Toast.makeText(context, context.getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
@@ -1329,15 +1499,37 @@ private fun ProxyScreen(
     }
 
     val applyInTelegramAction by rememberUpdatedState {
-        val port = portText.toIntOrNull() ?: 1081
-        val proxyUrl = "tg://socks?server=127.0.0.1&port=$port"
-        openTelegram(context, proxyUrl)
+        if (localProxyFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            val proxyUrl = MtProtoTelegramLinkBuilder.tgUri(mtProtoConfigFromInput())
+            if (proxyUrl == null) {
+                Toast.makeText(context, context.getString(R.string.mtproto_link_unavailable), Toast.LENGTH_SHORT).show()
+                return@rememberUpdatedState
+            }
+            openTelegram(context, proxyUrl)
+        } else {
+            val port = portText.toIntOrNull() ?: DEFAULT_LOCAL_PROXY_PORT
+            val proxyUrl = "tg://socks?server=127.0.0.1&port=$port"
+            openTelegram(context, proxyUrl)
+        }
     }
-    val proxyAddress = "127.0.0.1:${portText.ifBlank { "1081" }}"
-    val activePolicyChipText = if (isRunning) {
-        uiMetrics.runtime.routeLabel(context)
-    } else {
-        stringResource(connectionMode.displayLabelRes())
+    val mtProtoUiStatus = MtProtoUiStatusResolver.resolve(
+        frontendType = localProxyFrontendType,
+        config = mtProtoProxyConfig,
+        serviceRunning = isRunning,
+        runtimeState = mtProtoRuntimeState,
+    )
+    val proxyPortLabel = portText.ifBlank { DEFAULT_LOCAL_PROXY_PORT.toString() }
+    val proxyAddress = when (localProxyFrontendType) {
+        LocalProxyFrontendType.SOCKS5 -> "$DEFAULT_LOCAL_PROXY_HOST:$proxyPortLabel"
+        LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> "${mtProtoProxyConfig.host}:$proxyPortLabel"
+    }
+    val activePolicyChipText = when (localProxyFrontendType) {
+        LocalProxyFrontendType.SOCKS5 -> if (isRunning) {
+            uiMetrics.runtime.routeLabel(context)
+        } else {
+            stringResource(connectionMode.displayLabelRes())
+        }
+        LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> stringResource(mtProtoUiStatus.labelRes())
     }
     val openUrl = { url: String ->
         try {
@@ -1355,6 +1547,28 @@ private fun ProxyScreen(
         val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
         cm?.setPrimaryClip(ClipData.newPlainText("Proxy address", proxyAddress))
         Toast.makeText(context, context.getString(R.string.proxy_address_copied), Toast.LENGTH_SHORT).show()
+    }
+    val copyMtProtoTelegramLinkAction by rememberUpdatedState {
+        val link = MtProtoTelegramLinkBuilder.httpsLink(mtProtoConfigFromInput())
+        if (link == null) {
+            Toast.makeText(context, context.getString(R.string.mtproto_link_unavailable), Toast.LENGTH_SHORT).show()
+            return@rememberUpdatedState
+        }
+        val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+        cm?.setPrimaryClip(ClipData.newPlainText("MTProto proxy link", link))
+        Toast.makeText(context, context.getString(R.string.mtproto_link_copied), Toast.LENGTH_SHORT).show()
+    }
+    val shareMtProtoTelegramLinkAction by rememberUpdatedState {
+        val link = MtProtoTelegramLinkBuilder.httpsLink(mtProtoConfigFromInput())
+        if (link == null) {
+            Toast.makeText(context, context.getString(R.string.mtproto_link_unavailable), Toast.LENGTH_SHORT).show()
+            return@rememberUpdatedState
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, link)
+        }
+        context.startActivity(Intent.createChooser(intent, context.getString(R.string.mtproto_link_share_title)))
     }
 
     Scaffold(
@@ -1474,16 +1688,6 @@ private fun ProxyScreen(
                                 },
                             ),
                             showMetrics = true,
-                            workerPoolCompact = buildWorkerPoolCompactUi(),
-                            onOpenWorkerPool = if (workerPoolEnabled) {
-                                {
-                                    currentPage = ProxyScreenPage.Settings
-                                    settingsPage = SettingsPage.CLOUDFLARE
-                                    cloudflareSettingsPage = CloudflareSettingsPage.WORKER_POOL
-                                }
-                            } else {
-                                null
-                            },
                         )
                     }
 
@@ -1577,7 +1781,7 @@ private fun ProxyScreen(
                     RunningProxySettingsBanner()
                 }
                 val applyRecommendedRoutes: () -> Unit = {
-                    RouteDefaultsMigration.applyRecommendedPreset1791(
+                    RouteDefaultsMigration.applyRecommendedPreset1800(
                         prefs = prefs,
                         repository = routePolicyRepository,
                     )
@@ -1615,16 +1819,32 @@ private fun ProxyScreen(
                 if (cfProxyOnly) {
                     HintText(stringResource(R.string.cf_only_hint))
                 }
+                ProxyFrontendSettingsSection(
+                    frontendType = localProxyFrontendType,
+                    mtProtoConfig = mtProtoProxyConfig,
+                    mtProtoUiStatus = mtProtoUiStatus,
+                    controlsEnabled = !isRunning,
+                    onFrontendTypeChange = ::selectLocalProxyFrontend,
+                    onMtProtoFakeTlsDomainChange = ::updateMtProtoFakeTlsDomain,
+                    onMtProtoFakeTlsPassthroughChange = ::updateMtProtoFakeTlsPassthrough,
+                    onRegenerateSecret = {
+                        regenerateMtProtoSecret()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.mtproto_secret_regenerated),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                    onCopyTelegramLink = copyMtProtoTelegramLinkAction,
+                    onShareTelegramLink = shareMtProtoTelegramLinkAction,
+                )
                 if (isRunning) {
                     SettingsSectionLockedSummary(R.string.settings_connection_locked)
                 } else {
                 // Proxy Port Input
                 OutlinedTextField(
                     value = portText,
-                    onValueChange = { 
-                        portText = it
-                        prefs.edit().putString("port", it).apply()
-                    },
+                    onValueChange = ::updateProxyPort,
                     label = { Text(stringResource(R.string.proxy_port_label)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = RoundedCornerShape(24.dp),
@@ -1639,6 +1859,7 @@ private fun ProxyScreen(
                 )
 
                 // DC selection modal button
+                if (localProxyFrontendType == LocalProxyFrontendType.SOCKS5) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1696,6 +1917,7 @@ private fun ProxyScreen(
                             )
                         }
                     }
+                }
                 }
                 }
                     }
@@ -1857,7 +2079,6 @@ private fun ProxyScreen(
                             workerPoolEnabled = workerPoolEnabled,
                             workerPoolWorkers = workerPoolWorkers,
                             workerPoolSelectedWorker = workerPoolSelectedWorker,
-                            workerPoolSelectionStrategy = workerPoolSelectionStrategy,
                             workerPoolUiState = buildWorkerPoolUiState(),
                             maskDomainsInSettings = maskDomainsInReport,
                             onWorkerDomainChange = { value ->
@@ -2015,8 +2236,6 @@ private fun ProxyScreen(
                             onOpenDiagnosticsFromWorkerPool = {
                                 currentPage = ProxyScreenPage.Diagnostics
                             },
-                            checkingWorkerIds = checkingWorkerIds,
-                            isCheckingAllWorkers = isCheckingAllWorkers,
                             onTestWorker = {
                                 val probeDomain = if (workerPoolEnabled) {
                                     WorkerRouteResolver.resolveDomain(workerPoolRepository, workerDomainText)
@@ -2657,42 +2876,6 @@ private fun ProxyScreen(
                             titleRes = R.string.settings_section_app_title,
                             subtitleRes = R.string.settings_section_app_subtitle,
                         )
-                CollapsibleSettingsSection(
-                    titleRes = R.string.section_legacy_connection,
-                    initiallyExpanded = false,
-                ) {
-                    LegacyConnectionModeSection(
-                        cfProxyEnabled = cfProxyEnabled,
-                        cfProxyPriority = cfProxyPriority,
-                        cfProxyOnly = cfProxyOnly,
-                        controlsEnabled = !isRunning,
-                        onCfProxyEnabledChange = {
-                            cfProxyEnabled = it
-                            if (!it) {
-                                cfProxyOnly = false
-                                prefs.edit().putBoolean("cfproxy_only", false).apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_enabled", it).apply()
-                        },
-                        onCfProxyPriorityChange = {
-                            cfProxyPriority = it
-                            prefs.edit().putBoolean("cfproxy_priority", it).apply()
-                        },
-                        onCfProxyOnlyChange = {
-                            cfProxyOnly = it
-                            if (it) {
-                                cfProxyEnabled = true
-                                cfProxyPriority = true
-                                prefs.edit()
-                                    .putBoolean("cfproxy_enabled", true)
-                                    .putBoolean("cfproxy_priority", true)
-                                    .apply()
-                            }
-                            prefs.edit().putBoolean("cfproxy_only", it).apply()
-                        },
-                    )
-                }
-
                 SettingsSectionCard(
                     titleRes = R.string.section_notifications,
                     subtitle = stringResource(R.string.section_notifications_hint),
@@ -2958,6 +3141,21 @@ private fun appVersionName(context: Context): String {
 }
 
 private fun safeToastFormatArg(value: String): String = value.replace("%", "%%")
+
+private fun mtProtoValidationMessage(
+    context: Context,
+    errors: Set<MtProtoProxyConfigValidationError>,
+): String {
+    val resId = when (errors.firstOrNull()) {
+        MtProtoProxyConfigValidationError.EMPTY_HOST -> R.string.mtproto_validation_host_empty
+        MtProtoProxyConfigValidationError.INVALID_PORT -> R.string.mtproto_validation_port_invalid
+        MtProtoProxyConfigValidationError.INVALID_SECRET -> R.string.mtproto_validation_secret_invalid
+        MtProtoProxyConfigValidationError.INVALID_FAKE_TLS_DOMAIN ->
+            R.string.mtproto_validation_fake_tls_domain_invalid
+        null -> R.string.mtproto_link_unavailable
+    }
+    return context.getString(resId)
+}
 
 private fun cfDomainStatusLabel(context: Context, status: CfDomainStatus): String {
     return context.getString(

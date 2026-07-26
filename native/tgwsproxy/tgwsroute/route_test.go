@@ -376,6 +376,21 @@ func TestBuiltInCFDomains(t *testing.T) {
 	}
 }
 
+func TestNormalizeCachedUpstreamCFDomainsDecodesFlowsealList(t *testing.T) {
+	domains := NormalizeCachedUpstreamCFDomains([]string{
+		"virkgj.com",
+		"vmmzovy.com",
+		"mkuosckvso.com",
+	})
+
+	want := []string{
+		DecodeFlowsealCFDomain("virkgj.com"),
+		DecodeFlowsealCFDomain("vmmzovy.com"),
+		DecodeFlowsealCFDomain("mkuosckvso.com"),
+	}
+	assertDomainList(t, domains, want)
+}
+
 func TestCFDomainPool_ManualSelectedBeforeBuiltIn(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return 100 })
 	pool.SetManualDomain("manual.example")
@@ -393,6 +408,17 @@ func TestCFDomainPool_BuiltIn429MovesToNextDomain(t *testing.T) {
 	pool.SetBuiltinDomains([]string{"pool-a.example", "pool-b.example"})
 	pool.MarkFailure("pool-a.example", CFFailureRateLimit, 100)
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"pool-b.example"})
+}
+
+func TestCFDomainPool_CachedDNSFailureGetsLongCooldown(t *testing.T) {
+	now := 100.0
+	pool := NewCFDomainPool(func() float64 { return now })
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+
+	health := pool.MarkFailure("cached.example", CFFailureDNS, 0)
+	if got := health.CooldownUntil - now; got != cachedUpstreamDNSCooldownSeconds {
+		t.Fatalf("cached DNS cooldown = %.0f, want %.0f", got, float64(cachedUpstreamDNSCooldownSeconds))
+	}
 }
 
 func TestCFDomainPool_ResetCooldowns(t *testing.T) {
@@ -444,6 +470,18 @@ func assertCandidateSet(t *testing.T, got []CFDomainCandidate, want []string) {
 	for _, domain := range want {
 		if _, ok := seen[domain]; !ok {
 			t.Fatalf("missing %s in %v", domain, got)
+		}
+	}
+}
+
+func assertDomainList(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len %d != %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("[%d]=%s want %s", i, got[i], want[i])
 		}
 	}
 }

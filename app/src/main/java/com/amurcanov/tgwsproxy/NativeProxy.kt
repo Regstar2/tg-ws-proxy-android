@@ -18,6 +18,9 @@ interface ProxyLibrary : Library {
     fun SetCachedCFDomains(domains: String)
     fun GetAdaptiveRouteStats(): Pointer?
     fun GetProxyStatus(): Pointer?
+    fun StartMtProtoProxy(host: String, port: Int, secret: String, runtimeConfig: String, verbose: Int): Int
+    fun StopMtProtoProxy(): Int
+    fun GetMtProtoProxyStatus(): Pointer?
     fun ResetAdaptiveRouteStats(all: Int)
     fun ResetAdaptiveNetworkRouteStats(profileId: String)
     fun FreeString(p: Pointer)
@@ -52,6 +55,24 @@ object NativeProxy {
     }
     fun getProxyStatus(): String? {
         val ptr = ProxyLibrary.INSTANCE.GetProxyStatus() ?: return null
+        val res = ptr.getString(0)
+        ProxyLibrary.INSTANCE.FreeString(ptr)
+        return res
+    }
+    fun startMtProtoProxy(
+        host: String,
+        port: Int,
+        secret: String,
+        runtimeConfig: String,
+        verbose: Int,
+    ): Int {
+        return ProxyLibrary.INSTANCE.StartMtProtoProxy(host, port, secret, runtimeConfig, verbose)
+    }
+    fun stopMtProtoProxy(): Int {
+        return ProxyLibrary.INSTANCE.StopMtProtoProxy()
+    }
+    fun getMtProtoProxyStatus(): String? {
+        val ptr = ProxyLibrary.INSTANCE.GetMtProtoProxyStatus() ?: return null
         val res = ptr.getString(0)
         ProxyLibrary.INSTANCE.FreeString(ptr)
         return res

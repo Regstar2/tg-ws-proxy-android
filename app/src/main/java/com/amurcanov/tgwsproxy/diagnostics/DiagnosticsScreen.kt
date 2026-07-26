@@ -135,6 +135,10 @@ fun DiagnosticsScreen(
             }
         }
 
+        state.frontendDiagnostics?.let { snapshot ->
+            FrontendDiagnosticsSections(snapshot)
+        }
+
         state.runtimeRoute?.let { runtime ->
             RuntimeRouteReadOnlyBlock(runtime)
         }
@@ -208,6 +212,307 @@ fun DiagnosticsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun FrontendDiagnosticsSections(snapshot: FrontendDiagnosticsSnapshot) {
+    DiagnosticsInfoCard(R.string.diagnostics_socks5_frontend_title) {
+        MetricLine(stringResource(R.string.diagnostics_frontend_kind), "SOCKS5")
+        MetricLine(
+            stringResource(R.string.diagnostics_maturity),
+            stringResource(R.string.diagnostics_value_stable),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_default_frontend),
+            stringResource(R.string.diagnostics_value_no),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_listener_status),
+            snapshot.socks5ListenerStatus,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_current_route_support),
+            supportStatusLabel(snapshot.socks5RouteSupport),
+        )
+        MetricLine(
+            stringResource(R.string.route_runtime_selected_route),
+            diagnosticValue(snapshot.socks5SelectedRoute),
+        )
+        MetricLine(
+            stringResource(R.string.route_runtime_active_route),
+            diagnosticValue(snapshot.socks5ActiveRoute),
+        )
+    }
+
+    DiagnosticsInfoCard(R.string.diagnostics_mtproto_frontend_title) {
+        MetricLine(
+            stringResource(R.string.diagnostics_frontend_kind),
+            stringResource(R.string.proxy_frontend_mtproto_title),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_mode_enabled),
+            booleanLabel(snapshot.mtProtoEnabled),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_listen_address),
+            "${snapshot.mtProtoHost}:${snapshot.mtProtoPort}",
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_secret_status),
+            secretStatusLabel(snapshot.mtProtoSecretStatus),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_secret_fingerprint),
+            diagnosticValue(snapshot.mtProtoSecretFingerprint),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_listener_status),
+            snapshot.mtProtoListenerStatus,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_outbound_support),
+            snapshot.mtProtoOutboundStatus,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_route_integration),
+            supportStatusLabel(snapshot.mtProtoRouteSupport),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_selected_backend),
+            diagnosticValue(snapshot.mtProtoSelectedBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_actual_backend),
+            diagnosticValue(snapshot.mtProtoActualBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_last_error_code),
+            snapshot.mtProtoLastErrorCode,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls),
+            booleanLabel(snapshot.mtProtoFakeTlsEnabled),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_masking_passthrough),
+            booleanLabel(snapshot.mtProtoMaskingPassthrough),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_accepted),
+            snapshot.mtProtoFakeTlsAccepted.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_rejected),
+            snapshot.mtProtoFakeTlsRejected.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_redirected),
+            snapshot.mtProtoFakeTlsRedirected.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_probes),
+            snapshot.mtProtoFakeTlsProbe.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_passthrough),
+            snapshot.mtProtoFakeTlsPassthrough.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fake_tls_last_error),
+            diagnosticValue(snapshot.mtProtoFakeTlsLastError),
+        )
+    }
+
+    DiagnosticsInfoCard(R.string.diagnostics_route_backend_title) {
+        MetricLine(
+            stringResource(R.string.diagnostics_configured_frontend),
+            snapshot.configuredFrontendKind,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_runtime_frontend),
+            snapshot.runtimeFrontendKind,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_route_integration),
+            supportStatusLabel(snapshot.runtimeRouteSupport),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_selected_backend),
+            diagnosticValue(snapshot.selectedBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_actual_backend),
+            diagnosticValue(snapshot.actualBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fallback_used),
+            snapshot.fallbackUsed?.let { booleanLabel(it) }
+                ?: stringResource(R.string.diagnostics_value_unknown),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_route_reason),
+            diagnosticValue(snapshot.routeReason),
+        )
+    }
+
+    DiagnosticsInfoCard(R.string.diagnostics_worker_future_pool_title) {
+        MetricLine(
+            stringResource(R.string.diagnostics_pool_enabled),
+            booleanLabel(snapshot.workerPoolEnabled),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_workers_configured),
+            snapshot.workerPoolWorkersCount.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_workers_enabled),
+            snapshot.workerPoolEnabledWorkersCount.toString(),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_selected_worker),
+            diagnosticValue(snapshot.workerPoolSelectedWorkerName),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_mtproto_worker_integration),
+            supportStatusLabel(snapshot.mtProtoWorkerPoolSupport),
+        )
+    }
+
+    DiagnosticsInfoCard(R.string.diagnostics_runtime_truth_title) {
+        MetricLine(
+            stringResource(R.string.diagnostics_runtime_frontend),
+            snapshot.runtimeFrontendKind,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_listener_status),
+            if (snapshot.runtimeFrontendKind == "MTPROTO") {
+                snapshot.mtProtoListenerStatus
+            } else {
+                snapshot.socks5ListenerStatus
+            },
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_selected_backend),
+            diagnosticValue(snapshot.selectedBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_actual_backend),
+            diagnosticValue(snapshot.actualBackend),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_fallback_used),
+            snapshot.fallbackUsed?.let { booleanLabel(it) }
+                ?: stringResource(R.string.diagnostics_value_unknown),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_route_reason),
+            diagnosticValue(snapshot.routeReason),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_last_error_code),
+            snapshot.lastErrorCode,
+        )
+    }
+
+    DiagnosticsInfoCard(R.string.diagnostics_comparison_title) {
+        Text(
+            stringResource(R.string.proxy_frontend_socks5_title),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_maturity),
+            stringResource(R.string.diagnostics_value_stable),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_default_frontend),
+            stringResource(R.string.diagnostics_value_no),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_current_route_support),
+            supportStatusLabel(snapshot.socks5RouteSupport),
+        )
+        Text(
+            stringResource(R.string.proxy_frontend_mtproto_title),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_default_frontend),
+            stringResource(R.string.diagnostics_value_yes),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_telegram_link_support),
+            supportStatusLabel(snapshot.mtProtoProxyLinkSupport),
+        )
+        MetricLine(
+            stringResource(R.string.diagnostics_current_route_support),
+            supportStatusLabel(snapshot.mtProtoRouteSupport),
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticsInfoCard(
+    titleRes: Int,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                stringResource(titleRes),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun supportStatusLabel(status: DiagnosticSupportStatus): String {
+    return stringResource(
+        when (status) {
+            DiagnosticSupportStatus.READY -> R.string.diagnostics_support_ready
+            DiagnosticSupportStatus.LIMITED -> R.string.diagnostics_support_limited
+            DiagnosticSupportStatus.UNSUPPORTED -> R.string.diagnostics_support_unsupported
+            DiagnosticSupportStatus.UNKNOWN -> R.string.diagnostics_value_unknown
+        },
+    )
+}
+
+@Composable
+private fun booleanLabel(value: Boolean): String {
+    return stringResource(
+        if (value) R.string.diagnostics_value_yes else R.string.diagnostics_value_no,
+    )
+}
+
+@Composable
+private fun diagnosticValue(value: String): String {
+    return value.ifBlank { stringResource(R.string.diagnostics_value_none) }
+}
+
+@Composable
+private fun secretStatusLabel(status: String): String {
+    return stringResource(
+        when (status) {
+            "CONFIGURED_MASKED" -> R.string.diagnostics_secret_configured_masked
+            "INVALID" -> R.string.diagnostics_secret_invalid
+            else -> R.string.diagnostics_secret_not_configured
+        },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

@@ -51,6 +51,31 @@ data class ProxyRuntimeMetrics(
     fun modeLabel(context: android.content.Context): String = RouteDisplayNames.modeLabel(context, mode)
 
     companion object {
+        internal fun fromMtProtoStatus(status: MtProtoNativeStatus): ProxyRuntimeMetrics {
+            val activeRoute = status.actualBackend.noneAsBlank()
+                .ifBlank { status.selectedBackend.noneAsBlank() }
+            val selectedRoute = status.selectedBackend.noneAsBlank()
+            return ProxyRuntimeMetrics(
+                running = status.toRuntimeState() == MtProtoRuntimeState.RUNNING ||
+                    status.toRuntimeState() == MtProtoRuntimeState.LISTENING_LOCAL_ONLY,
+                mode = "mtproto",
+                route = activeRoute,
+                activeRouteKind = activeRoute,
+                transportType = if (activeRoute.isBlank()) "" else "websocket",
+                activeConnections = status.activeConnections,
+                totalConnections = status.totalConnections,
+                lastError = status.lastError.noneAsBlank(),
+                routeRuntime = RouteRuntimeState(
+                    configuredMode = "mtproto",
+                    selectedRoute = selectedRoute,
+                    activeRoute = activeRoute,
+                    lastSuccessfulRoute = if (activeRoute.isNotBlank()) activeRoute else "",
+                    fallbackReason = if (status.fallbackUsed) status.routeReason.noneAsBlank() else "",
+                    lastUpdatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+
         fun parseStatus(raw: String?): ProxyRuntimeMetrics? {
             if (raw.isNullOrBlank()) {
                 return null
@@ -111,6 +136,10 @@ data class ProxyRuntimeMetrics(
         /** @deprecated Use [RouteDisplayNames.modeLabelRes] in UI code. */
         fun modeDisplayLabel(mode: String): String = mode
     }
+}
+
+private fun String.noneAsBlank(): String {
+    return trim().takeUnless { it.equals("none", ignoreCase = true) }.orEmpty()
 }
 
 private fun Map<String, String>.safeInt(vararg keys: String): Int {

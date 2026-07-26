@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"tg-ws-proxy/mtproxyfrontend"
 	"tg-ws-proxy/tgwsroute"
 )
 
@@ -49,16 +50,20 @@ type workerConfig struct {
 }
 
 type runtimeSettings struct {
-	Mode                connectionMode
-	CF                  cfProxyConfig
-	Worker              workerConfig
-	CFManualDomains     []string // user CF domains override cached and built-in pool entries
-	CFCachedUpstream    []string // cached Flowseal upstream domains
-	NetworkProfileID    string
-	NetworkProfileType  string
-	NetworkProfileLabel string
-	AdaptiveRouteStats  string
-	AutoStrategy        string
+	Mode                      connectionMode
+	CF                        cfProxyConfig
+	Worker                    workerConfig
+	CFManualDomains           []string // user CF domains override cached and built-in pool entries
+	CFCachedUpstream          []string // cached Flowseal upstream domains
+	NetworkProfileID          string
+	NetworkProfileType        string
+	NetworkProfileLabel       string
+	AdaptiveRouteStats        string
+	AutoStrategy              string
+	MtProtoFakeTLSDomain      string
+	MtProtoMaskingPassthrough bool
+	MtProtoWorkerPreconnect   bool
+	ForceTestDC               bool
 	// Per-network route policy (from Android @route_* tokens).
 	PolicyPresent bool
 	AllowDirect   bool
@@ -98,6 +103,8 @@ func setRuntimeSettings(cfg runtimeSettings) {
 	prev := getRuntimeSettings()
 	cfg.CF = normalizeCfProxyConfig(cfg.CF)
 	cfg.Worker.Domain = NormalizeWorkerDomain(cfg.Worker.Domain)
+	cfg.MtProtoFakeTLSDomain = mtproxyfrontend.NormalizeFakeTLSDomain(cfg.MtProtoFakeTLSDomain)
+	cfg.MtProtoMaskingPassthrough = cfg.MtProtoMaskingPassthrough && cfg.MtProtoFakeTLSDomain != ""
 	cfg.CFManualDomains = tgwsroute.NormalizeCFDomains(cfg.CFManualDomains)
 	cfg.PolicyGen = policyGenCounter.Add(1)
 	runtimeCfgMu.Lock()
@@ -655,7 +662,13 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 	}
 	stats.cfPoolHits.Add(1)
 
+	skipCachedUpstream := false
 	for _, candidate := range selection.Candidates {
+		if skipCachedUpstream && candidate.Source == tgwsroute.CFDomainSourceCachedUpstream {
+			logDebug.Printf("[%s] DC%d%s CF cached upstream skipped domain=%s reason=previous_dns_failure",
+				label, dc, mTag, candidate.Domain)
+			continue
+		}
 		baseDomain := candidate.Domain
 		host := cfProxyHost(wsDC, baseDomain)
 		url := fmt.Sprintf("wss://%s/apiws", host)
@@ -676,6 +689,11 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		logInfo.Printf("[%s] DC%d%s CF domain cooldown domain=%s reason=%s until=%s",
 			label, dc, mTag, baseDomain, failureKind, formatCooldownUntil(health.CooldownUntil))
 		logDebug.Printf("[%s] DC%d%s CF proxy failed domain=%s detail=%s", label, dc, mTag, baseDomain, reason)
+		if candidate.Source == tgwsroute.CFDomainSourceCachedUpstream && tgwsroute.IsCFDNSFailure(failureKind) {
+			skipCachedUpstream = true
+			logInfo.Printf("[%s] DC%d%s CF cached upstream fast-skip enabled after dns failure domain=%s",
+				label, dc, mTag, baseDomain)
+		}
 	}
 
 	logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
@@ -857,6 +875,10 @@ func classifyCFFailure(err error) tgwsroute.CFFailureKind {
 
 	var stageErr *wsStageError
 	if errors.As(err, &stageErr) {
+		var dnsErr *net.DNSError
+		if errors.As(stageErr.Err, &dnsErr) {
+			return tgwsroute.CFFailureDNS
+		}
 		if ne, ok := stageErr.Err.(net.Error); ok && ne.Timeout() {
 			return tgwsroute.CFFailureTimeout
 		}

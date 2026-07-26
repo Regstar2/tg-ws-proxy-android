@@ -14,11 +14,11 @@ import (
 )
 
 var (
-	lastMetricsRoute      atomic.Value // string — legacy alias of active route kind
-	lastActiveRouteKind   atomic.Value // string
-	lastMetricsTransport  atomic.Value // string: websocket | tcp
-	lastMetricsLatency    atomic.Int64
-	lastMetricsError      atomic.Value // string
+	lastMetricsRoute     atomic.Value // string — legacy alias of active route kind
+	lastActiveRouteKind  atomic.Value // string
+	lastMetricsTransport atomic.Value // string: websocket | tcp
+	lastMetricsLatency   atomic.Int64
+	lastMetricsError     atomic.Value // string
 )
 
 func transportForRoute(route routeKind) string {
@@ -143,7 +143,7 @@ func exportProxyStatus() string {
 		escapeStatusField(lastErr),
 		stats.workerEndpointPoolHits.Load(),
 		stats.workerEndpointPoolMisses.Load(),
-		boolInt(workerWsPreconnectEnabled),
+		boolInt(workerWsPreconnectActiveForSettings(settings)),
 		stats.workerWsPreconnectHits.Load(),
 		stats.workerWsPreconnectMisses.Load(),
 		workerPool.IdleCount(),

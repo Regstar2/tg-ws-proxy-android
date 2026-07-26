@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import com.amurcanov.tgwsproxy.NetworkProfileProvider
+import com.amurcanov.tgwsproxy.MtProtoProxyConfigDiagnostics
+import com.amurcanov.tgwsproxy.MtProtoProxyConfigRepository
 import com.amurcanov.tgwsproxy.PersistentLogStore
 import com.amurcanov.tgwsproxy.PersistentLoggingPrefsStore
 import com.amurcanov.tgwsproxy.ProxyRuntimeState
@@ -78,6 +80,13 @@ object DiagnosticReportContextFactory {
             workerPoolUiNoEnabledWorkers = reportUi.workerPoolNoEnabledWorkers,
             workerPoolUiInvalidConfig = reportUi.workerPoolInvalidConfig,
             cfProxyConfigured = reportUi.cfProxyConfigured,
+            mtProtoConfigLines = MtProtoProxyConfigDiagnostics.reportLines(
+                MtProtoProxyConfigRepository(prefs).loadForDiagnostics(),
+            ),
+            frontendDiagnostics = FrontendDiagnosticsSource.read(
+                context = context,
+                workerPoolSnapshot = reportUi.workerPoolSnapshot,
+            ),
             maskDomains = reportUi.maskDomains,
             fallbackEnabled = reportUi.fallbackEnabled,
             diagnosticsEnabled = reportUi.diagnosticsEnabled,

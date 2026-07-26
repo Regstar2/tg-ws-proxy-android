@@ -25,4 +25,12 @@ class DiagnosticReportSanitizerTest {
         assertTrue(out.contains("secret=***"))
         assertFalse(out.contains("my-value"))
     }
+
+    @Test
+    fun masksMtProtoSecretAssignment() {
+        val secret = "0123456789abcdef0123456789abcdef"
+        val out = DiagnosticReportSanitizer.sanitize("mtproto_secret=$secret")
+        assertTrue(out.contains("mtproto_secret=***"))
+        assertFalse(out.contains(secret))
+    }
 }

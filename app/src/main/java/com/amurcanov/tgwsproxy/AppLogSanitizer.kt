@@ -7,6 +7,8 @@ package com.amurcanov.tgwsproxy
 object AppLogSanitizer {
     // key=value (or key:"value") redaction. Keep key, redact value.
     private val patterns = listOf(
+        Regex("""(?i)\b(mtproto_secret|mtprotoSecret|secret_key|secretKey)\s*=\s*("[^"]*"|[^\s&]+)"""),
+        Regex("""(?i)\b(mtproto_secret|mtprotoSecret|secret_key|secretKey)\s*:\s*("[^"]*"|[^\s,}]+)"""),
         Regex("""(?i)\b(token|auth|auth_key|key|password|cookie|secret)\s*=\s*("[^"]*"|[^\s&]+)"""),
         Regex("""(?i)\b(token|auth|auth_key|key|password|cookie|secret)\s*:\s*("[^"]*"|[^\s,}]+)"""),
         Regex("""(?i)\b(payload|raw)\s*=\s*("[^"]*"|[^\s]+)"""),

@@ -35,6 +35,8 @@ data class DiagnosticReportContext(
     val workerPoolUiNoEnabledWorkers: Boolean = false,
     val workerPoolUiInvalidConfig: Boolean = false,
     val cfProxyConfigured: Boolean,
+    val mtProtoConfigLines: List<String> = emptyList(),
+    val frontendDiagnostics: FrontendDiagnosticsSnapshot = FrontendDiagnosticsSnapshot(),
     val maskDomains: Boolean,
     val fallbackEnabled: Boolean,
     val diagnosticsEnabled: Boolean,

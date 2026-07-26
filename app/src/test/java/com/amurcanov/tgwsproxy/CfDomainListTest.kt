@@ -19,12 +19,35 @@ class CfDomainListTest {
 
             https://Example.com/apiws
             second.example/
+            third.example
             // another comment
             """.trimIndent()
         )
 
         assertEquals(
-            CfDomainListParseResult.Success(listOf("example.com", "second.example")),
+            CfDomainListParseResult.Success(listOf("example.com", "second.example", "third.example")),
+            parsed,
+        )
+    }
+
+    @Test
+    fun parser_decodesFlowsealEncodedUpstreamList() {
+        val parsed = CfDomainListParser.parse(
+            """
+            virkgj.com
+            vmmzovy.com
+            mkuosckvso.com
+            """.trimIndent()
+        )
+
+        assertEquals(
+            CfDomainListParseResult.Success(
+                listOf(
+                    CfDomain.decodeFlowseal("virkgj.com"),
+                    CfDomain.decodeFlowseal("vmmzovy.com"),
+                    CfDomain.decodeFlowseal("mkuosckvso.com"),
+                ),
+            ),
             parsed,
         )
     }
@@ -39,7 +62,20 @@ class CfDomainListTest {
             127.0.0.1
             """.trimIndent()
         )
-        assertEquals(CfDomainListParseResult.Success(listOf("valid.example")), mixed)
+        assertTrue(mixed is CfDomainListParseResult.ValidationError)
+
+        val enoughValid = CfDomainListParser.parse(
+            """
+            valid.example
+            second.example
+            third.example
+            domain with spaces.com
+            """.trimIndent()
+        )
+        assertEquals(
+            CfDomainListParseResult.Success(listOf("valid.example", "second.example", "third.example")),
+            enoughValid,
+        )
 
         val invalidOnly = CfDomainListParser.parse(
             """
@@ -100,14 +136,14 @@ class CfDomainListTest {
             repository = repository,
             handlers = mapOf(
                 CfDomainUpdateConfig.PRIMARY_URL to { _ ->
-                    okBody("new.example\nsecond.example", etag = "\"abc\"")
+                    okBody("new.example\nsecond.example\nthird.example", etag = "\"abc\"")
                 },
             ),
         )
 
         val result = updater.manualUpdate()
         assertTrue(result is CfDomainListUpdateResult.Success)
-        assertEquals(listOf("new.example", "second.example"), repository.state().domains)
+        assertEquals(listOf("new.example", "second.example", "third.example"), repository.state().domains)
         assertEquals("\"abc\"", repository.state().etag)
         assertEquals(CfDomainUpdateSourceType.PRIMARY_GITHUB, repository.state().lastSuccessfulSource)
     }
@@ -159,13 +195,13 @@ class CfDomainListTest {
                 CfDomainUpdateConfig.PRIMARY_URL to { _ ->
                     throw UnknownHostException("dns down")
                 },
-                MIRROR_URL to { _ -> okBody("mirror.example") },
+                MIRROR_URL to { _ -> okBody("mirror.example\nsecond.example\nthird.example") },
             ),
         )
 
         val result = updater.manualUpdate()
         assertTrue(result is CfDomainListUpdateResult.Success)
-        assertEquals(listOf("mirror.example"), repository.state().domains)
+        assertEquals(listOf("mirror.example", "second.example", "third.example"), repository.state().domains)
         assertEquals(CfDomainUpdateSourceType.USER_MIRROR, repository.state().lastSuccessfulSource)
     }
 
@@ -187,7 +223,7 @@ class CfDomainListTest {
                     primaryCalls += 1
                     CfDomainHttpResponse(500, null, null, null)
                 },
-                MIRROR_URL to { _ -> okBody("mirror.example") },
+                MIRROR_URL to { _ -> okBody("mirror.example\nsecond.example\nthird.example") },
             ),
             sleeper = {},
         )
@@ -195,7 +231,7 @@ class CfDomainListTest {
         val result = updater.manualUpdate()
         assertTrue(result is CfDomainListUpdateResult.Success)
         assertEquals(2, primaryCalls)
-        assertEquals(listOf("mirror.example"), repository.state().domains)
+        assertEquals(listOf("mirror.example", "second.example", "third.example"), repository.state().domains)
     }
 
     @Test
@@ -214,13 +250,13 @@ class CfDomainListTest {
                 CfDomainUpdateConfig.PRIMARY_URL to { _ ->
                     CfDomainHttpResponse(429, null, null, null)
                 },
-                MIRROR_URL to { _ -> okBody("mirror.example") },
+                MIRROR_URL to { _ -> okBody("mirror.example\nsecond.example\nthird.example") },
             ),
         )
 
         val result = updater.manualUpdate()
         assertTrue(result is CfDomainListUpdateResult.Success)
-        assertEquals(listOf("mirror.example"), repository.state().domains)
+        assertEquals(listOf("mirror.example", "second.example", "third.example"), repository.state().domains)
     }
 
     @Test
@@ -283,13 +319,32 @@ class CfDomainListTest {
     }
 
     @Test
+    fun updater_shortValidBodyFailsAndKeepsCache() = runBlocking {
+        val persistence = FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
+        val repository = CfDomainListRepository(persistence)
+        val updater = buildUpdater(
+            repository = repository,
+            handlers = mapOf(
+                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("new.example\nsecond.example") },
+            ),
+        )
+
+        val result = updater.manualUpdate()
+        assertTrue(result is CfDomainListUpdateResult.Failure)
+        assertEquals(CfDomainUpdateStage.VALIDATION, (result as CfDomainListUpdateResult.Failure).stage)
+        assertEquals(listOf("old.example"), repository.state().domains)
+    }
+
+    @Test
     fun updater_testPrimaryDoesNotReplaceCache() = runBlocking {
         val persistence = FakePersistence(CfDomainUpstreamState(domains = listOf("old.example")))
         val repository = CfDomainListRepository(persistence)
         val updater = buildUpdater(
             repository = repository,
             handlers = mapOf(
-                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("new.example") },
+                CfDomainUpdateConfig.PRIMARY_URL to {
+                    okBody("new.example\nsecond.example\nthird.example")
+                },
             ),
         )
 
@@ -298,7 +353,7 @@ class CfDomainListTest {
         val success = result as CfDomainListUpdateResult.Success
         assertTrue(success.dryRun)
         assertEquals(listOf("old.example"), repository.state().domains)
-        assertEquals(1, success.domainCount)
+        assertEquals(3, success.domainCount)
     }
 
     @Test
@@ -350,7 +405,9 @@ class CfDomainListTest {
         val updater = buildUpdater(
             repository = CfDomainListRepository(persistence),
             handlers = mapOf(
-                CfDomainUpdateConfig.PRIMARY_URL to { _ -> okBody("fresh.example") },
+                CfDomainUpdateConfig.PRIMARY_URL to {
+                    okBody("fresh.example\nsecond.example\nthird.example")
+                },
             ),
             nowMs = { now + (60L * 60L * 1000L) + 1L },
         )

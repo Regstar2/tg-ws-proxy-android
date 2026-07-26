@@ -33,29 +33,27 @@ object DefaultNetworkRoutePolicies {
                     RouteKind.CF_PROXY_WS,
                     RouteKind.TCP_FALLBACK,
                 ),
-                preferredRoute = RouteKind.DIRECT_WS,
-                autoStrategy = AutoStrategy.STRICT_FAST_FAILOVER,
+                preferredRoute = RouteKind.CF_PROXY_WS,
+                autoStrategy = AutoStrategy.CF_PREFERRED,
                 allowFallback = true,
             )
             NetworkProfileType.MOBILE -> NetworkRoutePolicy(
                 networkType = type,
                 enabledRoutes = linkedSetOf(
                     RouteKind.CF_PROXY_WS,
-                    RouteKind.TCP_FALLBACK,
                 ),
                 preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.STRICT_FAST_FAILOVER,
-                allowFallback = true,
+                autoStrategy = AutoStrategy.CF_PREFERRED,
+                allowFallback = false,
             )
             NetworkProfileType.UNKNOWN -> NetworkRoutePolicy(
                 networkType = type,
                 enabledRoutes = linkedSetOf(
                     RouteKind.CF_PROXY_WS,
-                    RouteKind.TCP_FALLBACK,
                 ),
                 preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.STRICT_FAST_FAILOVER,
-                allowFallback = true,
+                autoStrategy = AutoStrategy.CF_PREFERRED,
+                allowFallback = false,
             )
         }
     }

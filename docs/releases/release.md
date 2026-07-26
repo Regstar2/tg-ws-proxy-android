@@ -67,4 +67,4 @@ Use `adb install -r` after uninstall if signatures differ (debug vs release).
 
 ## Historical release notes
 
-Per-version notes: [release-notes/](release-notes/)
+Per-version notes: `RELEASE_NOTES_vX.Y.Z.md` in this directory.

@@ -2,6 +2,17 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.10.12
+
+- MTProto Proxy is now the default local frontend on shared port `1443`; SOCKS5/WS stays available as a compatibility mode.
+- MTProto routing uses the existing route backend, including `cf_proxy_ws`. The `MTProto -> Cloudflare Proxy` path was manually verified on mobile network and Wi-Fi.
+- Fake TLS support for MTProto links: `dd<secret>` by default, `ee<secret><domain_hex>` when a masking domain is configured, plus optional masking-domain passthrough for probes.
+- Flowseal-inspired runtime hardening: direct IP cooldown, WS pool age rotation, listener watchdog, test DC support, and CF domain refresh quality gate.
+- Main screen cleanup: no Worker Pool button, no expandable metrics details, and no Worker Pool line in the compact status card.
+- Runtime log collection and persistent file logs are off by default; they can be enabled manually for diagnostics.
+- README refreshed for publication, screenshots replaced, and local runtime artifacts/logs removed from the working tree.
+- Known issue: Worker Pool is still slow and should be treated as a diagnostics/development path, not the default route.
+
 ## 1.9.8
 
 - **DC2 Worker destination scoring:** per-destination runtime score keyed by `dc + worker_dst + destination_mode` tracks bidirectional vs zero-down sessions, heavy zero-down upload volume, and a 5-minute penalty window after `ws_up_bytes >= 64 KiB` with no downstream data.
@@ -41,7 +52,7 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - Metrics split: `worker_endpoint_pool_hits/misses` (endpoint selection/failover) vs `worker_ws_preconnect_*` (disabled for cf_worker_ws).
 - Worker Pool UI polish: structured screen with summary, strategy, runtime state, and readable worker cards.
 - Selected vs runtime worker markers, health states, empty/warning/invalid config states, and improved add/edit/delete flows.
-- Main screen and Diagnostics show compact Worker Pool summary with link to Worker Pool settings.
+- Diagnostics shows Worker Pool summary with link to Worker Pool settings.
 
 ## 1.9.3
 

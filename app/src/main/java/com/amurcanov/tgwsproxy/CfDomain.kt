@@ -69,6 +69,7 @@ object CfDomain {
         "bxaxtxmrw.com",
         "dmohrsgmohcrwb.com",
     )
+    private val upstreamEncodedSet = upstreamEncoded.toSet()
 
     val builtInDomains: List<String> = upstreamEncoded
         .map(::decodeFlowseal)
@@ -123,6 +124,23 @@ object CfDomain {
             }
         }
         return "$decoded.co.uk"
+    }
+
+    fun normalizeCachedUpstream(domains: List<String>): List<String> {
+        val normalized = domains.mapNotNull(::normalizeOrNull)
+        val shouldDecodeFlowseal = normalized.any { it in upstreamEncodedSet }
+        val seen = linkedSetOf<String>()
+        normalized.forEach { domain ->
+            val effective = if (shouldDecodeFlowseal) {
+                normalizeOrNull(decodeFlowseal(domain))
+            } else {
+                domain
+            }
+            if (effective != null) {
+                seen += effective
+            }
+        }
+        return seen.toList()
     }
 
     private fun isValidHostname(host: String): Boolean {

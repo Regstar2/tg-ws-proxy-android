@@ -10,6 +10,7 @@ type CFFailureKind string
 
 const (
 	CFFailureUnknown   CFFailureKind = "unknown"
+	CFFailureDNS       CFFailureKind = "dns"
 	CFFailureRateLimit CFFailureKind = "http_429"
 	CFFailureForbidden CFFailureKind = "http_403"
 	CFFailureServer    CFFailureKind = "http_5xx"
@@ -17,6 +18,8 @@ const (
 	CFFailureTLS       CFFailureKind = "tls"
 	CFFailureWebSocket CFFailureKind = "websocket"
 )
+
+const cachedUpstreamDNSCooldownSeconds = 6 * 60 * 60
 
 type CFDomainHealth struct {
 	Domain              string
@@ -80,7 +83,7 @@ func (p *CFDomainPool) SetBuiltinDomains(domains []string) {
 }
 
 func (p *CFDomainPool) SetCachedUpstreamDomains(domains []string) {
-	normalized := NormalizeCFDomains(domains)
+	normalized := NormalizeCachedUpstreamCFDomains(domains)
 	p.mu.Lock()
 	p.cachedUpstream = normalized
 	for _, domain := range normalized {
@@ -119,7 +122,8 @@ func (p *CFDomainPool) MarkFailure(domain string, kind CFFailureKind, latencyMs 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	health := p.ensureHealthLocked(normalized, p.sourceForLocked(normalized))
+	source := p.sourceForLocked(normalized)
+	health := p.ensureHealthLocked(normalized, source)
 	now := p.now()
 	health.FailureCount++
 	health.ConsecutiveFailures++
@@ -129,6 +133,9 @@ func (p *CFDomainPool) MarkFailure(domain string, kind CFFailureKind, latencyMs 
 		health.LastLatencyMs = latencyMs
 	}
 	health.CooldownUntil = now + cooldownSeconds(kind, health.ConsecutiveFailures)
+	if source == CFDomainSourceCachedUpstream && IsCFDNSFailure(kind) {
+		health.CooldownUntil = now + cachedUpstreamDNSCooldownSeconds
+	}
 	return *health
 }
 
@@ -326,6 +333,8 @@ func cooldownSeconds(kind CFFailureKind, consecutive int) float64 {
 	}
 
 	switch kind {
+	case CFFailureDNS:
+		return maxFloat(progressive, 120)
 	case CFFailureRateLimit:
 		return maxFloat(progressive, 300)
 	case CFFailureForbidden:
@@ -335,6 +344,10 @@ func cooldownSeconds(kind CFFailureKind, consecutive int) float64 {
 	default:
 		return progressive
 	}
+}
+
+func IsCFDNSFailure(kind CFFailureKind) bool {
+	return kind == CFFailureDNS
 }
 
 func scoreHealth(health CFDomainHealth) int {

@@ -1,12 +1,12 @@
 # Architecture
 
-High-level view of TGWSProxyAndroid. For file locations see [project-map.md](project-map.md).
+High-level view of TGWSProxyAndroid. For file locations see [repository-structure.md](../development/repository-structure.md).
 
 ## Flow
 
 ```text
 Telegram app
-    -> SOCKS5 127.0.0.1:1081
+    -> local proxy frontend (default: MTProto Proxy 127.0.0.1:1443)
         -> Android ProxyService (foreground)
             -> Go runtime (libtgwsproxy.so)
                 -> route selection + pools
@@ -18,12 +18,33 @@ Telegram app
 ### Android UI and settings
 
 - Jetpack Compose (`MainActivity.kt`): start/stop proxy, metrics card, route policy UI, diagnostics, logs.
-- Preferences: port, connection mode, worker domain, CF domains, per-network policies, notifications, language.
+- Preferences: shared local port, frontend type, connection mode, worker domain,
+  CF domains, per-network policies, notifications, language.
+- MTProto settings are stored separately from the SOCKS5 runtime config. They
+  use local host `127.0.0.1`, shared default port `1443`, and a generated
+  16-byte / 32-hex raw secret. Diagnostic reports must include only masked
+  MTProto secrets.
+- The MTProto settings UI exposes the frontend switch, local config, masking
+  domain, Fake TLS passthrough, masked secret status, and Telegram proxy link
+  actions. Generated links use the official `t.me/proxy` / `tg://proxy`
+  parameter shape with `dd` or `ee` transport prefixes.
 
 ### Foreground service
 
-- `ProxyService.kt` runs the native proxy, polls `GetProxyStatus()`, updates notification and `ProxyRuntimeState`.
+- `ProxyService.kt` runs the selected local proxy frontend, polls `GetProxyStatus()`
+  for the SOCKS5/WS runtime, updates notification and `ProxyRuntimeState`.
 - Network changes can trigger `ACTION_RECONFIGURE` with updated policy tokens.
+- `LocalProxyFrontendType` selects the local frontend protocol. The default
+  frontend is `MTPROTO_EXPERIMENTAL`; the pref value is kept for migration
+  compatibility, while UI labels show `MTProto Proxy`.
+- `Socks5LocalProxyFrontend` wraps the existing Go/JNA `NativeProxy` calls without changing runtime arguments.
+- `MtProtoLocalProxyFrontend` loads `MtProtoProxyConfig`, maps it into
+  `MtProtoRuntimeConfig`, checks the local port before start, writes masked logs,
+  and delegates to `MtProtoRuntimeAdapter`.
+- `NativeMtProtoRuntimeAdapter` calls the Go `StartMtProtoProxy` listener. A
+  validated MTProxy handshake can enter the route chain and report selected vs
+  actual backend for `direct_ws`, `cf_proxy_ws`, `cf_worker_ws`, or direct TCP.
+  The tested primary path is MTProto over `cf_proxy_ws`.
 
 ### Runtime config (Android → Go)
 
@@ -33,6 +54,9 @@ Telegram app
 ### Go runtime
 
 - SOCKS5 listener, MTProto init parsing, per-DC routing.
+- MTProto listener in `mtproxyfrontend`, with upstream-derived
+  handshake/session transforms, Fake TLS, masking-domain passthrough, and route
+  connectors for direct WS, CF Proxy, Worker WS, and direct TCP.
 - Route chains (`routing.go`), adaptive ordering (`adaptive_bridge.go` + `tgwsroute/`).
 - Pools: direct WS, Worker WS, CF domain pool with health/cooldown.
 - Status export (`proxy_status_bridge.go`) for Android metrics.

@@ -9,6 +9,8 @@ import com.amurcanov.tgwsproxy.routeprobe.RouteDiagnosticsRepository
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
+import com.amurcanov.tgwsproxy.worker.WorkerPoolReportSnapshot
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 
 class DiagnosticsViewModel(
     private val repository: RouteDiagnosticsRepository = RouteDiagnosticsRepository(),
@@ -33,6 +36,16 @@ class DiagnosticsViewModel(
     fun syncRuntimeRoute(routeState: RouteRuntimeState? = null) {
         val runtime = routeState ?: ProxyRuntimeState.uiMetrics.value.runtime.routeRuntime
         _state.update { it.copy(runtimeRoute = RuntimeRouteUiModel.from(runtime)) }
+    }
+
+    suspend fun refreshFrontendDiagnostics(
+        context: Context,
+        workerPoolSnapshot: WorkerPoolReportSnapshot? = null,
+    ) {
+        val snapshot = withContext(Dispatchers.IO) {
+            FrontendDiagnosticsSource.read(context, workerPoolSnapshot)
+        }
+        _state.update { it.copy(frontendDiagnostics = snapshot) }
     }
 
     fun clearScreenError() {

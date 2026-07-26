@@ -23,6 +23,7 @@ private const val MAX_ATTEMPTS_MANUAL = 2
 private const val MAX_ATTEMPTS_AUTO = 1
 private const val RETRY_DELAY_MIN_MS = 500L
 private const val RETRY_DELAY_MAX_MS = 1500L
+internal const val MIN_VALID_CF_UPSTREAM_DOMAINS = 3
 
 @Deprecated("Use CfDomainUpdateConfig.PRIMARY_URL", ReplaceWith("CfDomainUpdateConfig.PRIMARY_URL"))
 const val DEFAULT_CF_DOMAIN_SOURCE_URL: String = CfDomainUpdateConfig.PRIMARY_URL
@@ -63,8 +64,7 @@ sealed interface CfDomainListParseResult {
 
 object CfDomainListParser {
     fun parse(text: String): CfDomainListParseResult {
-        val domains = mutableListOf<String>()
-        val seen = linkedSetOf<String>()
+        val candidates = mutableListOf<String>()
         var candidateCount = 0
 
         text.lineSequence().forEach { rawLine ->
@@ -75,14 +75,16 @@ object CfDomainListParser {
 
             candidateCount += 1
             val normalized = CfDomain.normalizeOrNull(line) ?: return@forEach
-            if (seen.add(normalized)) {
-                domains += normalized
-            }
+            candidates += normalized
         }
 
+        val domains = CfDomain.normalizeCachedUpstream(candidates)
         return when {
-            domains.isNotEmpty() -> CfDomainListParseResult.Success(domains)
+            domains.size >= MIN_VALID_CF_UPSTREAM_DOMAINS -> CfDomainListParseResult.Success(domains)
             candidateCount == 0 -> CfDomainListParseResult.EmptyListError
+            domains.isNotEmpty() -> CfDomainListParseResult.ValidationError(
+                "too_few_valid_domains valid=${domains.size} required=$MIN_VALID_CF_UPSTREAM_DOMAINS",
+            )
             else -> CfDomainListParseResult.ValidationError("no valid Cloudflare domains")
         }
     }

@@ -63,6 +63,7 @@ object RouteDisplayNames {
             "worker_only" -> R.string.connection_mode_worker_only
             "cf_only" -> R.string.connection_mode_cf_only
             "direct_only" -> R.string.connection_mode_direct_only
+            "mtproto" -> R.string.proxy_frontend_mtproto_title
             else -> R.string.route_display_unknown
         }
     }

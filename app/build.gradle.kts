@@ -46,8 +46,8 @@ android {
         applicationId = "com.amurcanov.tgwsproxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 49
-        versionName = "1.9.8"
+        versionCode = 50
+        versionName = "1.10.12"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

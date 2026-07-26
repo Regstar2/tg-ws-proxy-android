@@ -9,17 +9,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +48,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
 import com.amurcanov.tgwsproxy.worker.WorkerPoolSettingsScreen
@@ -86,9 +95,7 @@ fun CloudflareSettingsScreen(
     workerPoolEnabled: Boolean,
     workerPoolWorkers: List<WorkerEndpoint>,
     workerPoolSelectedWorker: WorkerEndpoint?,
-    workerPoolSelectionStrategy: com.amurcanov.tgwsproxy.worker.WorkerSelectionStrategy,
     workerPoolUiState: com.amurcanov.tgwsproxy.worker.WorkerPoolUiState,
-    workerPoolCompact: com.amurcanov.tgwsproxy.worker.WorkerPoolCompactUiModel? = null,
     maskDomainsInSettings: Boolean,
     onWorkerDomainChange: (String) -> Unit,
     onWorkerDomainBlur: () -> Unit,
@@ -129,8 +136,6 @@ fun CloudflareSettingsScreen(
     mirrorValidationError: String?,
     isUpdateRunning: Boolean,
     isDiagRunning: Boolean,
-    checkingWorkerIds: Set<String> = emptySet(),
-    isCheckingAllWorkers: Boolean = false,
     onAutoUpdateChange: (Boolean) -> Unit,
     onMirrorEnabledChange: (Boolean) -> Unit,
     onMirrorUrlChange: (String) -> Unit,
@@ -155,7 +160,6 @@ fun CloudflareSettingsScreen(
                 isProxyRunning = isProxyRunning,
                 workerConfigured = WorkerDomain.normalize(workerDomainText).isNotBlank() ||
                     workerPoolWorkers.any { it.enabled },
-                workerEnabled = workerEnabled || workerPoolEnabled,
                 workerDomainText = workerDomainText,
                 workerPoolEnabled = workerPoolEnabled,
                 workerPoolSelectedWorker = workerPoolSelectedWorker,
@@ -292,7 +296,6 @@ private fun CloudflareSubpageScaffold(
 private fun CloudflareOverviewScreen(
     isProxyRunning: Boolean,
     workerConfigured: Boolean,
-    workerEnabled: Boolean,
     workerDomainText: String,
     workerPoolEnabled: Boolean,
     workerPoolSelectedWorker: WorkerEndpoint?,
@@ -467,7 +470,6 @@ private fun CfProxyDomainsSettingsScreen(
         )
         Spacer(modifier = Modifier.height(10.dp))
         CfDomainSourcesCard(
-            upstreamState = upstreamState,
             autoUpdateEnabled = autoUpdateEnabled,
             mirrorEnabled = mirrorEnabled,
             mirrorUrl = mirrorUrl,
@@ -552,56 +554,43 @@ private fun CfDomainActionsCard(
     onOpenDomainList: () -> Unit,
 ) {
     CfSectionCard(titleRes = R.string.cf_proxy_domains_actions_title) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(
+            CfDomainActionButton(
+                text = stringResource(R.string.cf_domains_test),
+                icon = Icons.Default.Refresh,
                 onClick = onTestCfDomains,
                 enabled = !isProxyRunning && !isDiagRunning,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.cf_domains_test))
-            }
-            OutlinedButton(
+            )
+            CfDomainActionButton(
+                text = if (isUpdateRunning) {
+                    stringResource(R.string.cf_domains_update_running)
+                } else {
+                    stringResource(R.string.cf_domains_update_all)
+                },
+                icon = Icons.Default.Refresh,
                 onClick = onUpdateUpstream,
                 enabled = !isUpdateRunning,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(
-                    if (isUpdateRunning) {
-                        stringResource(R.string.cf_domains_update_running)
-                    } else {
-                        stringResource(R.string.cf_domains_update_all)
-                    },
-                )
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedButton(
+                primary = true,
+            )
+            CfDomainActionButton(
+                text = stringResource(R.string.cf_domains_reset_cooldown),
+                icon = Icons.Default.Refresh,
                 onClick = onResetCooldown,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.cf_domains_reset_cooldown))
-            }
-            OutlinedButton(
+            )
+            CfDomainActionButton(
+                text = stringResource(R.string.cf_proxy_domains_open_list),
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
                 onClick = onOpenDomainList,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.cf_proxy_domains_open_list))
-            }
+            )
         }
     }
 }
 
 @Composable
 private fun CfDomainSourcesCard(
-    upstreamState: CfDomainUpstreamState,
     autoUpdateEnabled: Boolean,
     mirrorEnabled: Boolean,
     mirrorUrl: String,
@@ -657,28 +646,79 @@ private fun CfDomainSourcesCard(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(
+            CfDomainActionButton(
+                text = stringResource(R.string.cf_update_test_primary),
+                icon = Icons.Default.Refresh,
                 onClick = onTestPrimarySource,
                 enabled = !isUpdateRunning,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.cf_update_test_primary))
-            }
-            OutlinedButton(
+            )
+            CfDomainActionButton(
+                text = stringResource(R.string.cf_update_test_mirror),
+                icon = Icons.Default.Refresh,
                 onClick = onTestMirrorSource,
                 enabled = !isUpdateRunning && mirrorEnabled,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.cf_update_test_mirror))
-            }
+            )
         }
     }
+}
+
+@Composable
+private fun CfDomainActionButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    primary: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val buttonModifier = modifier
+        .fillMaxWidth()
+        .heightIn(min = 48.dp)
+    val shape = RoundedCornerShape(12.dp)
+    if (primary) {
+        FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+            shape = shape,
+            colors = ButtonDefaults.filledTonalButtonColors(),
+        ) {
+            CfDomainActionContent(icon = icon, text = text)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = buttonModifier,
+            shape = shape,
+        ) {
+            CfDomainActionContent(icon = icon, text = text)
+        }
+    }
+}
+
+@Composable
+private fun CfDomainActionContent(
+    icon: ImageVector,
+    text: String,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+    )
+    Spacer(modifier = Modifier.width(8.dp))
+    Text(
+        text = text,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)

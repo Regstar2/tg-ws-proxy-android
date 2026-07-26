@@ -1,6 +1,6 @@
 # Структура репозитория
 
-Актуально для версии **1.8.0**.
+Актуально для версии **1.10.12**.
 
 ## Корень
 
@@ -20,7 +20,7 @@
 
 ## `app/`
 
-Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, настройки маршрутов, логи, JNI/JNA к `libtgwsproxy.so`.
+Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, настройки frontend/route policy, логи, JNI/JNA к `libtgwsproxy.so`.
 
 Собранная библиотека: `app/src/main/jniLibs/arm64-v8a/libtgwsproxy.so` (генерируется, в git не коммитится).
 
@@ -28,8 +28,9 @@ Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, нас
 
 Нативный proxy runtime:
 
-- `tg-ws-proxy.go` — SOCKS5, bridge, CGO exports
+- `tg-ws-proxy.go` — SOCKS5, MTProto lifecycle, bridge, CGO exports
 - `routing.go`, `adaptive_bridge.go`, `proxy_status_bridge.go`
+- `mtproxyfrontend/` — MTProto listener/frontend
 - `tgwsroute/` — типы маршрутов, adaptive, CF pool
 - `go.mod`, `*_test.go`
 
@@ -60,6 +61,7 @@ go test ./...
 | `build-apk.ps1` | Gradle APK + копия в `artifacts/` |
 | `generate-icons.py` | Иконки из `icon.png` |
 | `sync-readme-screenshots.ps1` | Копирование скринов в `docs/assets/screenshots/` |
+| `cloudflare-worker/worker.js` | Worker script для ручного деплоя |
 
 ## Не для git
 

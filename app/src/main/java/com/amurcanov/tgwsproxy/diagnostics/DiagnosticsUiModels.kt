@@ -89,6 +89,7 @@ data class DiagnosticsScreenState(
     val isGeneratingReport: Boolean = false,
     val persistentLogsEnabled: Boolean = false,
     val persistentLogsSizeLabel: String = "",
+    val frontendDiagnostics: FrontendDiagnosticsSnapshot? = null,
 )
 
 data class WorkerPoolHealthSummaryUi(

@@ -107,16 +107,23 @@ object WorkerSelectionResolver {
         nowMs: Long,
     ): WorkerSelectionResult {
         val eligible = filterEligible(workers, config, nowMs)
-        if (eligible.isEmpty()) {
-            return noEnabledOrBackoff(WorkerSelectionStrategy.PRIORITY, workers, config, nowMs)
+        if (eligible.workers.isEmpty()) {
+            return noEnabledOrBackoff(WorkerSelectionStrategy.PRIORITY, workers)
         }
-        val ordered = eligible.sortedWith(
+        val ordered = eligible.workers.sortedWith(
             compareByDescending<WorkerEndpoint> { it.priority }
                 .thenBy { WorkerCandidateMapper.stateRank(it.state) }
                 .thenBy { it.createdAt }
                 .thenBy { it.id },
         )
-        return mapSuccess(ordered, config.selectedWorkerId, WorkerSelectionStrategy.PRIORITY, WorkerSelectionReason.HIGHEST_PRIORITY, nowMs)
+        return mapSuccess(
+            ordered,
+            config.selectedWorkerId,
+            WorkerSelectionStrategy.PRIORITY,
+            WorkerSelectionReason.HIGHEST_PRIORITY,
+            nowMs,
+            eligible.skippedBackoffCount,
+        )
     }
 
     private fun resolveFailover(
@@ -145,11 +152,19 @@ object WorkerSelectionResolver {
                         .thenBy { it.id },
                 ),
             )
-        }.filter { WorkerCandidateMapper.isEligibleForAttempt(it, config, nowMs) }
-        if (ordered.isEmpty()) {
-            return noEnabledOrBackoff(WorkerSelectionStrategy.FAILOVER, workers, config, nowMs)
         }
-        return mapSuccess(ordered, selectedId, WorkerSelectionStrategy.FAILOVER, WorkerSelectionReason.FAILOVER_ORDER, nowMs)
+        val eligibleOrdered = filterEligible(ordered, config, nowMs)
+        if (eligibleOrdered.workers.isEmpty()) {
+            return noEnabledOrBackoff(WorkerSelectionStrategy.FAILOVER, workers)
+        }
+        return mapSuccess(
+            eligibleOrdered.workers,
+            selectedId,
+            WorkerSelectionStrategy.FAILOVER,
+            WorkerSelectionReason.FAILOVER_ORDER,
+            nowMs,
+            eligibleOrdered.skippedBackoffCount,
+        )
     }
 
     private fun resolveRoundRobin(
@@ -159,10 +174,10 @@ object WorkerSelectionResolver {
         advanceRoundRobin: Boolean,
     ): WorkerSelectionResult {
         val eligible = filterEligible(workers, config, nowMs)
-        if (eligible.isEmpty()) {
-            return noEnabledOrBackoff(WorkerSelectionStrategy.ROUND_ROBIN, workers, config, nowMs)
+        if (eligible.workers.isEmpty()) {
+            return noEnabledOrBackoff(WorkerSelectionStrategy.ROUND_ROBIN, workers)
         }
-        val sorted = eligible.sortedWith(WorkerCandidateMapper.stableOrderComparator())
+        val sorted = eligible.workers.sortedWith(WorkerCandidateMapper.stableOrderComparator())
         val cursorId = config.roundRobinCursor?.takeIf { it.isNotBlank() }
         var startIdx = cursorId?.let { id -> sorted.indexOfFirst { it.id == id } } ?: -1
         var reason = WorkerSelectionReason.ROUND_ROBIN
@@ -195,7 +210,7 @@ object WorkerSelectionResolver {
             candidates = mapped.candidates,
             strategy = WorkerSelectionStrategy.ROUND_ROBIN,
             reason = reason,
-            skippedBackoffCount = mapped.skippedBackoffCount,
+            skippedBackoffCount = eligible.skippedBackoffCount + mapped.skippedBackoffCount,
             roundRobinNextCursor = nextCursor,
         )
     }
@@ -206,11 +221,11 @@ object WorkerSelectionResolver {
         nowMs: Long,
     ): WorkerSelectionResult {
         val eligible = filterEligible(workers, config, nowMs)
-        if (eligible.isEmpty()) {
-            return noEnabledOrBackoff(WorkerSelectionStrategy.LOWEST_LATENCY, workers, config, nowMs)
+        if (eligible.workers.isEmpty()) {
+            return noEnabledOrBackoff(WorkerSelectionStrategy.LOWEST_LATENCY, workers)
         }
         val maxAge = config.lowestLatencyMaxAgeMs.coerceAtLeast(0L)
-        val withValidLatency = eligible.filter { worker ->
+        val withValidLatency = eligible.workers.filter { worker ->
             hasFreshLatency(worker, nowMs, maxAge)
         }
         if (withValidLatency.isEmpty()) {
@@ -237,7 +252,7 @@ object WorkerSelectionResolver {
                 .thenBy { it.priority }
                 .thenBy { it.id },
         )
-        val withoutLatency = eligible.filter { worker -> !hasFreshLatency(worker, nowMs, maxAge) }
+        val withoutLatency = eligible.workers.filter { worker -> !hasFreshLatency(worker, nowMs, maxAge) }
             .sortedWith(
                 compareBy<WorkerEndpoint>({ WorkerCandidateMapper.stateRank(it.state) })
                     .thenBy { it.priority }
@@ -251,6 +266,7 @@ object WorkerSelectionResolver {
             WorkerSelectionStrategy.LOWEST_LATENCY,
             WorkerSelectionReason.LOWEST_CACHED_LATENCY,
             nowMs,
+            eligible.skippedBackoffCount,
         )
     }
 
@@ -262,12 +278,32 @@ object WorkerSelectionResolver {
         return true
     }
 
+    private data class EligibleWorkers(
+        val workers: List<WorkerEndpoint>,
+        val skippedBackoffCount: Int,
+    )
+
     private fun filterEligible(
         workers: List<WorkerEndpoint>,
         config: WorkerPoolConfig,
         nowMs: Long,
-    ): List<WorkerEndpoint> {
-        return workers.filter { WorkerCandidateMapper.isEligibleForAttempt(it, config, nowMs) }
+    ): EligibleWorkers {
+        var skippedBackoff = 0
+        val eligible = workers.filter { worker ->
+            if (!worker.enabled) return@filter false
+            if (!config.allowDegradedWorkers && worker.state == WorkerHealthState.DEGRADED) {
+                return@filter false
+            }
+            if (
+                worker.state == WorkerHealthState.DEAD &&
+                WorkerHealthBackoffPolicy.shouldSkipAutomaticCheck(worker, worker.lastCheckedAt, nowMs)
+            ) {
+                skippedBackoff += 1
+                return@filter false
+            }
+            worker.normalizedDomain().isNotBlank()
+        }
+        return EligibleWorkers(eligible, skippedBackoff)
     }
 
     private fun mapSuccess(
@@ -276,6 +312,7 @@ object WorkerSelectionResolver {
         strategy: WorkerSelectionStrategy,
         reason: WorkerSelectionReason,
         nowMs: Long,
+        skippedBackoffCount: Int = 0,
     ): WorkerSelectionResult {
         val mapped = WorkerCandidateMapper.mapOrdered(ordered, selectedWorkerId, nowMs)
         if (mapped.candidates.isEmpty()) {
@@ -285,14 +322,12 @@ object WorkerSelectionResolver {
             TAG,
             "Worker selection candidates resolved: strategy=${strategy.name}, count=${mapped.candidates.size}, reason=${reason.wireValue}",
         )
-        return success(mapped.candidates, strategy, reason, mapped.skippedBackoffCount)
+        return success(mapped.candidates, strategy, reason, skippedBackoffCount + mapped.skippedBackoffCount)
     }
 
     private fun noEnabledOrBackoff(
         strategy: WorkerSelectionStrategy,
         workers: List<WorkerEndpoint>,
-        config: WorkerPoolConfig,
-        nowMs: Long,
     ): WorkerSelectionResult {
         val enabledCount = workers.count { it.enabled }
         if (enabledCount == 0) {

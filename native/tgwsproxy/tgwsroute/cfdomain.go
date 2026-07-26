@@ -28,6 +28,14 @@ var flowsealEncodedCFDomains = []string{
 	"dmohrsgmohcrwb.com",
 }
 
+var flowsealEncodedCFDomainSet = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(flowsealEncodedCFDomains))
+	for _, domain := range flowsealEncodedCFDomains {
+		out[domain] = struct{}{}
+	}
+	return out
+}()
+
 func FlowsealEncodedCFDomains() []string {
 	return append([]string(nil), flowsealEncodedCFDomains...)
 }
@@ -137,6 +145,37 @@ func NormalizeCFDomains(raw []string) []string {
 		out = append(out, domain)
 	}
 	return out
+}
+
+func NormalizeCachedUpstreamCFDomains(raw []string) []string {
+	normalized := NormalizeCFDomains(raw)
+	if !looksLikeFlowsealEncodedCFList(normalized) {
+		return normalized
+	}
+
+	out := make([]string, 0, len(normalized))
+	seen := make(map[string]struct{}, len(normalized))
+	for _, domain := range normalized {
+		decoded, ok := NormalizeCFDomain(DecodeFlowsealCFDomain(domain))
+		if !ok {
+			continue
+		}
+		if _, exists := seen[decoded]; exists {
+			continue
+		}
+		seen[decoded] = struct{}{}
+		out = append(out, decoded)
+	}
+	return out
+}
+
+func looksLikeFlowsealEncodedCFList(domains []string) bool {
+	for _, domain := range domains {
+		if _, ok := flowsealEncodedCFDomainSet[domain]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func IsValidCFDomain(raw string) bool {

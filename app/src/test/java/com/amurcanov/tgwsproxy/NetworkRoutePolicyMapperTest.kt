@@ -63,7 +63,8 @@ class NetworkRoutePolicyMapperTest {
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE), policy)
         assertFalse(RouteKind.DIRECT_WS in policy.enabledRoutes)
-        assertTrue(RouteKind.WORKER_WS in policy.enabledRoutes)
+        assertFalse(RouteKind.WORKER_WS in policy.enabledRoutes)
+        assertTrue(RouteKind.CF_PROXY_WS in policy.enabledRoutes)
     }
 
     @Test

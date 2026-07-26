@@ -60,10 +60,7 @@ func TestInitSessionWorkerRoutePreservesFirstPacket(t *testing.T) {
 }
 
 func TestInitSessionDirectRouteMayPatchWhenMappedViaIP(t *testing.T) {
-	original := make([]byte, 64)
-	for i := range original {
-		original[i] = byte(i)
-	}
+	original := buildTestInitWithSignedDC(t, 0)
 
 	dcOptMu.Lock()
 	prev := dcOpt

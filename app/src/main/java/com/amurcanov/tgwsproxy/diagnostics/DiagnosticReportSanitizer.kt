@@ -10,6 +10,8 @@ object DiagnosticReportSanitizer {
     private val bearerInline = Regex("""(?i)\bBearer\s+\S+""")
     private val urlQueryPattern = Regex("""(\?)([^#\s"]+)""")
     private val secretPatterns = listOf(
+        Regex("""(?i)\b(mtproto_secret|mtprotoSecret|secret_key|secretKey)\s*=\s*[^\s&"']+"""),
+        Regex("""(?i)\b(mtproto_secret|mtprotoSecret|secret_key|secretKey)\s*:\s*[^\s,}]+"""),
         Regex("""(?i)\b(token|secret|password|auth_key|api_key|cookie)\s*=\s*[^\s&"']+"""),
         Regex("""(?i)\b(token|secret|password|auth_key|api_key|cookie)\s*:\s*[^\s,}]+"""),
     )

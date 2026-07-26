@@ -1,170 +1,216 @@
-# TGWSProxyAndroid
+# TgWsProxy Android
 
-Android-приложение для локального SOCKS5-прокси Telegram с маршрутизацией через WebSocket (Direct, Cloudflare Worker, Cloudflare Proxy) и TCP fallback. Нативный runtime (`libtgwsproxy.so`) управляется из Kotlin UI.
+Android-прокси для Telegram. Приложение поднимает локальный прокси на
+`127.0.0.1:1443`, а дальше ведёт трафик через Cloudflare Proxy, прямой
+WebSocket Telegram, Cloudflare Worker или TCP fallback.
 
-**Версия:** 1.8.0 · **Статус:** активная разработка  
+В текущей ветке основной режим - **MTProto Proxy**. SOCKS5/WebSocket оставлен
+как режим совместимости на том же локальном порту.
 
-Репозиторий: https://github.com/Regstar2/TgWsProxy_Android
+## Текущее состояние
 
-## Обзор
+- MTProto через **Cloudflare Proxy** проверен вручную на мобильной сети и на
+  Wi-Fi. Это сейчас главный рабочий сценарий.
+- По умолчанию используется порт `1443`, чтобы Telegram сразу получал нормальную
+  MTProto-ссылку.
+- Worker Pool есть в настройках, диагностике и runtime, но пока работает
+  слишком медленно. Я бы не делал его основным маршрутом до отдельной доводки.
+- Логи, отчёты и UI скрывают MTProto secret, query-параметры и чувствительные
+  домены там, где это возможно.
 
-TgWsProxy поднимает прокси на `127.0.0.1` (порт по умолчанию `1081`), принимает SOCKS5 от Telegram и направляет MTProto-трафик по выбранным маршрутам. Подходит для сетей, где прямые Telegram endpoint-ы недоступны или нестабильны.
+## Что изменилось после опубликованной GitHub-ветки
 
-**Приложение не является VPN** и не шифрует весь трафик устройства — только сессии, идущие через настроенный SOCKS5 в Telegram.
+Локальная версия заметно ушла вперёд относительно прежнего `main` на GitHub
+(`v1.8.4`). Изменения:
 
-## Возможности
-
-- Локальный SOCKS5 для Telegram, deep link «Применить в Telegram»
-- Foreground service и уведомление со статусом
-- Режимы и **политики маршрутов** отдельно для Wi‑Fi и мобильной сети
-- Cloudflare Proxy (`cf_proxy_ws`) с пулом доменов и cooldown
-- Опциональный Cloudflare Worker (`cf_worker_ws`)
-- Прямой WebSocket (`direct_ws`) и TCP fallback
-- Адаптивный режим **Auto** (статистика, cooldown, last-good)
-- Runtime-логи, экспорт, диагностика маршрутов
-- RU/EN интерфейс, светлая/тёмная тема
+- Добавлен локальный **MTProto Proxy frontend**: генерация `t.me/proxy` /
+  `tg://proxy` ссылок, хранение 16-байтового секрета, запуск через
+  foreground service, отдельный статус runtime.
+- MTProto теперь умеет идти через route backend, включая `cf_proxy_ws`.
+  Именно `MTProto -> CF Proxy` сейчас проверен на телефоне.
+- Добавлен Flowseal-слой **Fake TLS**: обычный `dd<secret>` и вариант
+  `ee<secret><domain_hex>` с masking domain. Есть отдельная опция passthrough:
+  если её включить, невалидный Fake TLS probe можно проксировать на настоящий
+  masking domain.
+- Перенесены и адаптированы идеи Flowseal для CF Proxy: список доменов,
+  quality gate для обновления, cooldown, аккуратная работа с плохими upstream
+  payload.
+- Для direct WebSocket добавлен cooldown Telegram IP: если IP таймаутится, runtime
+  быстрее уходит в CF/Worker и не долбит тот же адрес сразу снова.
+- WS pool получил возрастную ротацию, чтобы после сна телефона или смены сети
+  меньше оставалось полумёртвых соединений.
+- Добавлен listener watchdog: сервис следит, что локальный listener жив, и
+  поднимает его заново при сбое.
+- Добавлена поддержка test DC (`dc >= 10000`, `/apiws_test`, `force_test_dc`) для
+  диагностики.
+- Настройки по умолчанию изменены под реальное мобильное поведение: MTProto
+  включён как frontend, CF Proxy имеет приоритет, общий порт - `1443`.
+- Главный экран стал короче: без legacy compatibility, без кнопки Worker Pool,
+  без раскрытия подробностей. Worker Pool не показывается в основной карточке
+  состояния.
+- Уведомление и диагностика показывают фактический frontend и route backend:
+  например `MTProto Proxy · Cloudflare Proxy`, а не старые пустые значения.
 
 ## Скриншоты
 
 <p align="center">
   <img src="docs/assets/screenshots/screenshot-main.jpg" width="220" alt="Главный экран" />
-  <img src="docs/assets/screenshots/screenshot-settings-mobile.jpg" width="220" alt="Политика маршрутов — мобильная сеть" />
-  <img src="docs/assets/screenshots/screenshot-settings-wifi.jpg" width="220" alt="Политика маршрутов — Wi‑Fi" />
+  <img src="docs/assets/screenshots/screenshot-settings-all.jpg" width="220" alt="Настройки" />
+  <img src="docs/assets/screenshots/screenshot-settings-connection.jpg" width="220" alt="Настройки подключения" />
+  <img src="docs/assets/screenshots/screenshot-settings-routes.jpg" width="220" alt="Политика маршрутов" />
+  <img src="docs/assets/screenshots/screenshot-settings-cloudflare.jpg" width="220" alt="Cloudflare Proxy" />
+  <img src="docs/assets/screenshots/screenshot-settings-app.jpg" width="220" alt="Настройки приложения" />
+  <img src="docs/assets/screenshots/screenshot-settings-logs.jpg" width="220" alt="Настройки логов" />
 </p>
+
+## Режимы локального прокси
+
+| Режим | Для чего |
+|-------|----------|
+| MTProto Proxy | Основной режим. Telegram подключается по MTProto proxy link. |
+| SOCKS5 / WebSocket | Режим совместимости. Можно настроить в Telegram вручную как SOCKS5. |
+
+Оба режима используют один локальный порт по умолчанию: `127.0.0.1:1443`.
+Если порт занят ByeDPI или другим локальным прокси, его можно поменять в
+настройках подключения.
 
 ## Маршруты
 
-| Тип маршрута | Описание |
-|------------|----------|
-| `direct_ws` | Прямой WebSocket к Telegram (`kws{dc}.web.telegram.org`) |
-| `cf_proxy_ws` | Cloudflare Proxy через `wss://kws{dc}.<domain>/apiws` |
-| `cf_worker_ws` | WebSocket через ваш Cloudflare Worker |
-| `tcp_fallback` | Резервный TCP к IP датацентра :443 |
+| Route kind | Что делает |
+|------------|------------|
+| `cf_proxy_ws` | WebSocket через Cloudflare Proxy domains (`kws{dc}.<domain>/apiws`). |
+| `direct_ws` | Прямой WebSocket к Telegram (`kws{dc}.web.telegram.org`). |
+| `cf_worker_ws` | WebSocket через ваш Cloudflare Worker. Код есть, но Worker Pool сейчас медленный. |
+| `tcp_fallback` | Прямой TCP к IP датацентра Telegram на `:443`. |
 
-**WebSocket — это транспорт**, а не название маршрута. Например, Cloudflare Proxy использует WebSocket, но это не «прямой WebSocket».
+WebSocket - это транспорт, а не route kind. В UI и логах route kind пишется
+явно: `cf_proxy_ws`, `direct_ws`, `cf_worker_ws`, `tcp_fallback`.
 
-В UI отображаются отдельно: **режим (стратегия)**, **текущий маршрут (route kind)** и **транспорт**.
+## Настройки по умолчанию
 
-Подробнее: [docs/architecture/architecture.md](docs/architecture/architecture.md)
+| Сеть | Политика |
+|------|----------|
+| Мобильная | Только `cf_proxy_ws`, без fallback. |
+| Wi-Fi | `cf_proxy_ws` в приоритете, затем `direct_ws` и `tcp_fallback`. |
+| Неизвестная сеть | Как мобильная: только `cf_proxy_ws`. |
 
-## Рекомендуемые настройки
+Сохранённые пользовательские политики не перетираются. Миграция применяется
+только там, где пользователь не менял маршруты вручную.
 
-Ориентиры без привязки к конкретной сети оператора:
+## Fake TLS и masking domain
 
-| Сеть | Рекомендация |
-|------|----------------|
-| **Мобильная** | Предпочитать `cf_proxy_ws`, оставить `tcp_fallback`; direct/worker включать вручную только при необходимости |
-| **Wi‑Fi** | Часто подходит `direct_ws` с fallback на CF proxy и TCP |
+Без masking domain Telegram получает обычный MTProto secret вида
+`dd<32 hex chars>`.
 
-В приложении: **Настройки → политика маршрутов** для Wi‑Fi/Mobile или пресет **«Рекомендуемый»** (если политика не менялась вручную — см. миграцию в release notes).
+Если указать masking domain, ссылка строится как
+`ee<secret><domain_hex>`. Так MTProto-подключение выглядит ближе к обычному TLS
+соединению на выбранный домен.
 
-Режимы legacy (Auto, CF first, Worker first, …) по-прежнему передаются в runtime; фактический набор маршрутов задаёт политика `@route_*`.
+Опция **Mask probes via masking domain** делает ещё один шаг: невалидный Fake TLS
+ClientHello не закрывается сразу, а может быть отправлен на настоящий masking
+domain. Включайте это только с доменом, которому доверяете: приложение начнёт
+делать реальные исходящие соединения к этому хосту.
+
+## Диагностика
+
+В приложении есть:
+
+- Route diagnostics для Direct, CF Proxy, Worker и TCP;
+- отдельные блоки для SOCKS5/WS и MTProto;
+- счётчики Fake TLS accepted/rejected/probe/passthrough;
+- экспорт отчёта с маскированием secret, токенов и URL query;
+- постоянные runtime-логи для коротких отладочных сессий; по умолчанию
+  сохранение и runtime-сбор выключены.
+
+Полезные строки в logcat с тегом `TgWsProxy`:
+
+| Строка | Что смотреть |
+|--------|--------------|
+| `MTProto route truth` | selected/actual backend, fallback, DC и media flag. |
+| `cfproxy connected` | домен CF Proxy и успешное подключение. |
+| `direct_ws_ip_timeout` | direct IP ушёл в cooldown. |
+| `fake_tls_*` | статистика Fake TLS и probe-сценариев. |
+| `route_policy network=...` | активная политика для текущей сети. |
 
 ## Быстрый старт
 
-1. Установите APK (debug или release).
-2. Откройте TgWsProxy, проверьте порт (`1081` по умолчанию).
-3. Настройте политику маршрутов для вашей сети.
-4. **Включить прокси** → **Применить в Telegram**.
-5. При проблемах включите runtime-логи и сохраните отчёт.
+1. Соберите или установите APK.
+2. Запустите TgWsProxy.
+3. Оставьте frontend **MTProto Proxy** и порт `1443`.
+4. Нажмите **Применить в Telegram**.
+5. Если Telegram висит на подключении, откройте диагностику и проверьте
+   `cf_proxy_ws`.
 
-Если параллельно используется ByeDPI на `1080`, выберите другой порт (например `1081`).
+Для ручного SOCKS5-режима в Telegram:
 
-## Логи и диагностика
-
-Logcat, тег **`TgWsProxy`**. Полезные строки:
-
-| Строка | Значение |
-|--------|----------|
-| `route_policy network=... routes=... preferred=...` | Активная политика |
-| `Policy changed generation=...` | Смена поколения policy |
-| `Route selected routeKind=... transport=...` | Выбор маршрута |
-| `cfproxy connected host=...` | Успешный CF proxy |
-| `UI route state activeRouteKind=... transport=...` | Состояние для UI |
-| `Skip current stats update route=... reason=...` | Старое/отключённое событие не влияет на UI |
-
-В приложении: runtime logs, экспорт, карточка политики маршрутов, проверки Direct/Worker/CF/TCP.
-
-## Структура репозитория
-
-| Путь | Содержимое |
-|------|------------|
-| `app/` | Android-приложение (Kotlin, UI, сервис) |
-| `native/tgwsproxy/` | Нативный proxy runtime (Go → `libtgwsproxy.so`) |
-| `docs/` | Документация, скриншоты в `docs/assets/screenshots/` |
-| `scripts/` | Сборка native/APK, иконки |
-
-Подробнее: [docs/development/repository-structure.md](docs/development/repository-structure.md)
+```text
+Host: 127.0.0.1
+Port: 1443
+Username/password: пусто
+```
 
 ## Сборка
 
-**Требования:** JDK 17, Android SDK, Go (для `native/tgwsproxy`), Gradle wrapper из репозитория.
-
-Debug:
+Нужно: JDK 17, Android SDK, Go, Gradle wrapper из репозитория.
 
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-APK: `app\build\outputs\apk\debug\app-debug.apk`
+APK появится здесь:
 
-Скрипт с копированием в `artifacts/`:
-
-```powershell
-.\scripts\build-apk.ps1 -Configuration Debug
+```text
+app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Release (локальная подпись, не в git):
-
-1. Скопируйте `release-signing.env.example` → `release-signing.env` и укажите путь к `tgwsproxy-release.jks` и пароли.
-2. Сборка (скрипт сам подхватит `release-signing.env`):
-
-```powershell
-.\scripts\build-apk.ps1 -Configuration Release
-```
-
-Или задайте переменные вручную: `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`.
-
-Go-тесты (из каталога runtime):
+Go runtime отдельно:
 
 ```powershell
 cd native\tgwsproxy
 go test ./...
 ```
 
-Подробнее: [docs/releases/release.md](docs/releases/release.md)
+Скрипт сборки APK с копированием в локальный `artifacts/`:
+
+```powershell
+.\scripts\build-apk.ps1 -Configuration Debug
+```
+
+`artifacts/`, `runtime-logs/`, keystore-файлы и локальные env-файлы не входят в
+репозиторий.
+
+## Структура
+
+| Путь | Что внутри |
+|------|------------|
+| `app/` | Android UI, настройки, `ProxyService`, bridge к native runtime. |
+| `native/tgwsproxy/` | Go runtime, MTProto frontend, маршруты и тесты. |
+| `docs/` | Архитектура, release notes, ручные чеклисты. |
+| `scripts/` | Сборка native/APK и Cloudflare Worker script. |
+
+Подробнее: [docs/development/repository-structure.md](docs/development/repository-structure.md)
 
 ## Документация
 
-| Документ | Описание |
-|----------|----------|
-| [docs/development/repository-structure.md](docs/development/repository-structure.md) | Структура репозитория |
-| [docs/architecture/architecture.md](docs/architecture/architecture.md) | Архитектура и терминология |
-| [docs/testing/README.md](docs/testing/README.md) | Чеклист ручного тестирования |
-| [docs/testing/manual-checklist-1.8.md](docs/testing/manual-checklist-1.8.md) | Проверка после рефакторинга 1.8 |
-| [docs/releases/release.md](docs/releases/release.md) | Выпуск релиза и APK |
-| [CHANGELOG.md](CHANGELOG.md) | История версий |
-| [docs/architecture/ADAPTIVE_ROUTING.md](docs/architecture/ADAPTIVE_ROUTING.md) | Адаптивный режим Auto |
-| [docs/architecture/CONNECTION_MODES.md](docs/architecture/CONNECTION_MODES.md) | Режимы подключения |
-| [docs/releases/](docs/releases/) | Заметки и чеклисты релизов |
+- [docs/architecture/architecture.md](docs/architecture/architecture.md)
+- [docs/architecture/CF_DOMAIN_POOL.md](docs/architecture/CF_DOMAIN_POOL.md)
+- [docs/architecture/cloudflare-worker.md](docs/architecture/cloudflare-worker.md)
+- [docs/testing/manual-checklist-1.8.md](docs/testing/manual-checklist-1.8.md)
+- [docs/releases/release.md](docs/releases/release.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
-## Разработка с помощью нейросетей
+## Использование нейросетей
 
-Значительная часть кода, документации и рефакторингов в этом репозитории выполнялась **с использованием больших языковых моделей** (в том числе через Cursor, OpenAI Codex, ChatGPT и аналогичные инструменты). Нейросети применялись для:
-
-- проектирования и правок Kotlin UI, настроек маршрутов и сервиса;
-- доработки native runtime, bridge и маршрутизации;
-- написания и обновления README и документации в `docs/`;
-- разбора логов, диагностики багов и подготовки release notes.
+При работе над проектом использовались нейросети: для отдельных участков кода,
+тестов и документации. Итоговые изменения проверялись вручную.
 
 ## Происхождение
 
-- **[Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)** — исходный прокси и маршруты (MIT)
-- **[amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android)** — Android-обёртка (GPLv3)
-- **[Regstar2/TgWsProxy_Android](https://github.com/Regstar2/TgWsProxy_Android)** — текущая разработка ([LICENSE](LICENSE))
+- [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) - desktop
+  runtime и основная идея маршрутов.
+- [amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android)
+  - Android-обёртка, от которой пошёл этот проект.
+- [Regstar2/TgWsProxy_Android](https://github.com/Regstar2/TgWsProxy_Android)
+  - текущая Android-ветка.
 
-Схема `kws{dc}.<domain>/apiws` и домен по умолчанию — из экосистемы Flowseal. Отличия от desktop: [ORIGINAL_VS_ANDROID_DIFF.md](ORIGINAL_VS_ANDROID_DIFF.md).
-
-## Лицензия
-
-[LICENSE](LICENSE) (GPLv3).
+Лицензия: [GPLv3](LICENSE).

@@ -43,6 +43,7 @@ import (
 	"time"
 	"unsafe"
 
+	"tg-ws-proxy/mtproxyfrontend"
 	"tg-ws-proxy/tgwsroute"
 )
 
@@ -58,10 +59,12 @@ const (
 	defaultPoolSz         = 4
 	defaultCfProxyDomain  = ""
 	wsPoolMaxAge          = 60.0
+	wsPoolRotationCheck   = 5.0
 	wsBridgeIdle          = 120.0
 	bridgeSlowOpThreshold = 750 * time.Millisecond
 
 	dcFailCooldown       = 30.0
+	ipFailCooldown       = 3600.0
 	wsFailTimeout        = 2.0
 	poolMaintainInterval = 15
 )
@@ -120,6 +123,12 @@ var dcDefaultIP = map[int]string{
 	203: "91.105.192.100",
 }
 
+var dcTestIP = map[int]string{
+	1: "149.154.175.10",
+	2: "149.154.167.40",
+	3: "149.154.175.117",
+}
+
 var validProtos = map[uint32]bool{
 	0xEFEFEFEF: true,
 	0xEEEEEEEE: true,
@@ -142,6 +151,9 @@ var (
 
 	dcFailMu    sync.RWMutex
 	dcFailUntil = make(map[[2]int]float64)
+
+	ipFailMu    sync.RWMutex
+	ipFailUntil = make(map[string]float64)
 
 	zero64 = make([]byte, 64)
 )
@@ -385,6 +397,73 @@ func shouldTryDomainDial(err error) bool {
 	default:
 		return false
 	}
+}
+
+func directWSErrorTimedOut(err error) bool {
+	if err == nil {
+		return false
+	}
+	var stageErr *wsStageError
+	if errors.As(err, &stageErr) {
+		return classifyConnError(stageErr.Err) == "tcp_dial_timeout"
+	}
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return true
+	}
+	return false
+}
+
+func directIPCooldownKey(target string) string {
+	return strings.TrimSpace(target)
+}
+
+func directIPCoolingDown(target string, now float64) bool {
+	key := directIPCooldownKey(target)
+	if key == "" {
+		return false
+	}
+	ipFailMu.RLock()
+	until := ipFailUntil[key]
+	ipFailMu.RUnlock()
+	return now < until
+}
+
+func markDirectIPTimeout(target string, now float64) {
+	key := directIPCooldownKey(target)
+	if key == "" {
+		return
+	}
+	ipFailMu.Lock()
+	ipFailUntil[key] = now + ipFailCooldown
+	ipFailMu.Unlock()
+}
+
+func markDirectIPSuccess(target string) {
+	key := directIPCooldownKey(target)
+	if key == "" {
+		return
+	}
+	ipFailMu.Lock()
+	delete(ipFailUntil, key)
+	ipFailMu.Unlock()
+}
+
+func clearDirectIPCooldowns() {
+	ipFailMu.Lock()
+	ipFailUntil = make(map[string]float64)
+	ipFailMu.Unlock()
+}
+
+func directIPCooldownFallbackAvailable(settings runtimeSettings) bool {
+	if settings.PolicyPresent {
+		if !settings.AllowFallback {
+			return false
+		}
+		return (settings.AllowWorker && settings.workerRouteAvailable()) ||
+			(settings.AllowCFProxy && settings.CF.Enabled) ||
+			settings.AllowTCP
+	}
+	return settings.Mode != modeDirectOnly
 }
 
 func resolvePreferredIPs(domain string, timeout float64) (resolvedIPs, error) {
@@ -1201,12 +1280,14 @@ type WsPool struct {
 	mu        sync.Mutex
 	idle      map[[2]int][]poolEntry
 	refilling map[[2]int]bool
+	rotating  map[[2]int]bool
 }
 
 func newWsPool() *WsPool {
 	return &WsPool{
 		idle:      make(map[[2]int][]poolEntry),
 		refilling: make(map[[2]int]bool),
+		rotating:  make(map[[2]int]bool),
 	}
 }
 
@@ -1244,6 +1325,7 @@ func (p *WsPool) Get(dc int, isMedia bool, targetIP string, domains []string) *R
 		logDebug.Printf("WS pool hit for DC%d%s (age=%.1fs, left=%d)",
 			dc, mediaTag(isMedia), age, len(bucket))
 		p.scheduleRefillLocked(key, targetIP, domains)
+		p.scheduleRotationLocked(key, targetIP, domains)
 		return entry.ws
 	}
 
@@ -1300,6 +1382,7 @@ func (p *WsPool) refill(key [2]int, targetIP string, domains []string) {
 		if r.ws != nil {
 			p.mu.Lock()
 			p.idle[key] = append(p.idle[key], poolEntry{r.ws, monoNow()})
+			p.scheduleRotationLocked(key, targetIP, domains)
 			p.mu.Unlock()
 		}
 	}
@@ -1308,6 +1391,79 @@ func (p *WsPool) refill(key [2]int, targetIP string, domains []string) {
 	logDebug.Printf("WS pool refilled DC%d%s: %d ready",
 		dc, mediaTag(isMedia), len(p.idle[key]))
 	p.mu.Unlock()
+}
+
+// scheduleRotationLocked must be called with p.mu held.
+func (p *WsPool) scheduleRotationLocked(key [2]int, targetIP string, domains []string) {
+	if poolSize <= 0 || p.rotating[key] || len(p.idle[key]) == 0 {
+		return
+	}
+	p.rotating[key] = true
+	go p.rotate(key, targetIP, append([]string(nil), domains...))
+}
+
+func (p *WsPool) rotate(key [2]int, targetIP string, domains []string) {
+	dc := key[0]
+	isMedia := key[1] == 1
+	defer func() {
+		p.mu.Lock()
+		delete(p.rotating, key)
+		p.mu.Unlock()
+	}()
+
+	for {
+		delay := wsPoolRotationCheck
+		p.mu.Lock()
+		bucket := p.idle[key]
+		if len(bucket) == 0 {
+			p.mu.Unlock()
+			return
+		}
+		now := monoNow()
+		for _, entry := range bucket {
+			until := entry.created + wsPoolMaxAge - now
+			if until < delay {
+				delay = until
+			}
+		}
+		p.mu.Unlock()
+
+		if delay < 0 {
+			delay = 0
+		}
+		time.Sleep(time.Duration(delay * float64(time.Second)))
+
+		now = monoNow()
+		var expired []*RawWebSocket
+		p.mu.Lock()
+		bucket = p.idle[key]
+		fresh := bucket[:0]
+		for _, entry := range bucket {
+			if now-entry.created >= wsPoolMaxAge || entry.ws.closed.Load() {
+				expired = append(expired, entry.ws)
+			} else {
+				fresh = append(fresh, entry)
+			}
+		}
+		p.idle[key] = fresh
+		ready := len(fresh)
+		if len(expired) > 0 {
+			p.scheduleRefillLocked(key, targetIP, domains)
+		}
+		empty := ready == 0
+		p.mu.Unlock()
+
+		for _, ws := range expired {
+			go ws.Close()
+		}
+		if len(expired) > 0 {
+			logDebug.Printf("WS pool rotated DC%d%s: %d stale, %d ready",
+				dc, mediaTag(isMedia), len(expired), ready)
+		}
+		if empty {
+			return
+		}
+	}
 }
 
 func connectOneWS(targetIP string, domains []string) *RawWebSocket {
@@ -1426,6 +1582,8 @@ func (p *WsPool) CloseAll() {
 		}
 		delete(p.idle, key)
 	}
+	p.refilling = make(map[[2]int]bool)
+	p.rotating = make(map[[2]int]bool)
 }
 
 var wsPool = newWsPool()
@@ -1437,6 +1595,14 @@ var wsPool = newWsPool()
 var workerWsPreconnectEnabled = false
 
 const workerWsPreconnectMaxPerKey = 2
+
+func workerWsPreconnectActive() bool {
+	return workerWsPreconnectEnabled || getRuntimeSettings().MtProtoWorkerPreconnect
+}
+
+func workerWsPreconnectActiveForSettings(settings runtimeSettings) bool {
+	return workerWsPreconnectEnabled || settings.MtProtoWorkerPreconnect
+}
 
 func workerWsPreconnectTargetSize() int {
 	if poolSize <= 0 {
@@ -1560,7 +1726,7 @@ func newWorkerWsPool(dialer workerPoolDialer) *WorkerWsPool {
 }
 
 func (p *WorkerWsPool) Get(key WorkerPoolKey) *RawWebSocket {
-	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || key.WorkerDomain == "" || key.Dst == "" {
+	if !workerWsPreconnectActive() || workerWsPreconnectTargetSize() <= 0 || key.WorkerDomain == "" || key.Dst == "" {
 		return nil
 	}
 
@@ -1591,7 +1757,7 @@ func (p *WorkerWsPool) Get(key WorkerPoolKey) *RawWebSocket {
 }
 
 func (p *WorkerWsPool) scheduleRefillLocked(key WorkerPoolKey) {
-	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || p.refilling[key] {
+	if !workerWsPreconnectActive() || workerWsPreconnectTargetSize() <= 0 || p.refilling[key] {
 		return
 	}
 	p.refilling[key] = true
@@ -1625,7 +1791,7 @@ func (p *WorkerWsPool) refill(key WorkerPoolKey) {
 }
 
 func (p *WorkerWsPool) Warmup(dcOptMap map[int]string, workerDomains []string) {
-	if !workerWsPreconnectEnabled || workerWsPreconnectTargetSize() <= 0 || len(workerDomains) == 0 {
+	if !workerWsPreconnectActive() || workerWsPreconnectTargetSize() <= 0 || len(workerDomains) == 0 {
 		return
 	}
 	p.mu.Lock()
@@ -2471,11 +2637,19 @@ func handleClient(ctx context.Context, conn net.Conn) {
 	target := dcOpt[dc]
 	dcOptMu.RUnlock()
 
+	if directIPCoolingDown(target, now) && directIPCooldownFallbackAvailable(settings) {
+		logInfo.Printf("[%s] DC%d%s direct_ws target=%s on IP cooldown for %ds -> fallback chain",
+			label, dc, mTag, target, int(ipFailCooldown))
+		runFallbackChain(ctx, conn, session, label, dst, port, "direct_ip_cooldown")
+		return
+	}
+
 	logDebug.Printf("[%s] raw_dst=%s parsed_dst=%s mapped_dc=%d is_media=%t selected_endpoint=%s ws_domains=%s",
 		label, rawDst, joinAddr(dst, port), dc, isMedia, target, strings.Join(domains, ","))
 
 	var ws *RawWebSocket
 	wsFailedRedirect := false
+	wsTimedOut := false
 	allRedirects := true
 
 	ws = wsPool.Get(dc, isMedia, target, domains)
@@ -2506,10 +2680,14 @@ func handleClient(ctx context.Context, conn net.Conn) {
 			}
 			if connErr == nil {
 				allRedirects = false
+				markDirectIPSuccess(target)
 				break
 			}
 
 			stats.wsErrors.Add(1)
+			if directWSErrorTimedOut(connErr) {
+				wsTimedOut = true
+			}
 
 			if wsErr, ok := connErr.(*WsHandshakeError); ok {
 				if wsErr.IsRedirect() {
@@ -2557,6 +2735,11 @@ func handleClient(ctx context.Context, conn net.Conn) {
 
 	// -- WS failed -> fallback --
 	if ws == nil {
+		if wsTimedOut {
+			markDirectIPTimeout(target, now)
+			logInfo.Printf("[%s] DC%d%s WS connect to %s timed out, IP cooldown for %ds",
+				label, dc, mTag, target, int(ipFailCooldown))
+		}
 		if wsFailedRedirect && allRedirects {
 			wsBlackMu.Lock()
 			wsBlacklist[dcKey] = true
@@ -2621,17 +2804,11 @@ func handleClient(ctx context.Context, conn net.Conn) {
 // Server
 // ---------------------------------------------------------------------------
 
-func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]string) error {
-	dcOptMu.Lock()
-	dcOpt = dcOptMap
-	dcOptMu.Unlock()
-
-	addr := joinAddr(host, port)
+func listenProxyTCP(ctx context.Context, addr string) (net.Listener, error) {
 	lc := net.ListenConfig{}
-
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
+		return nil, err
 	}
 
 	if tcpL, ok := listener.(*net.TCPListener); ok {
@@ -2641,6 +2818,19 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 				_ = setSockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
 			})
 		}
+	}
+	return listener, nil
+}
+
+func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]string) error {
+	dcOptMu.Lock()
+	dcOpt = dcOptMap
+	dcOptMu.Unlock()
+
+	addr := joinAddr(host, port)
+	listener, err := listenProxyTCP(ctx, addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
 
 	srvCtx, srvCancel := context.WithCancel(ctx)
@@ -2702,22 +2892,26 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 		go wsPool.Maintain(srvCtx, dcOptMap)
 	}
 	workerDomains := workerWarmupDomains(settings)
-	if settings.workerRouteAvailable() && workerWsPreconnectEnabled && len(workerDomains) > 0 {
+	workerPreconnectActive := workerWsPreconnectActiveForSettings(settings)
+	if settings.workerRouteAvailable() && workerPreconnectActive && len(workerDomains) > 0 {
 		workerPool.Warmup(dcOptMap, workerDomains)
 		go workerPool.Maintain(srvCtx, dcOptMap, workerDomains)
 		logInfo.Printf("  Worker WS preconnect enabled domains=%d", len(workerDomains))
 	} else {
 		logInfo.Printf("  Worker WS preconnect skipped enabled=%t route_available=%t domains=%d",
-			workerWsPreconnectEnabled, settings.workerRouteAvailable(), len(workerDomains))
+			workerPreconnectActive, settings.workerRouteAvailable(), len(workerDomains))
 	}
 
 	// Track active connections for graceful shutdown
 	var activeConns sync.WaitGroup
+	var listenerMu sync.Mutex
+	currentListener := listener
 
 	// Accept loop
 	go func() {
+		current := listener
 		for {
-			conn, err := listener.Accept()
+			conn, err := current.Accept()
 			if err != nil {
 				select {
 				case <-srvCtx.Done():
@@ -2726,8 +2920,29 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 					if ne, ok := err.(net.Error); ok && ne.Timeout() {
 						continue
 					}
-					logError.Printf("accept error: %v", err)
-					return
+					logWarn.Printf("listener watchdog restarting socket after accept error: %v", err)
+					_ = current.Close()
+					for {
+						timer := time.NewTimer(time.Second)
+						select {
+						case <-srvCtx.Done():
+							timer.Stop()
+							return
+						case <-timer.C:
+						}
+						next, listenErr := listenProxyTCP(srvCtx, addr)
+						if listenErr != nil {
+							logError.Printf("listener watchdog restart failed on %s: %v", addr, listenErr)
+							continue
+						}
+						listenerMu.Lock()
+						currentListener = next
+						listenerMu.Unlock()
+						current = next
+						logInfo.Printf("listener watchdog restored socket on %s", addr)
+						break
+					}
+					continue
 				}
 			}
 			activeConns.Add(1)
@@ -2741,7 +2956,9 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	// Wait for context cancellation
 	<-srvCtx.Done()
 	logInfo.Println("Shutting down proxy server...")
-	_ = listener.Close()
+	listenerMu.Lock()
+	_ = currentListener.Close()
+	listenerMu.Unlock()
 
 	// Wait for active connections with timeout
 	done := make(chan struct{})
@@ -2760,6 +2977,7 @@ func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]strin
 	// Close pool connections
 	wsPool.CloseAll()
 	workerPool.CloseAll()
+	clearDirectIPCooldowns()
 
 	logInfo.Printf("Final stats: %s", stats.Summary())
 	return nil
@@ -2848,7 +3066,9 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 					}
 				}
 			case "cf_cached_domains":
-				settings.CFCachedUpstream = parseCFDomains(val)
+				if domains, ok := parseCachedCFDomains(val); ok {
+					settings.CFCachedUpstream = domains
+				}
 			case "worker_enabled":
 				settings.Worker.Enabled = parseBoolValue(val)
 			case "worker_domain":
@@ -2900,6 +3120,14 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.AdaptiveRouteStats = val
 			case "auto_strategy":
 				settings.AutoStrategy = val
+			case "mtproto_fake_tls_domain", "fake_tls_domain":
+				settings.MtProtoFakeTLSDomain = mtproxyfrontend.NormalizeFakeTLSDomain(val)
+			case "mtproto_masking_passthrough", "fake_tls_masking_passthrough":
+				settings.MtProtoMaskingPassthrough = parseBoolValue(val)
+			case "mtproto_worker_preconnect":
+				settings.MtProtoWorkerPreconnect = parseBoolValue(val)
+			case "force_test_dc":
+				settings.ForceTestDC = parseBoolValue(val)
 			case "route_direct_ws":
 				settings.PolicyPresent = true
 				settings.AllowDirect = parseBoolValue(val)
@@ -2968,6 +3196,20 @@ func parseCFDomains(raw string) []string {
 	return tgwsroute.NormalizeCFDomains(strings.Split(raw, "|"))
 }
 
+const minCachedCFDomains = 3
+
+func parseCachedCFDomains(raw string) ([]string, bool) {
+	domains := tgwsroute.NormalizeCachedUpstreamCFDomains(strings.Split(raw, "|"))
+	if len(domains) > 0 && len(domains) < minCachedCFDomains {
+		if logWarn != nil {
+			logWarn.Printf("CF cached upstream quality gate rejected count=%d required=%d",
+				len(domains), minCachedCFDomains)
+		}
+		return nil, false
+	}
+	return domains, true
+}
+
 // ---------------------------------------------------------------------------
 // CGO exports for Android .so
 // ---------------------------------------------------------------------------
@@ -2976,7 +3218,60 @@ var (
 	globalCtx    context.Context
 	globalCancel context.CancelFunc
 	globalMu     sync.Mutex
+
+	mtProtoRuntime              = mtproxyfrontend.NewRuntime(mtProtoLogWriter{}, newMtProtoRouteConnector())
+	mtProtoWorkerPreconnectMu   sync.Mutex
+	mtProtoWorkerPreconnectStop context.CancelFunc
 )
+
+type mtProtoLogWriter struct{}
+
+func (mtProtoLogWriter) Printf(format string, args ...any) {
+	if logInfo != nil {
+		logInfo.Printf(format, args...)
+	}
+}
+
+func startMtProtoWorkerPreconnect(dcOptMap map[int]string, settings runtimeSettings) {
+	workerDomains := workerWarmupDomains(settings)
+	active := workerWsPreconnectActiveForSettings(settings)
+	if !settings.workerRouteAvailable() || !active || len(workerDomains) == 0 {
+		if logInfo != nil {
+			logInfo.Printf("MTProto Worker WS preconnect skipped enabled=%t route_available=%t domains=%d",
+				active, settings.workerRouteAvailable(), len(workerDomains))
+		}
+		stopMtProtoWorkerPreconnect(false)
+		return
+	}
+
+	mtProtoWorkerPreconnectMu.Lock()
+	if mtProtoWorkerPreconnectStop != nil {
+		mtProtoWorkerPreconnectStop()
+		mtProtoWorkerPreconnectStop = nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	mtProtoWorkerPreconnectStop = cancel
+	mtProtoWorkerPreconnectMu.Unlock()
+
+	workerPool.Warmup(dcOptMap, workerDomains)
+	go workerPool.Maintain(ctx, dcOptMap, workerDomains)
+	if logInfo != nil {
+		logInfo.Printf("MTProto Worker WS preconnect enabled domains=%d", len(workerDomains))
+	}
+}
+
+func stopMtProtoWorkerPreconnect(closePool bool) {
+	mtProtoWorkerPreconnectMu.Lock()
+	cancel := mtProtoWorkerPreconnectStop
+	mtProtoWorkerPreconnectStop = nil
+	mtProtoWorkerPreconnectMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if closePool {
+		workerPool.CloseAll()
+	}
+}
 
 //export StartProxy
 func StartProxy(cHost *C.char, port C.int, cDcIps *C.char, verbose C.int) C.int {
@@ -3040,9 +3335,63 @@ func StopProxy() C.int {
 	wsPool.CloseAll()
 	workerPool.CloseAll()
 	resetWorkerRouteCooldowns()
+	clearDirectIPCooldowns()
 	resetProxyRouteDisplayState()
 
 	return 0
+}
+
+//export StartMtProtoProxy
+func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfig *C.char, verbose C.int) C.int {
+	isVerbose := int(verbose) != 0
+	initLogging(isVerbose)
+
+	dcOptMap, settings, err := parseRuntimeConfig(C.GoString(cRuntimeConfig))
+	if err != nil {
+		logError.Printf("MTProto parseRuntimeConfig: %v", err)
+		return -4
+	}
+	setRuntimeSettings(settings)
+	setCfProxyConfig(settings.CF)
+	dcOptMu.Lock()
+	dcOpt = dcOptMap
+	dcOptMu.Unlock()
+
+	result := mtProtoRuntime.Start(mtproxyfrontend.Config{
+		Host:                      C.GoString(cHost),
+		Port:                      int(port),
+		Secret:                    C.GoString(cSecret),
+		FakeTLSDomain:             settings.MtProtoFakeTLSDomain,
+		FakeTLSMaskingPassthrough: settings.MtProtoMaskingPassthrough,
+		ForceTestDC:               settings.ForceTestDC,
+		Verbose:                   isVerbose,
+	})
+	if result.Err == nil {
+		startMtProtoWorkerPreconnect(dcOptMap, settings)
+		return 0
+	}
+	switch result.Status {
+	case mtproxyfrontend.StatusFailedInvalidSecret:
+		return -2
+	case mtproxyfrontend.StatusFailedPortInUse:
+		return -3
+	default:
+		return -4
+	}
+}
+
+//export StopMtProtoProxy
+func StopMtProtoProxy() C.int {
+	if err := mtProtoRuntime.Stop(); err != nil {
+		return -1
+	}
+	stopMtProtoWorkerPreconnect(true)
+	return 0
+}
+
+//export GetMtProtoProxyStatus
+func GetMtProtoProxyStatus() *C.char {
+	return C.CString(mtProtoRuntime.StatusString())
 }
 
 //export SetPoolSize
@@ -3073,7 +3422,10 @@ func ResetCFDomainCooldowns() {
 
 //export SetCachedCFDomains
 func SetCachedCFDomains(cDomains *C.char) {
-	domains := parseCFDomains(C.GoString(cDomains))
+	domains, ok := parseCachedCFDomains(C.GoString(cDomains))
+	if !ok {
+		return
+	}
 	settings := getRuntimeSettings()
 	settings.CFCachedUpstream = domains
 	setRuntimeSettings(settings)

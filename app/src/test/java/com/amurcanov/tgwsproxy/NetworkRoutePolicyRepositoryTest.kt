@@ -14,7 +14,10 @@ class NetworkRoutePolicyRepositoryTest {
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), policy)
         assertTrue(RouteKind.DIRECT_WS in policy.enabledRoutes)
-        assertEquals(RouteKind.DIRECT_WS, policy.preferredRoute)
+        assertTrue(RouteKind.CF_PROXY_WS in policy.enabledRoutes)
+        assertTrue(RouteKind.TCP_FALLBACK in policy.enabledRoutes)
+        assertEquals(RouteKind.CF_PROXY_WS, policy.preferredRoute)
+        assertEquals(AutoStrategy.CF_PREFERRED, policy.autoStrategy)
         assertTrue(policy.allowFallback)
     }
 
@@ -26,9 +29,12 @@ class NetworkRoutePolicyRepositoryTest {
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE), policy)
         assertFalse(RouteKind.DIRECT_WS in policy.enabledRoutes)
-        assertTrue(RouteKind.WORKER_WS in policy.enabledRoutes)
-        assertEquals(RouteKind.WORKER_WS, policy.preferredRoute)
-        assertTrue(policy.allowFallback)
+        assertFalse(RouteKind.WORKER_WS in policy.enabledRoutes)
+        assertFalse(RouteKind.TCP_FALLBACK in policy.enabledRoutes)
+        assertEquals(setOf(RouteKind.CF_PROXY_WS), policy.enabledRoutes)
+        assertEquals(RouteKind.CF_PROXY_WS, policy.preferredRoute)
+        assertEquals(AutoStrategy.CF_PREFERRED, policy.autoStrategy)
+        assertFalse(policy.allowFallback)
     }
 
     @Test
