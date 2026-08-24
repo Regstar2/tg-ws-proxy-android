@@ -68,6 +68,9 @@ internal object WorkerCandidateMapper {
     }
 
     fun stableOrderComparator(): Comparator<WorkerEndpoint> {
-        return compareBy<WorkerEndpoint>({ it.createdAt }, { it.id })
+        // Kotlin's sortedWith is stable. For workers created in the same
+        // millisecond, preserve persistence/insertion order instead of using
+        // a random UUID as a tie-breaker, which made round-robin flaky.
+        return compareBy<WorkerEndpoint> { it.createdAt }
     }
 }
