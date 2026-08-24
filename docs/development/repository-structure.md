@@ -1,57 +1,83 @@
 # Структура репозитория
 
-Актуально для версии **1.10.12**.
+Актуально для опубликованной версии **1.10.12** и текущей разработки **v1.10.13**.
 
 ## Корень
 
 | Путь | Назначение |
 |------|------------|
-| `README.md` | Описание проекта, сборка, ссылки |
+| `README.md` / `README_EN.md` | Основное публичное описание проекта |
 | `CHANGELOG.md` | История версий |
 | `LICENSE` | GPLv3 |
 | `app/` | Модуль Android-приложения |
 | `native/tgwsproxy/` | Go proxy runtime (сборка `libtgwsproxy.so`) |
-| `docs/` | Документация |
+| `docs/` | Публичная документация проекта |
 | `scripts/` | Скрипты сборки и утилиты |
-| `gradle/`, `gradlew*` | Gradle wrapper |
+| `gradle/`, `gradlew*` | Gradle Wrapper |
 | `icon.png` | Исходник иконок приложения |
 
-В корне **нет** Go-исходников: они перенесены в `native/tgwsproxy/`.
+В корне **нет** Go-исходников runtime: они находятся в `native/tgwsproxy/`.
+
+Приватные governance-файлы могут существовать локально, но не являются частью публичного репозитория. В частности, `/AGENTS.md` и `/.project-rules/` должны оставаться локальными и исключаются через `.gitignore`.
 
 ## `app/`
 
-Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, настройки frontend/route policy, логи, JNI/JNA к `libtgwsproxy.so`.
+Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, настройки frontend/route policy, диагностика, логи и JNA bridge к `libtgwsproxy.so`.
 
-Собранная библиотека: `app/src/main/jniLibs/arm64-v8a/libtgwsproxy.so` (генерируется, в git не коммитится).
+Собранная библиотека:
+
+```text
+app/src/main/jniLibs/arm64-v8a/libtgwsproxy.so
+```
+
+Она генерируется build-процессом и в Git не коммитится.
 
 ## `native/tgwsproxy/`
 
 Нативный proxy runtime:
 
-- `tg-ws-proxy.go` — SOCKS5, MTProto lifecycle, bridge, CGO exports
-- `routing.go`, `adaptive_bridge.go`, `proxy_status_bridge.go`
-- `mtproxyfrontend/` — MTProto listener/frontend
-- `tgwsroute/` — типы маршрутов, adaptive, CF pool
-- `go.mod`, `*_test.go`
+- `tg-ws-proxy.go` — основной runtime/bridge и связанные transport-функции;
+- `mtproto_worker_route.go`, `mtproto_ws_route.go` — MTProto route connectors;
+- `mtproxyfrontend/` — MTProto listener/frontend;
+- `tgwsroute/` — типы маршрутов и связанная route-логика;
+- `go.mod`, `*_test.go` — Go module и тесты.
 
-Сборка: `scripts/build-native-android.ps1` (вызывается из Gradle `preBuild`).
+Точный состав runtime меняется по мере развития; архитектурные документы не должны подменять фактическое дерево исходников.
+
+Сборка:
+
+```powershell
+.\scripts\build-native-android.ps1
+```
 
 Тесты:
 
 ```powershell
-cd native\tgwsproxy
+Push-Location native\tgwsproxy
 go test ./...
+Pop-Location
 ```
 
 ## `docs/`
 
 | Каталог | Содержимое |
 |---------|------------|
-| `docs/architecture/` | Архитектура, режимы, CF pool, worker, уведомления |
-| `docs/development/` | Структура репозитория, заметки для разработки |
-| `docs/testing/` | Ручные чеклисты |
-| `docs/releases/` | Release workflow, чеклисты, RELEASE_NOTES |
-| `docs/assets/screenshots/` | Скриншоты для README |
+| `docs/product/` | Идея проекта, MVP scope, roadmap и другие публичные product docs |
+| `docs/architecture/` | Архитектура, tech stack, режимы, CF pool, Worker, уведомления |
+| `docs/development/` | Публичная структура репозитория и development notes |
+| `docs/testing/` | Ручные чеклисты и release smoke checks |
+| `docs/releases/` | Release workflow, чеклисты, release notes |
+| `docs/versions/` | Документы по отдельным версиям/итерациям |
+| `docs/research/` | Публичные технические исследования и сравнения |
+| `docs/assets/` | Публичные изображения и screenshots для документации |
+
+### Приватные docs-пути
+
+Следующие пути зарезервированы для локальной работы и не публикуются:
+
+- `docs/ai-prompts/`;
+- `docs/private/`;
+- `docs/development/development-principles.md` — локальная копия общих принципов разработки, если она используется.
 
 ## `scripts/`
 
@@ -60,17 +86,24 @@ go test ./...
 | `build-native-android.ps1` | Go → `libtgwsproxy.so` |
 | `build-apk.ps1` | Gradle APK + копия в `artifacts/` |
 | `generate-icons.py` | Иконки из `icon.png` |
-| `sync-readme-screenshots.ps1` | Копирование скринов в `docs/assets/screenshots/` |
+| `sync-readme-screenshots.ps1` | Копирование скриншотов в `docs/assets/screenshots/` |
 | `cloudflare-worker/worker.js` | Worker script для ручного деплоя |
 
-## Не для git
+Automation-specific `ci.ps1`/`release.ps1` относятся к отдельной задаче v1.10.13 и не считаются реализованными, пока соответствующий Issue не завершён.
+
+## Не для Git
 
 | Путь | Причина |
 |------|---------|
+| `AGENTS.md`, `.project-rules/` | Приватные project governance files |
+| `docs/ai-prompts/`, `docs/private/` | Приватные AI/governance материалы |
+| `.codex/`, `.cursor/`, `.claude/`, `.ai/` | Локальное состояние AI/dev tools |
 | `artifacts/` | Локальные APK и `.so` |
-| `runtime-logs/` | Локальные логи |
-| `secrets/`, `*.jks`, `*.keystore` | Секреты и ключи |
-| `app/build/`, `.gradle/` | Сборка Gradle |
-| `readme_images/` | Опциональная локальная staging-папка для скринов |
+| `runtime-logs/`, `*.log` | Локальные логи и captures |
+| `secrets/`, `.env*`, `*.secret`, `*.secrets` | Секреты и локальное окружение |
+| `*.jks`, `*.keystore`, `*.p12`, `*.pfx`, `*.pem`, `*.key` | Signing/private key material |
+| `app/build/`, `.gradle/` | Gradle build outputs |
+| `app/src/main/jniLibs/**/*.so` | Сгенерированные native libraries |
+| `readme_images/` | Локальная staging-папка для скриншотов |
 
-См. `.gitignore`.
+Источник истины для исключений — `.gitignore`.
