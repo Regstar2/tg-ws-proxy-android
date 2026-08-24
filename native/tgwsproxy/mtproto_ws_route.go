@@ -306,6 +306,7 @@ func defaultMtProtoCFProxyDial(domain, path, logPrefix string) (mtProtoFrameSock
 }
 
 func mtProtoWebSocketConn(ws mtProtoFrameSocket, relayInit []byte, remote string) (net.Conn, error) {
+	ws = wrapMtProtoFrameSocket(ws)
 	if err := ws.Send(relayInit); err != nil {
 		return nil, fmt.Errorf("write relay init to WebSocket %s: %w", remote, err)
 	}

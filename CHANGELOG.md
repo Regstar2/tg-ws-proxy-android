@@ -2,6 +2,17 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## Unreleased — 1.10.13
+
+- MTProto WebSocket receive path now reassembles fragmented/continuation messages instead of dropping continuation frames.
+- Added 16 MiB protection for individual WebSocket frames and accumulated fragmented messages before payload allocation/delivery.
+- Failed/rejected MTProto WebSocket receive paths close the underlying connection.
+- Worker preconnect remains disabled by default. When explicitly enabled, a session pool miss no longer launches a duplicate background refill while the foreground Worker dial is already in progress; hits still replenish the pool.
+- Worker failover is regression-tested to stop after the first successful candidate.
+- Worker ordering for equal creation timestamps preserves stable persistence/insertion order instead of using random UUID order.
+- Reviewed relevant Flowseal runtime changes through `b2a8074`; Android-specific route keys, cooldown/watchdog/fake-TLS/diagnostics behavior are retained and disabled upstream 429 logic is not ported.
+- Added `docs/research/flowseal-upstream-2026-08-24.md` with port/no-port decisions. Automated Go/Android/debug-build validation passed on the implementation branch; the project owner also reported a successful manual proxy smoke test.
+
 ## 1.10.12
 
 - MTProto Proxy is now the default local frontend on shared port `1443`; SOCKS5/WS stays available as a compatibility mode.

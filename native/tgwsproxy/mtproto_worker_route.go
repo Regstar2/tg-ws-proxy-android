@@ -290,7 +290,7 @@ func (c *mtProtoWorkerConnector) Connect(
 		}
 		var ws mtProtoFrameSocket
 		var err error
-		if pooled := workerPool.Get(poolKey); pooled != nil {
+		if pooled := workerPool.GetForSession(poolKey); pooled != nil {
 			ws = pooled
 			if logInfo != nil {
 				logInfo.Printf(
