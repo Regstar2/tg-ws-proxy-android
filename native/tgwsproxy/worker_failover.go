@@ -293,7 +293,7 @@ func tryWorkerFailoverConnect(
 			Dst:          dstIP,
 			Media:        false,
 		}
-		ws := workerPool.Get(poolKey)
+		ws := workerPool.GetForSession(poolKey)
 		var err error
 		if ws != nil {
 			logInfo.Printf("[%s] session_id=%s DC%d%s Worker WS preconnect hit host=%s workerId=%s worker_dst=%s",
