@@ -1,0 +1,45 @@
+name: Project Sync
+
+on:
+  issues:
+    types:
+      - opened
+      - reopened
+      - transferred
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  add-to-project:
+    name: Add owner issue or PR to Development project
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2' &&
+      (
+        github.event_name == 'issues' ||
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login == 'Regstar2' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 5
+
+    steps:
+      - name: Add item to Development project
+        uses: actions/add-to-project@v2.0.0
+        with:
+          project-url: https://github.com/users/Regstar2/projects/2
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

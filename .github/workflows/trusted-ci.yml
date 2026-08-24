@@ -1,0 +1,49 @@
+name: Trusted CI
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-ci:
+    name: Trusted Windows CI
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login == 'Regstar2' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout trusted ref
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
+          persist-credentials: false
+
+      - name: Run project CI
+        shell: pwsh
+        run: |
+          if (-not (Test-Path './scripts/ci.ps1')) {
+              throw 'Required script scripts/ci.ps1 was not found.'
+          }
+
+          ./scripts/ci.ps1
