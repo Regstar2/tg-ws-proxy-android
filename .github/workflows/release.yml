@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2'
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+    timeout-minutes: 120
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and checkout exact release tag
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+              throw 'Release tag is empty.'
+          }
+
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+              throw "Invalid release tag: $tag"
+          }
+
+          git fetch --tags --force
+          if ($LASTEXITCODE -ne 0) {
+              throw 'git fetch --tags failed.'
+          }
+
+          git rev-parse "refs/tags/$tag^{commit}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+              throw "Tag '$tag' does not exist."
+          }
+
+          git checkout --detach "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to checkout tag '$tag'."
+          }
+
+      - name: Run release-source CI
+        shell: pwsh
+        run: |
+          if (-not (Test-Path './scripts/ci.ps1')) {
+              throw 'Required script scripts/ci.ps1 was not found.'
+          }
+
+          ./scripts/ci.ps1
+
+      - name: Prepare release output
+        shell: pwsh
+        run: |
+          if (Test-Path './dist') {
+              Remove-Item './dist' -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path './dist' | Out-Null
+
+      - name: Build release artifacts
+        shell: pwsh
+        run: |
+          if (-not (Test-Path './scripts/release.ps1')) {
+              throw 'Required script scripts/release.ps1 was not found.'
+          }
+
+          ./scripts/release.ps1 -Version $env:RELEASE_TAG
+
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem './dist' -File -Recurse)
+
+          if ($files.Count -eq 0) {
+              throw 'Release produced no files in dist/.'
+          }
+
+          $apk = @($files | Where-Object Extension -eq '.apk')
+          $checksums = @($files | Where-Object Name -like '*.sha256')
+          if ($apk.Count -ne 1 -or $checksums.Count -ne 1) {
+              throw "Expected one APK and one SHA-256 file in dist/; found APK=$($apk.Count), checksum=$($checksums.Count)."
+          }
+
+          Write-Host 'Release artifacts:'
+          $files | ForEach-Object { Write-Host " - $($_.FullName)" }
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+              throw "GitHub Release '$env:RELEASE_TAG' already exists."
+          }
+
+          $files = @(
+              Get-ChildItem './dist' -File -Recurse |
+              Select-Object -ExpandProperty FullName
+          )
+
+          $arguments = @('release', 'create', $env:RELEASE_TAG)
+          $arguments += $files
+          $arguments += @('--title', $env:RELEASE_TAG, '--generate-notes')
+
+          if ($env:RELEASE_TAG -match '-(alpha|beta|rc)(\.|$)') {
+              $arguments += '--prerelease'
+          }
+
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create GitHub Release '$env:RELEASE_TAG'."
+          }
