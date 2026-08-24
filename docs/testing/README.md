@@ -1,10 +1,20 @@
 # Testing
 
-Manual checklist for validating builds and routing. Automated unit tests: `.\gradlew.bat testDebugUnitTest`.
+Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
 The currently published application version is `1.10.12`; `v1.10.13` is the active development target. Do not mark a v1.10.13 check as passed unless it was actually run against the corresponding integrated build.
 
 ## Automated checks
+
+Preferred local/CI entry point:
+
+```powershell
+.\scripts\ci.ps1
+```
+
+The script covers Go module verification, native Go tests, Android unit tests, debug APK assembly, expected APK/native-library outputs and packaged-resource audit.
+
+Individual commands remain useful for diagnosis:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest
@@ -16,6 +26,20 @@ Pop-Location
 ```
 
 If a command cannot run in the current environment, record that limitation instead of treating the check as successful.
+
+## GitHub automation smoke
+
+For changes that affect `.github/workflows/` or `scripts/ci.ps1`:
+
+- [ ] owner-created same-repository PR starts **Trusted CI** on the self-hosted `Windows`/`X64` runner;
+- [ ] Trusted CI checks out the PR head and `.\scripts\ci.ps1` completes successfully;
+- [ ] owner-created Issue/PR is added to Development Project #2 when `ADD_TO_PROJECT_PAT` is configured;
+- [ ] external/fork PR code is not executed on the persistent self-hosted runner;
+- [ ] no Project PAT or signing secret is printed in logs.
+
+Release automation is not considered functionally verified by a debug CI run. Before an automated public release, separately validate release signing, `scripts/release.ps1`, the exact release tag and the generated `dist/` artifacts.
+
+Automation contract: [../development/github-automation.md](../development/github-automation.md).
 
 ## Basic build
 
