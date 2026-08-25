@@ -10,10 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -170,7 +169,7 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ),
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text(
                     text = stringResource(R.string.update_current_version_title),
                     style = MaterialTheme.typography.titleMedium,
@@ -183,13 +182,7 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                         installed.code,
                     ),
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                Text(
-                    text = stringResource(R.string.update_source_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
         }
@@ -201,7 +194,7 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ),
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 when (val current = state) {
                     UpdateScreenState.Idle -> {
                         Text(stringResource(R.string.update_status_idle))
@@ -238,6 +231,14 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                     }
                     is UpdateScreenState.Available -> {
                         val release = current.release
+                        val fullNotes = remember(release.notes) {
+                            ReleaseNotesTextFormatter.toPlainText(release.notes)
+                        }
+                        val preview = remember(release.notes) {
+                            ReleaseNotesTextFormatter.preview(release.notes)
+                        }
+                        var notesExpanded by remember(release.tagName) { mutableStateOf(false) }
+
                         Text(
                             text = stringResource(R.string.update_available_title, release.tagName),
                             style = MaterialTheme.typography.titleMedium,
@@ -251,26 +252,15 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                         }
-                        Text(
-                            text = release.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                        Text(
-                            text = stringResource(R.string.update_release_notes_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                        Text(
-                            text = release.notes.ifBlank {
-                                stringResource(R.string.update_release_notes_empty)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        if (release.title.isNotBlank() && release.title != release.tagName) {
+                            Text(
+                                text = release.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+
                         Button(
                             onClick = {
                                 val url = AppUpdateSelector.officialReleaseUrl(release.tagName)
@@ -294,30 +284,67 @@ private fun UpdateScreen(modifier: Modifier = Modifier) {
                                     }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp),
                         ) {
                             Text(stringResource(R.string.update_open_release))
                         }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                FilledTonalButton(
-                    onClick = { scope.launch { checkForUpdates() } },
-                    enabled = state != UpdateScreenState.Checking,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (state == UpdateScreenState.Checking) {
-                            stringResource(R.string.update_status_checking)
-                        } else {
-                            stringResource(R.string.update_check_now)
-                        },
-                    )
+                        Text(
+                            text = stringResource(R.string.update_release_notes_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 14.dp),
+                        )
+                        Text(
+                            text = when {
+                                fullNotes.isBlank() -> stringResource(R.string.update_release_notes_empty)
+                                notesExpanded -> fullNotes
+                                else -> preview.text
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        if (preview.truncated) {
+                            TextButton(
+                                onClick = { notesExpanded = !notesExpanded },
+                                modifier = Modifier.padding(top = 2.dp),
+                            ) {
+                                Text(
+                                    if (notesExpanded) {
+                                        stringResource(R.string.update_hide_release_notes)
+                                    } else {
+                                        stringResource(R.string.update_show_release_notes)
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
+        FilledTonalButton(
+            onClick = { scope.launch { checkForUpdates() } },
+            enabled = state != UpdateScreenState.Checking,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                if (state == UpdateScreenState.Checking) {
+                    stringResource(R.string.update_status_checking)
+                } else {
+                    stringResource(R.string.update_check_now)
+                },
+            )
+        }
+
+        Text(
+            text = stringResource(R.string.update_source_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(
             text = stringResource(R.string.update_security_note),
             style = MaterialTheme.typography.bodySmall,
