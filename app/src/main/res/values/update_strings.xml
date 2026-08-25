@@ -14,6 +14,8 @@
     <string name="update_prerelease_label">Prerelease</string>
     <string name="update_release_notes_title">Release notes</string>
     <string name="update_release_notes_empty">No release notes were provided.</string>
+    <string name="update_show_release_notes">Show full release notes</string>
+    <string name="update_hide_release_notes">Hide full release notes</string>
     <string name="update_open_release">Open official release</string>
     <string name="update_check_now">Check for updates</string>
     <string name="update_open_failed">Could not open the official GitHub Release page.</string>
