@@ -1,0 +1,80 @@
+name: Bug report
+description: Report a reproducible problem in TgWsProxy Android
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem.
+
+        **Privacy:** do not include proxy credentials, Telegram content, IP addresses, secrets/tokens, private domains, or unreviewed raw logs. The app does not attach diagnostics automatically.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you were trying to do.
+      placeholder: A clear, concise description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest sequence that reproduces the problem.
+      placeholder: |
+        1. Open ...
+        2. Enable ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: You can copy this from Settings → Feedback → App and device info.
+      placeholder: 1.10.12 (50)
+    validations:
+      required: true
+  - type: input
+    id: android-version
+    attributes:
+      label: Android version
+      placeholder: Android 14 (SDK 34)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Manufacturer and model only. Do not include serial numbers or device identifiers.
+      placeholder: Manufacturer Model
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network where the problem occurs
+      options:
+        - Wi-Fi
+        - Mobile data
+        - Both
+        - Not network-specific / Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add only information you have reviewed and intentionally want to make public. Do not paste unreviewed logs or credentials.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I reviewed this report and removed credentials, Telegram content, IP addresses, secrets/tokens, private domains, and other sensitive data.
+          required: true

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="feedback_title">Обратная связь</string>
+    <string name="feedback_subtitle">Сообщите о проблеме или предложите улучшение через GitHub.</string>
+    <string name="feedback_report_bug">Сообщить об ошибке</string>
+    <string name="feedback_request_feature">Предложить функцию</string>
+    <string name="feedback_safe_context_title">Информация о приложении и устройстве</string>
+    <string name="feedback_copy_context">Скопировать информацию</string>
+    <string name="feedback_context_copied">Информация о приложении и устройстве скопирована</string>
+    <string name="feedback_open_failed">Не удалось открыть GitHub. Ссылка на форму скопирована.</string>
+    <string name="feedback_privacy_note">Приложение не прикладывает автоматически логи, данные прокси, данные Telegram, IP-адреса, домены, секреты или другую диагностику. Проверьте всё, чем решите поделиться.</string>
+</resources>
