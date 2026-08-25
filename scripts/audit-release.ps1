@@ -45,7 +45,8 @@ function Get-NormalizedMarkdownText {
     }
 
     $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-    return $text.Replace([char]96, '').Replace('*', '')
+    $backtick = ([char]96).ToString()
+    return $text.Replace($backtick, '').Replace('*', '')
 }
 
 function Assert-NormalizedContains {
