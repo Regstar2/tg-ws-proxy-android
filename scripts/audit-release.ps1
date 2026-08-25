@@ -35,6 +35,37 @@ function Assert-Match {
     }
 }
 
+function Get-NormalizedMarkdownText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    return $text.Replace([char]96, '').Replace('*', '')
+}
+
+function Assert-NormalizedContains {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedText,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $text = Get-NormalizedMarkdownText -Path $Path
+    if ($null -eq $text) {
+        Add-Failure "${Description}: missing file $Path"
+        return
+    }
+
+    if (-not $text.Contains($ExpectedText)) {
+        Add-Failure "${Description}: expected text '$ExpectedText' was not found in $Path"
+    }
+}
+
 Write-Host '==> Release metadata consistency'
 $gradlePath = Join-Path $root 'app\build.gradle.kts'
 $gradleText = Get-Content -LiteralPath $gradlePath -Raw -Encoding UTF8
@@ -53,11 +84,16 @@ if (-not $versionCodeMatch.Success) {
     Add-Failure "releaseVersionCode is '$($versionCodeMatch.Groups[1].Value)', expected '$ExpectedVersionCode'."
 }
 
+$versionSummary = "$ExpectedVersion (versionCode $ExpectedVersionCode)"
+Assert-NormalizedContains -Path (Join-Path $root 'README.md') -ExpectedText $versionSummary -Description 'Russian README source version'
+Assert-NormalizedContains -Path (Join-Path $root 'README_EN.md') -ExpectedText $versionSummary -Description 'English README source version'
+
 $escapedVersion = [regex]::Escape($ExpectedVersion)
-Assert-Match -Path (Join-Path $root 'README.md') -Pattern "`?$escapedVersion`?\s+\(`?versionCode\s+$ExpectedVersionCode`?\)" -Description 'Russian README source version'
-Assert-Match -Path (Join-Path $root 'README_EN.md') -Pattern "`?$escapedVersion`?\s+\(`?versionCode\s+$ExpectedVersionCode`?\)" -Description 'English README source version'
 Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##[^\r\n]*$escapedVersion\b" -Description 'CHANGELOG version section'
-Assert-Match -Path (Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md') -Pattern "versionName.*$escapedVersion" -Description 'Release notes versionName'
+
+$releaseNotesPath = Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md'
+Assert-NormalizedContains -Path $releaseNotesPath -ExpectedText "versionName $ExpectedVersion" -Description 'Release notes versionName'
+Assert-NormalizedContains -Path $releaseNotesPath -ExpectedText "versionCode $ExpectedVersionCode" -Description 'Release notes versionCode'
 
 foreach ($readme in @('README.md', 'README_EN.md')) {
     $text = Get-Content -LiteralPath (Join-Path $root $readme) -Raw -Encoding UTF8
