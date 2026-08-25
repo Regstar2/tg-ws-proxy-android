@@ -19,11 +19,18 @@ if ($aapt) {
     Write-Warning "aapt not found; skip badging"
 }
 
-$checkDir = Join-Path $env:TEMP "tgwsproxy_apk_check"
-if (Test-Path $checkDir) { Remove-Item $checkDir -Recurse -Force }
-New-Item -ItemType Directory -Path $checkDir | Out-Null
-Copy-Item $ApkPath (Join-Path $checkDir "app.zip")
-Expand-Archive (Join-Path $checkDir "app.zip") (Join-Path $checkDir "unzipped") -Force
+# Keep temporary extraction under the repository build tree instead of $env:TEMP.
+# Some Windows profiles with non-ASCII user names expose an invalid 8.3 TEMP path
+# (for example C:\Users\XXXX~1), which breaks Remove-Item in Windows PowerShell 5.1.
+$checkDir = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "..\app\build\tmp\tgwsproxy_apk_check")
+)
+if (Test-Path -LiteralPath $checkDir) {
+    Remove-Item -LiteralPath $checkDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $checkDir -Force | Out-Null
+Copy-Item -LiteralPath $ApkPath -Destination (Join-Path $checkDir "app.zip")
+Expand-Archive -LiteralPath (Join-Path $checkDir "app.zip") -DestinationPath (Join-Path $checkDir "unzipped") -Force
 
 Write-Host "`n=== Icon-like files in APK ===" -ForegroundColor Cyan
 $patterns = @(
