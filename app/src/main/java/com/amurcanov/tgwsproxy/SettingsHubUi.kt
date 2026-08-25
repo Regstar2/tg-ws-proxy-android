@@ -92,6 +92,7 @@ fun SettingsNavigationCard(
     onRoutesClick: () -> Unit,
     onCloudflareClick: () -> Unit,
     onDiagnosticsLogsClick: () -> Unit,
+    onUpdatesClick: () -> Unit,
     onFeedbackClick: () -> Unit,
     onAppClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -131,6 +132,11 @@ fun SettingsNavigationCard(
                 title = stringResource(R.string.settings_section_diagnostics_logs_title),
                 subtitle = stringResource(R.string.settings_section_diagnostics_logs_subtitle),
                 onClick = onDiagnosticsLogsClick,
+            )
+            SettingsNavigationRow(
+                title = stringResource(R.string.update_title),
+                subtitle = stringResource(R.string.update_subtitle),
+                onClick = onUpdatesClick,
             )
             SettingsNavigationRow(
                 title = stringResource(R.string.feedback_title),
@@ -247,6 +253,9 @@ fun SettingsHomeScreen(
             onRoutesClick = { onNavigate(SettingsPage.ROUTES) },
             onCloudflareClick = { onNavigate(SettingsPage.CLOUDFLARE) },
             onDiagnosticsLogsClick = { onNavigate(SettingsPage.DIAGNOSTICS_LOGS) },
+            onUpdatesClick = {
+                context.startActivity(Intent(context, UpdateActivity::class.java))
+            },
             onFeedbackClick = {
                 context.startActivity(Intent(context, FeedbackActivity::class.java))
             },
