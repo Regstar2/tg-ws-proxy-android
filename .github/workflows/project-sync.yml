@@ -19,22 +19,8 @@ permissions:
 
 jobs:
   add-to-project:
-    name: Add owner issue or PR to Development project
-    if: >
-      github.actor == 'Regstar2' &&
-      github.triggering_actor == 'Regstar2' &&
-      (
-        github.event_name == 'issues' ||
-        (
-          github.event_name == 'pull_request_target' &&
-          github.event.pull_request.user.login == 'Regstar2' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        )
-      )
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
+    name: Add issue or PR to Development project
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
