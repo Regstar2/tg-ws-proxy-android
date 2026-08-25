@@ -51,6 +51,17 @@ if (-not (Test-Path $pythonRequirements)) {
     throw "Python CI requirements not found: $pythonRequirements"
 }
 
+$releaseAudit = Join-Path $PSScriptRoot 'audit-release.ps1'
+if (-not (Test-Path $releaseAudit)) {
+    throw "Release audit script not found: $releaseAudit"
+}
+
+Write-Host "`n==> Audit release metadata, localization and tracked private files"
+& $releaseAudit -ExpectedVersion '1.10.13' -ExpectedVersionCode 51
+if ($LASTEXITCODE -ne 0) {
+    throw "Release audit failed with exit code $LASTEXITCODE."
+}
+
 Invoke-CheckedCommand -Label 'Install Python build dependencies' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'pip', 'install', '--disable-pip-version-check', '--requirement', $pythonRequirements)
 Invoke-CheckedCommand -Label 'Verify Go module' -FilePath $go.Source -Arguments @('mod', 'verify') -WorkingDirectory $nativeDir
 Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
