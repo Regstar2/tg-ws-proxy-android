@@ -35,6 +35,7 @@ function Invoke-CheckedCommand {
 }
 
 $go = Get-Command go -ErrorAction Stop
+$pythonLauncher = Get-Command py -ErrorAction Stop
 $gradle = Join-Path $root 'gradlew.bat'
 if (-not (Test-Path $gradle)) {
     throw "Gradle wrapper not found: $gradle"
@@ -45,6 +46,12 @@ if (-not (Test-Path $nativeDir)) {
     throw "Native runtime directory not found: $nativeDir"
 }
 
+$pythonRequirements = Join-Path $PSScriptRoot 'requirements-ci.txt'
+if (-not (Test-Path $pythonRequirements)) {
+    throw "Python CI requirements not found: $pythonRequirements"
+}
+
+Invoke-CheckedCommand -Label 'Install Python build dependencies' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'pip', 'install', '--disable-pip-version-check', '--requirement', $pythonRequirements)
 Invoke-CheckedCommand -Label 'Verify Go module' -FilePath $go.Source -Arguments @('mod', 'verify') -WorkingDirectory $nativeDir
 Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
 Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
