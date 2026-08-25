@@ -36,6 +36,7 @@ function Invoke-CheckedCommand {
 
 $go = Get-Command go -ErrorAction Stop
 $pythonLauncher = Get-Command py -ErrorAction Stop
+$windowsPowerShell = Get-Command powershell.exe -ErrorAction Stop
 $gradle = Join-Path $root 'gradlew.bat'
 if (-not (Test-Path $gradle)) {
     throw "Gradle wrapper not found: $gradle"
@@ -66,6 +67,17 @@ Write-Host "`n==> Audit release metadata, localization and tracked private files
 if ($LASTEXITCODE -ne 0) {
     throw "Release audit failed with exit code $LASTEXITCODE."
 }
+
+Invoke-CheckedCommand `
+    -Label 'Validate release audit under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $releaseAudit,
+        '-ExpectedVersion', '1.10.13',
+        '-ExpectedVersionCode', '51'
+    )
 
 Write-Host "`n==> Validate release-script metadata preflight"
 & $releaseScript -Version 'v1.10.13' -PreflightOnly
