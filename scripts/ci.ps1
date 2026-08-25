@@ -36,6 +36,7 @@ function Invoke-CheckedCommand {
 
 $go = Get-Command go -ErrorAction Stop
 $pythonLauncher = Get-Command py -ErrorAction Stop
+$windowsPowerShell = Get-Command powershell.exe -ErrorAction Stop
 $gradle = Join-Path $root 'gradlew.bat'
 if (-not (Test-Path $gradle)) {
     throw "Gradle wrapper not found: $gradle"
@@ -49,6 +50,39 @@ if (-not (Test-Path $nativeDir)) {
 $pythonRequirements = Join-Path $PSScriptRoot 'requirements-ci.txt'
 if (-not (Test-Path $pythonRequirements)) {
     throw "Python CI requirements not found: $pythonRequirements"
+}
+
+$releaseAudit = Join-Path $PSScriptRoot 'audit-release.ps1'
+if (-not (Test-Path $releaseAudit)) {
+    throw "Release audit script not found: $releaseAudit"
+}
+
+$releaseScript = Join-Path $PSScriptRoot 'release.ps1'
+if (-not (Test-Path $releaseScript)) {
+    throw "Release script not found: $releaseScript"
+}
+
+Write-Host "`n==> Audit release metadata, localization and tracked private files"
+& $releaseAudit -ExpectedVersion '1.10.13' -ExpectedVersionCode 51
+if ($LASTEXITCODE -ne 0) {
+    throw "Release audit failed with exit code $LASTEXITCODE."
+}
+
+Invoke-CheckedCommand `
+    -Label 'Validate release audit under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $releaseAudit,
+        '-ExpectedVersion', '1.10.13',
+        '-ExpectedVersionCode', '51'
+    )
+
+Write-Host "`n==> Validate release-script metadata preflight"
+& $releaseScript -Version 'v1.10.13' -PreflightOnly
+if ($LASTEXITCODE -ne 0) {
+    throw "Release-script preflight failed with exit code $LASTEXITCODE."
 }
 
 Invoke-CheckedCommand -Label 'Install Python build dependencies' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'pip', 'install', '--disable-pip-version-check', '--requirement', $pythonRequirements)

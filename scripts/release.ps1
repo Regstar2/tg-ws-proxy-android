@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$Version
+    [string]$Version,
+
+    [switch]$PreflightOnly
 )
 
 Set-StrictMode -Version Latest
@@ -18,12 +20,30 @@ if ($Version -notmatch '^v\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
 $versionName = $Version.Substring(1)
 $gradleFile = Join-Path $root 'app\build.gradle.kts'
 $gradleText = Get-Content $gradleFile -Raw -Encoding UTF8
-$versionMatch = [regex]::Match($gradleText, 'versionName\s*=\s*"([^"]+)"')
+$versionMatch = [regex]::Match($gradleText, 'val\s+releaseVersionName\s*=\s*"([^"]+)"')
+$versionCodeMatch = [regex]::Match($gradleText, 'val\s+releaseVersionCode\s*=\s*(\d+)')
 if (-not $versionMatch.Success) {
-    throw 'Could not read versionName from app/build.gradle.kts.'
+    throw 'Could not read releaseVersionName from app/build.gradle.kts.'
+}
+if (-not $versionCodeMatch.Success) {
+    throw 'Could not read releaseVersionCode from app/build.gradle.kts.'
 }
 if ($versionMatch.Groups[1].Value -ne $versionName) {
-    throw "Release tag $Version does not match app versionName '$($versionMatch.Groups[1].Value)'."
+    throw "Release tag $Version does not match app releaseVersionName '$($versionMatch.Groups[1].Value)'."
+}
+$expectedVersionCode = [int]$versionCodeMatch.Groups[1].Value
+
+$releaseNotes = Join-Path $root ("docs\releases\RELEASE_NOTES_$Version.md")
+if (-not (Test-Path $releaseNotes)) {
+    throw "Release notes were not found for ${Version}: $releaseNotes"
+}
+
+$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
+Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode artifact=$artifactName"
+
+if ($PreflightOnly) {
+    Write-Host 'Release metadata preflight passed.'
+    exit 0
 }
 
 $signingLoader = Join-Path $PSScriptRoot 'load-release-signing.ps1'
@@ -81,7 +101,7 @@ if ([string]::IsNullOrWhiteSpace($sdkRoot) -and (Test-Path 'C:\Android\SDK')) {
     $sdkRoot = 'C:\Android\SDK'
 }
 if ([string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path $sdkRoot)) {
-    throw 'Android SDK root is not configured; apksigner is required for release verification.'
+    throw 'Android SDK root is not configured; aapt/apksigner are required for release verification.'
 }
 
 $buildToolsRoot = Join-Path $sdkRoot 'build-tools'
@@ -92,13 +112,32 @@ if (-not $apksigner) {
     throw "apksigner.bat was not found under $buildToolsRoot."
 }
 
+$aapt = Get-ChildItem $buildToolsRoot -Recurse -Filter 'aapt.exe' -File -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+if (-not $aapt) {
+    throw "aapt.exe was not found under $buildToolsRoot."
+}
+
+Write-Host '==> Verify APK package/version metadata'
+$badgingLines = @(& $aapt.FullName dump badging $sourceApk)
+if ($LASTEXITCODE -ne 0) {
+    throw "aapt dump badging failed with exit code $LASTEXITCODE."
+}
+$badging = $badgingLines -join "`n"
+$escapedVersionName = [regex]::Escape($versionName)
+$escapedVersionCode = [regex]::Escape($expectedVersionCode.ToString())
+if ($badging -notmatch "package:\s+name='com\.amurcanov\.tgwsproxy'.*versionCode='$escapedVersionCode'.*versionName='$escapedVersionName'") {
+    throw "Release APK metadata mismatch. Expected com.amurcanov.tgwsproxy versionName=$versionName versionCode=$expectedVersionCode."
+}
+Write-Host "Verified package metadata: versionName=$versionName versionCode=$expectedVersionCode"
+
 Write-Host '==> Verify APK signature'
 & $apksigner.FullName verify --verbose --print-certs $sourceApk
 if ($LASTEXITCODE -ne 0) {
     throw "APK signature verification failed with exit code $LASTEXITCODE."
 }
 
-$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
 $artifactPath = Join-Path $dist $artifactName
 Copy-Item -Force $sourceApk $artifactPath
 

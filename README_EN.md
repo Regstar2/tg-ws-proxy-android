@@ -8,16 +8,16 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 [Русский](README.md) · **English**
 
-[![Version](https://img.shields.io/badge/version-1.10.12-0969DA?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/source-1.10.13-0969DA?style=for-the-badge)](CHANGELOG.md)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](app/build.gradle.kts)
 [![ABI](https://img.shields.io/badge/ABI-arm64--v8a-7B61FF?style=for-the-badge)](app/build.gradle.kts)
 [![Documentation](https://img.shields.io/badge/docs-open-4C8BF5?style=for-the-badge&logo=readthedocs&logoColor=white)](#documentation)
-[![License](https://img.shields.io/github/license/Regstar2/TgWsProxy_Android?style=for-the-badge&label=license)](LICENSE)
+[![License](https://img.shields.io/github/license/Regstar2/tg-ws-proxy-android?style=for-the-badge&label=license)](LICENSE)
 
 [Quick start](#quick-start) ·
 [Documentation](#documentation) ·
-[Releases](https://github.com/Regstar2/TgWsProxy_Android/releases) ·
-[Report an issue](https://github.com/Regstar2/TgWsProxy_Android/issues)
+[Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases) ·
+[Report an issue](https://github.com/Regstar2/tg-ws-proxy-android/issues)
 
 </div>
 
@@ -27,20 +27,22 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 TgWsProxy runs a local proxy on an Android device. Telegram connects through the MTProto Proxy frontend or the compatible SOCKS5 mode, and the native runtime selects an allowed route to Telegram infrastructure.
 
-The primary use case in version `1.10.12` is **MTProto Proxy → Cloudflare Proxy** on `127.0.0.1:1443`. The application does not create a system VPN tunnel or route all device traffic.
+The primary use case in version `1.10.13` is **MTProto Proxy → Cloudflare Proxy** on `127.0.0.1:1443`. The application does not create a system VPN tunnel or route all device traffic.
 
 ## Project status
 
-**Version:** `1.10.12` (`versionCode 50`)  
-**Stage:** active development
+**Source version:** `1.10.13` (`versionCode 51`)  
+**Stage:** release candidate; the tag and GitHub Release are published only after final Issue #7 acceptance
 
 | Area | Status |
 |---|---|
-| MTProto Proxy over `cf_proxy_ws` | Primary use case; the release notes report manual verification on mobile data and Wi-Fi |
+| MTProto Proxy over `cf_proxy_ws` | Primary use case; previously manually verified on mobile data and Wi-Fi |
 | SOCKS5 / WebSocket frontend | Implemented as a compatibility mode |
 | `direct_ws` and `tcp_fallback` | Implemented; availability depends on the network |
 | Cloudflare Worker | Implemented as an optional route |
-| Worker Pool | Implemented, but remains slow in version `1.10.12` and is not recommended as the primary route |
+| Worker Pool | Implemented but still slow and not recommended as the primary route |
+| Feedback | Dedicated screen; GitHub Issue Forms without an embedded PAT |
+| Updates | Official GitHub Releases check with SemVer and official release-page navigation |
 
 ## Features
 
@@ -52,6 +54,7 @@ The primary use case in version `1.10.12` is **MTProto Proxy → Cloudflare Prox
 - optional probe passthrough to a configured masking domain;
 - foreground service, status notification, and a local listener watchdog;
 - route diagnostics, runtime status, report export, and configurable logging;
+- dedicated Feedback and Updates screens;
 - English and Russian UI.
 
 ## Screenshots
@@ -69,7 +72,7 @@ The primary use case in version `1.10.12` is **MTProto Proxy → Cloudflare Prox
 
 ## Quick start
 
-1. Install an ARM64 APK from [GitHub Releases](https://github.com/Regstar2/TgWsProxy_Android/releases) when the required version is available, or [build a debug APK](#build).
+1. Install an ARM64 APK from [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases) when the required version is available, or [build a debug APK](#build).
 2. Open TgWsProxy.
 3. Keep **MTProto Proxy** as the frontend and port `1443` unless another local service already uses it.
 4. Tap **Start proxy**.
@@ -99,13 +102,13 @@ The current native build script uses a Windows NDK toolchain path. The repositor
 
 ## Installation
 
-Check [GitHub Releases](https://github.com/Regstar2/TgWsProxy_Android/releases) for an APK of the required version. Install a locally built debug APK through ADB:
+Check [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases) for an APK of the required version. Install a locally built debug APK through ADB:
 
 ```powershell
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Android may require uninstalling the existing application when switching between debug and release signatures.
+Android may require uninstalling the existing application when switching between debug and release signatures. Note that uninstalling may remove local application settings.
 
 ## Usage
 
@@ -153,7 +156,7 @@ WebSocket is a transport. The interface and diagnostics identify the actual path
 
 ## Configuration
 
-Defaults for version `1.10.12`:
+Defaults for version `1.10.13`:
 
 | Setting | Value |
 |---|---|
@@ -200,6 +203,8 @@ Detailed design: [docs/architecture/architecture.md](docs/architecture/architect
 - MTProto secrets, query parameters, and sensitive addresses are masked in the interface, diagnostic reports, and logs where the implementation supports it.
 - Cloudflare Worker URLs, proxy secrets, keystores, and signing variables must not be published in issues, logs, or commits.
 - Release signing uses local environment variables; the keystore is excluded from Git.
+- Feedback does not automatically attach runtime logs, proxy credentials, Telegram data, IP addresses, or secrets.
+- Update checks use the official GitHub Releases API; the application does not install APKs itself.
 - A masking domain changes the Fake TLS handshake shape but does not turn the application into a VPN.
 
 Review every diagnostic report manually before publishing it.
@@ -254,6 +259,14 @@ Build and copy the APK to the local `artifacts/` directory:
 .\scripts\build-apk.ps1 -Configuration Debug
 ```
 
+Build the final signed release only when the local keystore is configured:
+
+```powershell
+.\scripts\release.ps1 -Version v1.10.13
+```
+
+The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
+
 Build the Go runtime separately:
 
 ```powershell
@@ -262,19 +275,15 @@ Build the Go runtime separately:
 
 ## Testing
 
-Commands defined by the project:
+Single project CI entry point:
 
 ```powershell
-.\gradlew.bat testDebugUnitTest
-.\gradlew.bat assembleDebug
-
-cd native\tgwsproxy
-go test ./...
+.\scripts\ci.ps1
 ```
 
-These commands were not run while preparing this README. The `1.10.12` release notes report unit tests, a debug build, Go tests, and manual verification of MTProto through Cloudflare Proxy on mobile data and Wi-Fi.
+It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Manual validation should cover starting and stopping the proxy service, connecting Telegram, loading messages and media, switching network policies, running route diagnostics, and reviewing exported reports for secrets.
+Manual pre-tag validation must cover proxy start/stop, Telegram connectivity, messages and media, Wi-Fi ↔ mobile switching, reconnect, Feedback/Updates, and review of exported diagnostics for secrets.
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
@@ -288,23 +297,24 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| Version `1.10.12` changes | [docs/releases/RELEASE_NOTES_v1.10.12.md](docs/releases/RELEASE_NOTES_v1.10.12.md) |
+| `1.10.13` release notes | [docs/releases/RELEASE_NOTES_v1.10.13.md](docs/releases/RELEASE_NOTES_v1.10.13.md) |
+| `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Credits
 
 - [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) — upstream runtime and the main WebSocket routing concept;
 - [amurcanov/tg-ws-proxy-android](https://github.com/amurcanov/tg-ws-proxy-android) — the Android wrapper this branch started from;
-- [Regstar2/TgWsProxy_Android](https://github.com/Regstar2/TgWsProxy_Android) — the current Android implementation and ongoing development.
+- [Regstar2/tg-ws-proxy-android](https://github.com/Regstar2/tg-ws-proxy-android) — the current Android implementation and ongoing development.
 
-AI tools were used for selected parts of the code, tests, and documentation. The resulting changes were reviewed manually.
+AI tools were used for selected parts of the code, tests, and documentation. The resulting changes are checked by tests and the release audit; manual device acceptance remains a required final step.
 
 ## Limitations
 
 - only the `arm64-v8a` ABI is supported;
 - the application is a Telegram proxy, not a system-wide VPN;
 - route availability depends on the network and external infrastructure;
-- Worker Pool remains slow in version `1.10.12` and is not intended for the primary use case;
+- Worker Pool remains slow and is not intended for the primary use case;
 - port `1443` must be changed when another local service already uses it;
 - the native build script targets Windows; Linux and macOS support is not confirmed;
 - masking-domain passthrough creates connections to the configured domain;

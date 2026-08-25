@@ -125,7 +125,17 @@ jobs:
 
           $arguments = @('release', 'create', $env:RELEASE_TAG)
           $arguments += $files
-          $arguments += @('--title', $env:RELEASE_TAG, '--generate-notes')
+          $arguments += @('--title', $env:RELEASE_TAG)
+
+          $notesPath = "./docs/releases/RELEASE_NOTES_$($env:RELEASE_TAG).md"
+          if (Test-Path $notesPath) {
+              Write-Host "Using curated release notes: $notesPath"
+              $arguments += @('--notes-file', $notesPath)
+          }
+          else {
+              Write-Host 'Curated release notes not found; falling back to generated notes.'
+              $arguments += '--generate-notes'
+          }
 
           if ($env:RELEASE_TAG -match '-(alpha|beta|rc)(\.|$)') {
               $arguments += '--prerelease'
