@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$Version
+    [string]$Version,
+
+    [switch]$PreflightOnly
 )
 
 Set-StrictMode -Version Latest
@@ -30,6 +32,19 @@ if ($versionMatch.Groups[1].Value -ne $versionName) {
     throw "Release tag $Version does not match app releaseVersionName '$($versionMatch.Groups[1].Value)'."
 }
 $expectedVersionCode = [int]$versionCodeMatch.Groups[1].Value
+
+$releaseNotes = Join-Path $root ("docs\releases\RELEASE_NOTES_$Version.md")
+if (-not (Test-Path $releaseNotes)) {
+    throw "Release notes were not found for $Version: $releaseNotes"
+}
+
+$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
+Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode artifact=$artifactName"
+
+if ($PreflightOnly) {
+    Write-Host 'Release metadata preflight passed.'
+    exit 0
+}
 
 $signingLoader = Join-Path $PSScriptRoot 'load-release-signing.ps1'
 if (Test-Path $signingLoader) {
@@ -123,7 +138,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "APK signature verification failed with exit code $LASTEXITCODE."
 }
 
-$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
 $artifactPath = Join-Path $dist $artifactName
 Copy-Item -Force $sourceApk $artifactPath
 
