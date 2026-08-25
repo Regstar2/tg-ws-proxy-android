@@ -2,6 +2,7 @@
 <resources>
     <string name="feedback_title">Feedback</string>
     <string name="feedback_subtitle">Report a problem or suggest an improvement on GitHub.</string>
+    <string name="feedback_back">Back to settings</string>
     <string name="feedback_report_bug">Report bug</string>
     <string name="feedback_request_feature">Request feature</string>
     <string name="feedback_safe_context_title">App and device info</string>

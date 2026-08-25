@@ -2,6 +2,7 @@
 <resources>
     <string name="feedback_title">Обратная связь</string>
     <string name="feedback_subtitle">Сообщите о проблеме или предложите улучшение через GitHub.</string>
+    <string name="feedback_back">Назад к настройкам</string>
     <string name="feedback_report_bug">Сообщить об ошибке</string>
     <string name="feedback_request_feature">Предложить функцию</string>
     <string name="feedback_safe_context_title">Информация о приложении и устройстве</string>

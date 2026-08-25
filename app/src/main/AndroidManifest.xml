@@ -32,6 +32,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name="com.amurcanov.tgwsproxy.FeedbackActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoTitleBar" />
+
         <service
             android:name="com.amurcanov.tgwsproxy.ProxyService"
             android:exported="false"
