@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="feedback_title">Feedback</string>
+    <string name="feedback_subtitle">Report a problem or suggest an improvement on GitHub.</string>
+    <string name="feedback_report_bug">Report bug</string>
+    <string name="feedback_request_feature">Request feature</string>
+    <string name="feedback_safe_context_title">App and device info</string>
+    <string name="feedback_copy_context">Copy app/device info</string>
+    <string name="feedback_context_copied">App/device info copied</string>
+    <string name="feedback_open_failed">Could not open GitHub. The form link was copied.</string>
+    <string name="feedback_privacy_note">The app does not attach logs, proxy credentials, Telegram data, IP addresses, domains, secrets, or other diagnostics automatically. Review anything you choose to share.</string>
+</resources>
