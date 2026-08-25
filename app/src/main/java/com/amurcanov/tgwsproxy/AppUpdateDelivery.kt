@@ -127,24 +127,9 @@ object AppUpdateSelector {
     }
 
     fun officialReleaseUrl(tagName: String): String? {
-        val version = SemanticVersion.parse(tagName) ?: return null
-        val canonicalTag = buildString {
-            append('v')
-            append(version.major)
-            append('.')
-            append(version.minor)
-            append('.')
-            append(version.patch)
-            if (version.prerelease.isNotEmpty()) {
-                append('-')
-                append(version.prerelease.joinToString("."))
-            }
-            if (version.buildMetadata.isNotEmpty()) {
-                append('+')
-                append(version.buildMetadata.joinToString("."))
-            }
-        }
-        return RELEASE_PAGE_PREFIX + canonicalTag
+        val validatedTag = tagName.trim()
+        SemanticVersion.parse(validatedTag) ?: return null
+        return RELEASE_PAGE_PREFIX + validatedTag
     }
 }
 
