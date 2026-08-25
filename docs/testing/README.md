@@ -31,11 +31,13 @@ If a command cannot run in the current environment, record that limitation inste
 
 For changes that affect `.github/workflows/` or `scripts/ci.ps1`:
 
-- [ ] owner-created same-repository PR starts **Trusted CI** on the self-hosted `Windows`/`X64` runner;
-- [ ] Trusted CI checks out the PR head and `.\scripts\ci.ps1` completes successfully;
-- [ ] owner-created Issue/PR is added to Development Project #2 when `ADD_TO_PROJECT_PAT` is configured;
-- [ ] external/fork PR code is not executed on the persistent self-hosted runner;
-- [ ] no Project PAT or signing secret is printed in logs.
+- [ ] a repository PR starts **CI** on GitHub-hosted `windows-latest`;
+- [ ] CI executes `.\scripts\ci.ps1` successfully without using the persistent owner runner;
+- [ ] an Issue/PR is added to Development Project #2 when `ADD_TO_PROJECT_PAT` is configured;
+- [ ] Project Sync runs on GitHub-hosted `ubuntu-latest` and does not checkout/execute PR code;
+- [ ] external/fork PR code is never executed on the persistent self-hosted runner;
+- [ ] no Project PAT or signing secret is printed in logs;
+- [ ] the self-hosted `Windows`/`X64` runner is reserved for the owner-controlled release workflow.
 
 Release automation is not considered functionally verified by a debug CI run. Before an automated public release, separately validate release signing, `scripts/release.ps1`, the exact release tag and the generated `dist/` artifacts.
 

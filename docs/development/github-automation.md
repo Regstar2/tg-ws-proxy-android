@@ -10,30 +10,24 @@ Project-specific commands live in PowerShell scripts. GitHub Actions only orches
 |---|---|
 | `scripts/ci.ps1` | Native Go verification/tests, Android unit tests, debug APK build and packaged-resource audit |
 | `scripts/release.ps1 -Version vX.Y.Z` | Signed release APK build, signature verification, stable artifact naming and SHA-256 generation into `dist/` |
-| `.github/workflows/trusted-ci.yml` | Owner-only CI for trusted same-repository PRs and manual dispatch |
-| `.github/workflows/project-sync.yml` | Add owner-created Issues and same-repository PRs to the Development Project |
-| `.github/workflows/release.yml` | Validate a release tag, rerun CI, build `dist/`, then create a GitHub Release |
+| `.github/workflows/trusted-ci.yml` | Public PR CI and manual CI dispatch on a GitHub-hosted Windows runner |
+| `.github/workflows/project-sync.yml` | Add Issues and Pull Requests to the Development Project on a GitHub-hosted runner |
+| `.github/workflows/release.yml` | Owner-only release validation/build/publication on the trusted self-hosted Windows runner |
 
-## Trusted CI
+## Public CI
 
-The persistent self-hosted runner is treated as a trusted owner machine.
+The repository is public, so normal pull-request validation must not execute contributor code on the persistent owner machine.
 
-The workflow uses the labels:
+`trusted-ci.yml` therefore uses GitHub-hosted `windows-latest` and responds to normal `pull_request` events plus `workflow_dispatch`. It does not receive project or release secrets.
 
-```text
-self-hosted, Windows, X64
-```
+The workflow:
 
-For `pull_request_target`, self-hosted execution is allowed only when all of the following are true:
+1. checks out the event ref without persisting Git credentials;
+2. configures Java 17;
+3. configures the Go version declared by `native/tgwsproxy/go.mod`;
+4. executes only `scripts/ci.ps1` as the project-specific CI entry point.
 
-- actor is `Regstar2`;
-- triggering actor is `Regstar2`;
-- PR author is `Regstar2`;
-- PR head belongs to this same repository.
-
-The workflow definition comes from the trusted base branch. Only after the metadata gate passes does it checkout the exact PR head SHA and execute `scripts/ci.ps1`.
-
-External/fork PR code must not run on the self-hosted runner.
+Because external PR code runs only inside an ephemeral GitHub-hosted runner, contributors can receive CI feedback without access to the owner's persistent Windows machine.
 
 ### Local equivalent
 
@@ -53,7 +47,7 @@ The script fails on an unsuccessful mandatory check. It currently performs:
 
 ## Development Project sync
 
-`project-sync.yml` adds owner-created Issues and owner-created same-repository Pull Requests to:
+`project-sync.yml` adds repository Issues and Pull Requests to:
 
 ```text
 https://github.com/users/Regstar2/projects/2
@@ -67,18 +61,22 @@ ADD_TO_PROJECT_PAT
 
 The token value must exist only in GitHub Actions secrets. It must not be committed, printed in logs, placed in issue text or copied into diagnostics.
 
-The token needs only the permissions required by GitHub for adding repository Issues/PRs to the configured user-level Project.
+Project Sync runs on `ubuntu-latest`, not on the owner's machine. For pull requests it uses `pull_request_target`, but it does not checkout or execute PR code; it only invokes the pinned project-management action against event metadata. This permits Project access without exposing the secret to contributor code.
 
-External issue/PR events are intentionally not sent to the self-hosted runner by this workflow.
+The token needs only the permissions required by GitHub for adding repository Issues/PRs to the configured user-level Project.
 
 ## Release automation
 
-`release.yml` runs only for an owner-triggered `v*` tag push or an owner `workflow_dispatch` that references an existing release tag.
+`release.yml` is intentionally separate from public CI. It runs only for an owner-triggered `v*` tag push or an owner `workflow_dispatch` that references an existing release tag.
+
+The release job still uses the trusted self-hosted Windows/X64 runner because the current signing model expects a keystore and signing environment that remain outside the repository checkout.
+
+Public PR code is never executed by this release workflow. The release workflow checks out only the exact owner-controlled release tag before running the project scripts.
 
 Release flow:
 
 ```text
-exact tag
+exact owner-controlled tag
   -> scripts/ci.ps1
   -> clean dist/
   -> scripts/release.ps1 -Version <tag>
@@ -103,7 +101,7 @@ KEY_ALIAS    # optional; defaults to tgwsproxy
 
 `KEYSTORE_FILE` may point to a keystore outside the repository. Signing material and passwords must not be committed.
 
-For local builds, the existing gitignored `release-signing.env` loader may populate these variables. On a self-hosted Actions runner, configure the runner/service environment or another secure secret-injection mechanism so that the release process receives them without storing the values in the checkout.
+For local builds, the existing gitignored `release-signing.env` loader may populate these variables. On the self-hosted release runner, configure the runner/service environment or another secure secret-injection mechanism so that the release process receives them without storing the values in the checkout.
 
 The release script also requires Android SDK build-tools with `apksigner.bat`. It verifies the generated APK signature before copying anything into `dist/`.
 
@@ -128,14 +126,12 @@ dist/TgWsProxy-Android-v1.10.13-arm64-v8a.apk.sha256
 
 `dist/` is generated locally and is ignored by Git.
 
-## Safe verification before the first release
+## Verification before the first automated release
 
-Before relying on this automation for a public release:
-
-1. verify the self-hosted runner reports the `self-hosted`, `Windows`, and `X64` labels;
-2. run `scripts/ci.ps1` locally;
-3. open an owner same-repository PR and confirm Trusted CI executes successfully;
-4. confirm an owner Issue/PR is added to Development Project #2;
-5. confirm no Project PAT or signing values appear in logs;
+1. open or update a PR and confirm public CI runs on GitHub-hosted Windows;
+2. confirm `scripts/ci.ps1` succeeds both locally and in GitHub-hosted CI;
+3. confirm a repository Issue/PR is added to Development Project #2 without using the self-hosted runner;
+4. confirm no Project PAT or signing values appear in logs;
+5. verify the self-hosted runner is used only for the owner-controlled release workflow;
 6. run `scripts/release.ps1` only after release signing is configured and application version metadata matches the intended tag;
 7. test the release workflow with a deliberate release candidate/test tag before the first stable automated publication when practical.
