@@ -155,7 +155,7 @@ foreach ($pattern in $tokenPatterns) {
 
 Write-Host '==> Hardcoded user-facing string heuristic'
 $uiPatterns = @(
-    'Text[[:space:]]*\([[:space:]]*"[^"\n]+"',
+    '(^|[^[:alnum:]_])Text[[:space:]]*\([[:space:]]*"[^"\n]+"',
     'contentDescription[[:space:]]*=[[:space:]]*"[^"\n]+"',
     'Toast\.makeText\([^,]+,[[:space:]]*"[^"\n]+"'
 )
@@ -193,3 +193,4 @@ if ($failures.Count -gt 0) {
 }
 
 Write-Host "`nRelease audit passed for v$ExpectedVersion (versionCode $ExpectedVersionCode)." -ForegroundColor Green
+exit 0
