@@ -1,5 +1,6 @@
 package com.amurcanov.tgwsproxy
 
+import android.content.Intent
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -90,6 +92,7 @@ fun SettingsNavigationCard(
     onRoutesClick: () -> Unit,
     onCloudflareClick: () -> Unit,
     onDiagnosticsLogsClick: () -> Unit,
+    onFeedbackClick: () -> Unit,
     onAppClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -128,6 +131,11 @@ fun SettingsNavigationCard(
                 title = stringResource(R.string.settings_section_diagnostics_logs_title),
                 subtitle = stringResource(R.string.settings_section_diagnostics_logs_subtitle),
                 onClick = onDiagnosticsLogsClick,
+            )
+            SettingsNavigationRow(
+                title = stringResource(R.string.feedback_title),
+                subtitle = stringResource(R.string.feedback_subtitle),
+                onClick = onFeedbackClick,
             )
             SettingsNavigationRow(
                 title = stringResource(R.string.settings_section_app_title),
@@ -226,6 +234,8 @@ fun SettingsHomeScreen(
     onApplyRecommendedRoutes: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+
     Column(modifier = modifier.fillMaxWidth()) {
         SettingsSummaryCard(
             networkLabel = networkLabel,
@@ -237,9 +247,11 @@ fun SettingsHomeScreen(
             onRoutesClick = { onNavigate(SettingsPage.ROUTES) },
             onCloudflareClick = { onNavigate(SettingsPage.CLOUDFLARE) },
             onDiagnosticsLogsClick = { onNavigate(SettingsPage.DIAGNOSTICS_LOGS) },
+            onFeedbackClick = {
+                context.startActivity(Intent(context, FeedbackActivity::class.java))
+            },
             onAppClick = { onNavigate(SettingsPage.APP) },
         )
-        FeedbackSettingsCard()
         SettingsQuickActionsCard(
             onApplyRecommendedRoutes = onApplyRecommendedRoutes,
             onCheckRoutes = { onNavigate(SettingsPage.DIAGNOSTICS_LOGS) },
