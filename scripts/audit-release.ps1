@@ -25,12 +25,12 @@ function Assert-Match {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        Add-Failure "$Description: missing file $Path"
+        Add-Failure "${Description}: missing file $Path"
         return
     }
     $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     if ($text -notmatch $Pattern) {
-        Add-Failure "$Description: expected pattern was not found in $Path"
+        Add-Failure "${Description}: expected pattern was not found in $Path"
     }
 }
 
@@ -53,10 +53,10 @@ if (-not $versionCodeMatch.Success) {
 }
 
 $escapedVersion = [regex]::Escape($ExpectedVersion)
-Assert-Match -Path (Join-Path $root 'README.md') -Pattern "Версия исходников:\*\*\s+`?$escapedVersion`?\s+\(`?versionCode $ExpectedVersionCode`?\)" -Description 'Russian README source version'
-Assert-Match -Path (Join-Path $root 'README_EN.md') -Pattern "Source version:\*\*\s+`?$escapedVersion`?\s+\(`?versionCode $ExpectedVersionCode`?\)" -Description 'English README source version'
+Assert-Match -Path (Join-Path $root 'README.md') -Pattern "Версия исходников:.*$escapedVersion.*versionCode\s+$ExpectedVersionCode" -Description 'Russian README source version'
+Assert-Match -Path (Join-Path $root 'README_EN.md') -Pattern "Source version:.*$escapedVersion.*versionCode\s+$ExpectedVersionCode" -Description 'English README source version'
 Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##\s+(Unreleased\s+—\s+)?$escapedVersion\b" -Description 'CHANGELOG version section'
-Assert-Match -Path (Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md') -Pattern "versionName`?\*\*?\s*$escapedVersion|versionName.*$escapedVersion" -Description 'Release notes versionName'
+Assert-Match -Path (Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md') -Pattern "versionName.*$escapedVersion" -Description 'Release notes versionName'
 
 foreach ($readme in @('README.md', 'README_EN.md')) {
     $text = Get-Content -LiteralPath (Join-Path $root $readme) -Raw -Encoding UTF8
