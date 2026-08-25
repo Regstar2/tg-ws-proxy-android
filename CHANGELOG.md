@@ -11,7 +11,14 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - Worker failover is regression-tested to stop after the first successful candidate.
 - Worker ordering for equal creation timestamps preserves stable persistence/insertion order instead of using random UUID order.
 - Reviewed relevant Flowseal runtime changes through `b2a8074`; Android-specific route keys, cooldown/watchdog/fake-TLS/diagnostics behavior are retained and disabled upstream 429 logic is not ported.
-- Added `docs/research/flowseal-upstream-2026-08-24.md` with port/no-port decisions. Automated Go/Android/debug-build validation passed on the implementation branch; the project owner also reported a successful manual proxy smoke test.
+- Added a dedicated **Feedback** settings section backed by GitHub Issue Forms, with optional safe app/device context and no embedded GitHub write credential.
+- Added a dedicated **Updates** section that checks only the official GitHub Releases feed asynchronously, applies SemVer stable/prerelease policy, shows bounded/cleaned release notes, and opens only the validated official release page.
+- Update checks do not silently download/install APKs, add install permissions, or touch proxy runtime state.
+- Public PR CI now runs on GitHub-hosted Windows; Project Sync uses GitHub-hosted Ubuntu; the persistent self-hosted runner is reserved for owner-controlled release/signing.
+- Added signed release packaging verification and SHA-256 artifact generation through `scripts/release.ps1`.
+- Added release-readiness auditing for version metadata, RU/EN resource parity, obsolete repository links, tracked private/local files, signing material, logs, environment files, and common credential signatures.
+- Public README/docs now describe source `1.10.13` accurately and use the canonical `Regstar2/tg-ws-proxy-android` repository URL.
+- Added `docs/research/flowseal-upstream-2026-08-24.md` with port/no-port decisions and `docs/releases/RELEASE_NOTES_v1.10.13.md` for the final release body.
 
 ## 1.10.12
 
