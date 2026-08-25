@@ -2,93 +2,113 @@
 
 > Short workflow: [release.md](release.md). This file is the detailed checklist.
 
-## Build
+## Metadata / repository audit
 
-- [ ] `cd native/tgwsproxy && go test ./tgwsroute/...` (or `go test ./...` on Linux/CI)
-- [ ] `./gradlew.bat testDebugUnitTest`
-- [ ] `./gradlew.bat assembleDebug`
-- [ ] `./gradlew.bat lint`
-- [ ] `./gradlew.bat assembleRelease` (if signing configured)
-- [ ] `.\scripts\build-apk.ps1 -Configuration Release` (signed copy to `artifacts/apk/release/`)
+- [ ] `releaseVersionName = 1.10.13` and `releaseVersionCode = 51`.
+- [ ] `.\scripts\audit-release.ps1 -ExpectedVersion 1.10.13 -ExpectedVersionCode 51` passes.
+- [ ] RU/default-English resource keys have parity.
+- [ ] README RU/EN, CHANGELOG, version docs and `RELEASE_NOTES_v1.10.13.md` agree with the source metadata.
+- [ ] No obsolete `Regstar2/TgWsProxy_Android` repository URLs remain in README RU/EN.
+- [ ] No private governance/tool state, local logs, environment files, signing material or keystores are tracked.
+- [ ] Final branch diff contains no unrelated changes.
 
-## Runtime
+## Automated build
 
-- [ ] Start / stop / reconnect proxy
-- [ ] Telegram connects via SOCKS5 `127.0.0.1:1081`
-- [ ] Worker test OK
-- [ ] CF test OK or clear error
-- [ ] Auto / Worker only / CF only modes
-- [ ] Worker route works with pool enabled
-- [ ] Worker route still works when pool size is 0
-- [ ] Worker pool does not warm up when Worker route is disabled by policy
-- [ ] Worker pool resets on Stop
-- [ ] Worker pool resets or reconfigures on ACTION_RECONFIGURE
-- [ ] CF route still works after Worker pool changes
-- [ ] Direct route still works when selected by policy
-- [ ] TCP fallback still works when selected by policy
-- [ ] Active routes test respects Wi-Fi policy
-- [ ] Active routes test respects Mobile policy
-- [ ] Disabled route is shown as disabled, not failed
-- [ ] Empty Worker domain is shown as not configured
-- [ ] CF failures show useful hint
-- [ ] Route probe report can be copied
-- [ ] Route probe report is included in runtime log export after running probe
-- [ ] Existing Direct/Worker/CF/TCP test buttons still work
-- [ ] Worker pool hits/misses appear in runtime status
-- [ ] CF pool hits/misses appear in runtime status
-- [ ] Pool metrics appear in runtime log export
-- [ ] Pool metrics export does not include domains or runtime tokens
-- [ ] Active route diagnostics still shows disabled/not configured routes correctly
-- [ ] Effective route policy card shows current network type
-- [ ] Effective route policy card shows saved vs global source
-- [ ] Network switch updates last reconfigure status
-- [ ] Last reconfigure status does not spam Toasts
+- [ ] `.\scripts\ci.ps1` passes.
+- [ ] `go mod verify` passes in `native/tgwsproxy`.
+- [ ] `go test ./...` passes in `native/tgwsproxy`.
+- [ ] `testDebugUnitTest` passes.
+- [ ] `assembleDebug` passes.
+- [ ] packaged APK icon/resource audit passes.
+- [ ] debug APK reports `versionName 1.10.13-debug` / `versionCode 52`.
 
-## Notification
+## Signed release artifact
 
-- [ ] Foreground notification visible while running
-- [ ] Application icon resource: `ic_launcher_tgwsproxy_v2` (manifest)
-- [ ] Round icon: `ic_launcher_tgwsproxy_round_v2`
-- [ ] Notification small: `ic_notification_small_v2` (vector)
-- [ ] Notification large: `notification_app_icon_v2` (not PackageManager)
-- [ ] Channel: `tgwsproxy_service_status_v3`
-- [ ] `scripts/audit-apk-icons.ps1` reports no legacy filenames in APK
-- [ ] `adb dumpsys package` shows expected `versionCode` after install
-- [ ] MIUI: uninstall + reinstall (+ reboot if icon still cached)
-- [ ] Tap notification opens app
-- [ ] Stop / Start / Reconnect / Open actions work
-- [ ] Speed and latency when metrics enabled
-- [ ] Minimal mode hides metrics
-- [ ] Open Android notification settings
+- [ ] Local release signing variables/keystore are configured outside Git.
+- [ ] `.\scripts\release.ps1 -Version v1.10.13` succeeds.
+- [ ] `apksigner verify --verbose --print-certs` succeeds inside the release script.
+- [ ] `dist\TgWsProxy-Android-v1.10.13-arm64-v8a.apk` exists.
+- [ ] matching `.sha256` exists and contains the artifact SHA-256.
+- [ ] signed release APK reports `versionName 1.10.13` / `versionCode 51`.
 
-## Lifecycle
+## Core runtime
 
-- [ ] Screen rotation
-- [ ] App background / resume
-- [ ] Network switch Wi-Fi ↔ mobile
-- [ ] Start proxy on Wi-Fi, switch to Mobile, proxy reconfigures without manual restart
-- [ ] Start proxy on Mobile, switch to Wi-Fi, proxy reconfigures without manual restart
-- [ ] Reconfigure keeps foreground notification visible
-- [ ] Reconfigure does not show repeated Toast spam
-- [ ] Manual Reconnect still uses last runtime config
-- [ ] Stop proxy disables network monitor
+- [ ] Start proxy.
+- [ ] Stop proxy.
+- [ ] Reconnect proxy.
+- [ ] MTProto frontend starts on the configured local port (default `127.0.0.1:1443`).
+- [ ] **Apply in Telegram** opens the MTProto proxy configuration.
+- [ ] Telegram connects and receives text messages.
+- [ ] Telegram sends text messages.
+- [ ] Telegram loads images/media.
+- [ ] Telegram sends media where practical.
+- [ ] Main `cf_proxy_ws` route works.
+- [ ] Disabled routes are not selected.
+- [ ] Direct/TCP fallback behavior remains consistent with the saved route policy.
+- [ ] Worker route remains optional and does not become the default unexpectedly.
 
-## Privacy
+## Network / lifecycle
 
-- [ ] Log export masks domains when configured
-- [ ] No raw SSID in diagnostics
-- [ ] Copy policy diagnostics masks sensitive data
-- [ ] Runtime log export includes effective route policy section
-- [ ] Export does not include raw SSID, SIM operator, or full domains
-- [ ] Route probe report masks domains and sensitive network data
+- [ ] Proxy works on Wi-Fi.
+- [ ] Proxy works on mobile data.
+- [ ] Start on Wi-Fi → switch to mobile → runtime reconfigures without manual restart.
+- [ ] Start on mobile → switch to Wi-Fi → runtime reconfigures without manual restart.
+- [ ] Foreground notification remains visible during reconfigure.
+- [ ] Background/resume does not stop the proxy unexpectedly.
+- [ ] Screen rotation does not break settings/runtime state.
 
-## UI
+## Diagnostics / privacy
 
-- [ ] Onboarding on first launch
-- [ ] Help / About links open repository
-- [ ] Worker domain URL normalized to hostname
+- [ ] Route diagnostics opens and completes expected checks.
+- [ ] Diagnostic report can be copied/shared.
+- [ ] Exported diagnostics do not expose raw proxy secrets/tokens.
+- [ ] Exported diagnostics do not expose raw SSID or SIM operator.
+- [ ] Exported diagnostics do not expose full sensitive domains when masking is expected.
+- [ ] Runtime/persistent logging remains disabled by default.
 
-## Docs
+## Feedback
 
-- [ ] Cloudflare Worker guide contains current Worker code
-- [ ] Copy Worker code action works, if implemented
+- [ ] **Settings → Feedback / Обратная связь** opens a dedicated screen.
+- [ ] Report bug opens this repository's bug Issue Form.
+- [ ] Request feature opens this repository's feature Issue Form.
+- [ ] Copied helper context contains only app version/code, Android release/SDK and manufacturer/model.
+- [ ] No logs, proxy credentials, Telegram data, IPs or secrets are auto-attached.
+- [ ] Opening Feedback/browser while proxy is running does not stop/reconfigure it.
+
+## Updates
+
+- [ ] **Settings → Updates / Обновления** opens a dedicated screen.
+- [ ] Installed version/code are shown.
+- [ ] Automatic check starts only after the Updates screen opens.
+- [ ] Manual **Check for updates** works.
+- [ ] Release notes render as cleaned compact text; full notes can be expanded/collapsed.
+- [ ] Available update action opens only `Regstar2/tg-ws-proxy-android` official GitHub Release page.
+- [ ] Offline/timeout/API failures remain local UI errors and do not affect proxy connectivity.
+- [ ] No APK is silently downloaded or installed.
+
+## Localization / UI
+
+- [ ] Main UI reviewed in Russian.
+- [ ] Main UI reviewed in English/default fallback.
+- [ ] Feedback reviewed in RU/EN.
+- [ ] Updates reviewed in RU/EN.
+- [ ] No obvious unintended hardcoded user-facing strings are visible.
+- [ ] Back navigation from Feedback and Updates works.
+
+## Notification / packaged resources
+
+- [ ] Foreground notification visible while running.
+- [ ] Application icon resource: `ic_launcher_tgwsproxy_v2`.
+- [ ] Round icon: `ic_launcher_tgwsproxy_round_v2`.
+- [ ] Notification small icon: `ic_notification_small_v2`.
+- [ ] Notification large icon: `notification_app_icon_v2`.
+- [ ] `scripts/audit-apk-icons.ps1` reports no legacy filenames in APK.
+- [ ] Tap notification opens app.
+- [ ] Stop / Start / Reconnect / Open notification actions work.
+
+## Publication gate
+
+- [ ] Issue #6 manual acceptance is complete/closed or explicitly resolved as part of this final acceptance.
+- [ ] Issue #7 manual proxy acceptance is recorded.
+- [ ] Signed release artifact is verified.
+- [ ] Only then create/push tag `v1.10.13` and allow the owner-controlled release workflow to publish.
