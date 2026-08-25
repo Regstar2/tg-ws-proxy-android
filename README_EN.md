@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <img src="icon.png" width="128" alt="TgWsProxy application icon">
 
@@ -323,3 +323,4 @@ AI tools were used for selected parts of the code, tests, and documentation. The
 ## License
 
 The project is distributed under the [GNU General Public License v3.0](LICENSE).
+

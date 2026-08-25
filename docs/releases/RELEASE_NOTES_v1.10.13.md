@@ -1,50 +1,146 @@
-# TgWsProxy Android v1.10.13
+﻿# TgWsProxy Android v1.10.13
+
+Релиз сосредоточен на стабильности proxy runtime, синхронизации актуальных методов работы с Flowseal и подготовке Android-приложения к более безопасным последующим обновлениям.
+
+Основной сценарий остаётся прежним:
+
+`Telegram → MTProto Proxy 127.0.0.1:1443 → Cloudflare Proxy → Telegram DC`
 
 `versionName` **1.10.13** · `versionCode` **51** · ABI **arm64-v8a**
 
 ## Главное
 
-- Стабилизирован MTProto WebSocket receive path: continuation/fragmented frames теперь собираются корректно, а размер отдельных и накопленных сообщений ограничен 16 MiB.
-- Worker failover и session-pool поведение усилены тестами; miss больше не запускает дублирующий background refill при уже выполняющемся foreground dial.
-- Синхронизированы релевантные изменения Flowseal с сохранением Android-специфичной маршрутизации, Fake TLS, watchdog и диагностики.
-- Добавлен отдельный экран **Обратная связь** с GitHub Issue Forms без встроенного GitHub PAT.
-- Добавлен отдельный экран **Обновления**: асинхронная проверка официальных GitHub Releases, SemVer stable/prerelease policy, release notes и переход только на официальный release URL.
-- Экран обновлений не скачивает и не устанавливает APK автоматически и не запрашивает дополнительные install/background permissions.
-- Публичная CI переведена на GitHub-hosted Windows; persistent self-hosted runner оставлен только для owner-controlled release/signing path.
-- Добавлены Project Sync, release automation, release signing verification и SHA-256 artifact generation.
-- Публичная структура и документация приведены к актуальным правилам проекта; private governance/AI/tool state исключены из Git.
+- Исправлена обработка fragmented WebSocket-сообщений в MTProto runtime.
+- Continuation frames теперь корректно собираются в единое сообщение.
+- Добавлено ограничение **16 MiB** для отдельных WebSocket frames и собранных fragmented messages.
+- При ошибках и отклонённых WS-сообщениях underlying connection корректно закрывается.
+- Улучшены Worker failover и session pool.
+- Worker failover гарантированно останавливается после первого успешного endpoint.
+- Исправлен лишний background refill Worker pool при уже выполняющемся foreground connection.
+- При одинаковом времени создания Worker порядок остаётся стабильным вместо случайного UUID-порядка.
 
-## Update delivery
+## Синхронизация с Flowseal
 
-В **Настройки → Обновления** отображается установленная версия и выполняется безопасная проверка `Regstar2/tg-ws-proxy-android` Releases.
+Проведён отдельный аудит актуального `Flowseal/tg-ws-proxy` вплоть до upstream commit `b2a8074`.
 
-При наличии более новой подходящей версии приложение показывает краткое описание релиза и предлагает открыть официальную страницу GitHub Release. Сетевые, timeout, API и malformed-metadata ошибки остаются локальным состоянием экрана и не должны останавливать или перенастраивать proxy runtime.
+В Android runtime перенесены применимые изменения:
 
-## Feedback
+- WebSocket fragmentation / continuation handling;
+- bounded WebSocket receive path;
+- 16 MiB frame/message guards;
+- Worker first-success behavior;
+- безопасная часть обновлённой Worker pool semantics.
 
-В **Настройки → Обратная связь** доступны отдельные действия **Сообщить об ошибке** и **Предложить функцию**. Приложение автоматически не прикладывает runtime logs, proxy credentials, Telegram data, IP-адреса или secrets. Копирование app/device context выполняется только по явному действию пользователя.
+Android-специфичная логика сохранена там, где прямой перенос Flowseal мог изменить поведение приложения:
 
-## Runtime
+- route policies для Wi-Fi и mobile data;
+- adaptive routing;
+- CF-domain health/cooldown;
+- Android Worker destination/media logic;
+- watchdog;
+- Fake TLS;
+- diagnostics.
 
-Основной сценарий остаётся **MTProto Proxy → Cloudflare Proxy** через локальный endpoint `127.0.0.1:1443`.
+Flowseal остаётся reference upstream для proxy runtime, а платформенный слой реализуется отдельно для Android.
 
-Worker Pool остаётся необязательным и более медленным development/diagnostics path. `direct_ws` и `tcp_fallback` сохраняются как разрешаемые политикой альтернативы.
+## Обратная связь
 
-## Безопасность релиза
+Добавлен отдельный экран:
 
-- Release signing material не хранится в Git.
-- `scripts/release.ps1 -Version v1.10.13` требует локально настроенные signing variables/keystore, проверяет подпись APK и формирует APK + SHA-256 в `dist/`.
-- GitHub Release должен публиковаться только после финального manual acceptance Issue #7.
+**Настройки → Обратная связь**
 
-## Перед публикацией
+Доступны:
 
-Обязательная ручная проверка финальной сборки:
+- **Сообщить об ошибке**
+- **Предложить функцию**
 
-- MTProto proxy start/stop/reconnect;
-- Telegram messages и media;
-- Wi-Fi и mobile data;
-- Wi-Fi ↔ mobile reconfigure;
-- Feedback и Updates;
-- RU/EN;
-- diagnostic export на отсутствие чувствительных данных;
-- signed release artifact и SHA-256.
+Используются официальные GitHub Issue Forms.
+
+Приложение не содержит встроенного GitHub PAT и автоматически не отправляет:
+
+- runtime logs;
+- proxy credentials;
+- Telegram data;
+- IP-адреса;
+- secrets.
+
+Безопасный app/device context копируется только по явному действию пользователя.
+
+## Обновления
+
+Добавлен экран:
+
+**Настройки → Обновления**
+
+Приложение умеет:
+
+- асинхронно проверять официальный GitHub Releases feed;
+- сравнивать версии по SemVer;
+- корректно учитывать stable/prerelease;
+- показывать доступную версию и release notes;
+- открывать только официальную страницу релиза `Regstar2/tg-ws-proxy-android`.
+
+Release notes отображаются в компактном читаемом виде с возможностью раскрыть полное описание.
+
+Проверка обновлений:
+
+- не скачивает APK автоматически;
+- не устанавливает APK автоматически;
+- не требует дополнительных install permissions;
+- не влияет на запуск и работу proxy runtime.
+
+## CI и выпуск
+
+Инфраструктура проекта переработана:
+
+- публичные Pull Requests проверяются на GitHub-hosted Windows;
+- Project Sync выполняется на GitHub-hosted runner;
+- persistent self-hosted runner оставлен только для owner-controlled release/signing;
+- добавлена проверка release metadata;
+- добавлена проверка RU/EN localization parity;
+- проверяется отсутствие private/local файлов и signing material в Git;
+- добавлен поиск типовых credential/private-key signatures;
+- release APK проверяется перед публикацией;
+- для release artifact формируется SHA-256.
+
+Release signing material и keystore не хранятся в репозитории.
+
+## Текущие маршруты
+
+Поддерживаются:
+
+- `cf_proxy_ws` — основной рекомендуемый маршрут;
+- `direct_ws`;
+- `cf_worker_ws`;
+- `tcp_fallback`.
+
+MTProto Proxy остаётся основным local frontend.
+
+SOCKS5/WebSocket сохранён как compatibility mode.
+
+## Known issues
+
+**Worker Pool** всё ещё заметно медленнее основного Cloudflare Proxy path и остаётся дополнительным/диагностическим режимом.
+
+Доступность `direct_ws`, `cf_proxy_ws` и `tcp_fallback` зависит от конкретной сети и ограничений провайдера.
+
+Приложение не является системным VPN и проксирует только трафик, который Telegram направляет на локальный proxy frontend.
+
+## Проверено
+
+- native Go tests;
+- Android unit tests;
+- debug APK build;
+- release/compliance audit;
+- RU/EN resource parity;
+- Windows PowerShell 5.1 release audit;
+- GitHub-hosted Windows CI;
+- установка Android debug build;
+- MTProto proxy;
+- Telegram messages/media;
+- reconnect;
+- Feedback / Updates screens.
+
+---
+
+Следующий этап разработки — дальнейшее сближение Android proxy paths с актуальной реализацией Flowseal при сохранении Android-specific lifecycle и network policy.
