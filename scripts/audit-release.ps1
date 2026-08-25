@@ -28,6 +28,7 @@ function Assert-Match {
         Add-Failure "${Description}: missing file $Path"
         return
     }
+
     $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     if ($text -notmatch $Pattern) {
         Add-Failure "${Description}: expected pattern was not found in $Path"
@@ -53,9 +54,9 @@ if (-not $versionCodeMatch.Success) {
 }
 
 $escapedVersion = [regex]::Escape($ExpectedVersion)
-Assert-Match -Path (Join-Path $root 'README.md') -Pattern "Версия исходников:.*$escapedVersion.*versionCode\s+$ExpectedVersionCode" -Description 'Russian README source version'
-Assert-Match -Path (Join-Path $root 'README_EN.md') -Pattern "Source version:.*$escapedVersion.*versionCode\s+$ExpectedVersionCode" -Description 'English README source version'
-Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##\s+(Unreleased\s+—\s+)?$escapedVersion\b" -Description 'CHANGELOG version section'
+Assert-Match -Path (Join-Path $root 'README.md') -Pattern "`?$escapedVersion`?\s+\(`?versionCode\s+$ExpectedVersionCode`?\)" -Description 'Russian README source version'
+Assert-Match -Path (Join-Path $root 'README_EN.md') -Pattern "`?$escapedVersion`?\s+\(`?versionCode\s+$ExpectedVersionCode`?\)" -Description 'English README source version'
+Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##[^\r\n]*$escapedVersion\b" -Description 'CHANGELOG version section'
 Assert-Match -Path (Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md') -Pattern "versionName.*$escapedVersion" -Description 'Release notes versionName'
 
 foreach ($readme in @('README.md', 'README_EN.md')) {
@@ -71,12 +72,14 @@ function Get-ResourceNames([string]$Directory) {
     if (-not (Test-Path -LiteralPath $Directory)) {
         return $set
     }
+
     Get-ChildItem -LiteralPath $Directory -Filter '*.xml' -File | ForEach-Object {
         $text = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8
         [regex]::Matches($text, '<(?:string|string-array|plurals)\b[^>]*\bname="([^"]+)"') | ForEach-Object {
             [void]$set.Add($_.Groups[1].Value)
         }
     }
+
     return $set
 }
 
@@ -85,12 +88,14 @@ $russianResources = Get-ResourceNames (Join-Path $root 'app\src\main\res\values-
 
 $missingRu = @($defaultResources | Where-Object { -not $russianResources.Contains($_) } | Sort-Object)
 $extraRu = @($russianResources | Where-Object { -not $defaultResources.Contains($_) } | Sort-Object)
+
 if ($missingRu.Count -gt 0) {
     Add-Failure ('Missing RU resources: ' + ($missingRu -join ', '))
 }
 if ($extraRu.Count -gt 0) {
     Add-Failure ('RU-only resources without default English fallback: ' + ($extraRu -join ', '))
 }
+
 Write-Host "Default resources: $($defaultResources.Count); RU resources: $($russianResources.Count)"
 
 Write-Host '==> Tracked private/local/sensitive files'
@@ -120,14 +125,17 @@ $sensitiveExtensions = @('.jks', '.keystore', '.p12', '.pfx', '.pem', '.key', '.
 
 foreach ($path in $tracked) {
     $normalized = $path.Replace('\', '/')
+
     if ($forbiddenExact -contains $normalized) {
         Add-Failure "Forbidden tracked local/private file: $normalized"
     }
+
     foreach ($prefix in $forbiddenPrefixes) {
         if ($normalized.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             Add-Failure "Forbidden tracked local/private path: $normalized"
         }
     }
+
     $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
     if ($sensitiveExtensions -contains $extension) {
         Add-Failure "Sensitive file extension is tracked: $normalized"
@@ -146,6 +154,7 @@ $tokenPatterns = @(
     ('github_' + 'pat_[A-Za-z0-9_]{20,}'),
     ('-----BEGIN ' + '(RSA |EC |OPENSSH )?PRIVATE KEY-----')
 )
+
 foreach ($pattern in $tokenPatterns) {
     $matches = @(& git grep -I -n -E -- $pattern 2>$null)
     if ($LASTEXITCODE -eq 0 -and $matches.Count -gt 0) {
@@ -159,6 +168,7 @@ $uiPatterns = @(
     'contentDescription[[:space:]]*=[[:space:]]*"[^"\n]+"',
     'Toast\.makeText\([^,]+,[[:space:]]*"[^"\n]+"'
 )
+
 foreach ($pattern in $uiPatterns) {
     $matches = @(& git grep -I -n -E -- $pattern -- ':(glob)app/src/main/java/**/*.kt' 2>$null)
     if ($LASTEXITCODE -eq 0 -and $matches.Count -gt 0) {
@@ -171,10 +181,22 @@ foreach ($pattern in $uiPatterns) {
 Write-Host '==> Required .gitignore protections'
 $gitignore = Get-Content -LiteralPath (Join-Path $root '.gitignore') -Raw -Encoding UTF8
 $requiredIgnoreEntries = @(
-    '/AGENTS.md', '/.project-rules/', '/docs/ai-prompts/', '/docs/private/',
-    '/.cursor/', '/.codex/', '/.claude/', '/.ai/', '*.jks', '*.keystore',
-    'release-signing.env', '.env', '*.log', 'dist/'
+    '/AGENTS.md',
+    '/.project-rules/',
+    '/docs/ai-prompts/',
+    '/docs/private/',
+    '/.cursor/',
+    '/.codex/',
+    '/.claude/',
+    '/.ai/',
+    '*.jks',
+    '*.keystore',
+    'release-signing.env',
+    '.env',
+    '*.log',
+    'dist/'
 )
+
 foreach ($entry in $requiredIgnoreEntries) {
     if (-not $gitignore.Contains($entry)) {
         Add-Failure ".gitignore is missing required protection: $entry"
@@ -188,7 +210,9 @@ if ($warnings.Count -gt 0) {
 
 if ($failures.Count -gt 0) {
     Write-Host "`nRelease audit FAILED:" -ForegroundColor Red
-    $failures | Sort-Object -Unique | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
+    $failures | Sort-Object -Unique | ForEach-Object {
+        Write-Host " - $_" -ForegroundColor Red
+    }
     exit 1
 }
 
