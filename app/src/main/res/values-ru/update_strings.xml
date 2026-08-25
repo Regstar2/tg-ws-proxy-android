@@ -14,6 +14,8 @@
     <string name="update_prerelease_label">Предварительная версия</string>
     <string name="update_release_notes_title">Описание релиза</string>
     <string name="update_release_notes_empty">Описание релиза отсутствует.</string>
+    <string name="update_show_release_notes">Показать полное описание</string>
+    <string name="update_hide_release_notes">Скрыть полное описание</string>
     <string name="update_open_release">Открыть официальный релиз</string>
     <string name="update_check_now">Проверить обновления</string>
     <string name="update_open_failed">Не удалось открыть официальный GitHub Release.</string>
