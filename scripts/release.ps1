@@ -35,7 +35,7 @@ $expectedVersionCode = [int]$versionCodeMatch.Groups[1].Value
 
 $releaseNotes = Join-Path $root ("docs\releases\RELEASE_NOTES_$Version.md")
 if (-not (Test-Path $releaseNotes)) {
-    throw "Release notes were not found for $Version: $releaseNotes"
+    throw "Release notes were not found for ${Version}: $releaseNotes"
 }
 
 $artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
