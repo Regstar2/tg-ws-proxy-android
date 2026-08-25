@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <img src="icon.png" width="128" alt="Иконка приложения TgWsProxy">
 
@@ -323,3 +323,4 @@ app\build\outputs\apk\debug\app-debug.apk
 ## Лицензия
 
 Проект распространяется по лицензии [GNU General Public License v3.0](LICENSE).
+

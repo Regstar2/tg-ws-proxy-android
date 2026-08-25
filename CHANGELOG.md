@@ -1,9 +1,8 @@
-# Changelog
+﻿# Changelog
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
-## Unreleased — 1.10.13
-
+## 1.10.13 - 2026-08-26
 - MTProto WebSocket receive path now reassembles fragmented/continuation messages instead of dropping continuation frames.
 - Added 16 MiB protection for individual WebSocket frames and accumulated fragmented messages before payload allocation/delivery.
 - Failed/rejected MTProto WebSocket receive paths close the underlying connection.
@@ -149,3 +148,4 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - “Recommended” preset in route policy UI.
 
 Earlier versions: see [docs/releases/](docs/releases/).
+
