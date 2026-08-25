@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_title">Updates</string>
+    <string name="update_subtitle">Check official GitHub Releases for a newer app version.</string>
+    <string name="update_back">Back</string>
+    <string name="update_current_version_title">Installed version</string>
+    <string name="update_current_version_value">%1$s (code %2$d)</string>
+    <string name="update_source_hint">Update metadata is read only from the official Regstar2/tg-ws-proxy-android GitHub Releases feed.</string>
+    <string name="update_status_idle">Update status has not been checked yet.</string>
+    <string name="update_status_checking">Checking for updates…</string>
+    <string name="update_status_up_to_date">You are using the newest applicable version.</string>
+    <string name="update_status_unsupported_version">The installed version is not valid SemVer, so it cannot be compared safely.</string>
+    <string name="update_available_title">Update available: %1$s</string>
+    <string name="update_prerelease_label">Prerelease</string>
+    <string name="update_release_notes_title">Release notes</string>
+    <string name="update_release_notes_empty">No release notes were provided.</string>
+    <string name="update_open_release">Open official release</string>
+    <string name="update_check_now">Check for updates</string>
+    <string name="update_open_failed">Could not open the official GitHub Release page.</string>
+    <string name="update_error_network">Could not reach GitHub Releases. Check the network connection and try again.</string>
+    <string name="update_error_timeout">The GitHub Releases request timed out. Try again later.</string>
+    <string name="update_error_api">GitHub Releases returned an API error. Try again later.</string>
+    <string name="update_error_malformed">GitHub Releases returned metadata that could not be processed safely.</string>
+    <string name="update_failure_safe_hint">Update-check failures do not stop or reconfigure the proxy.</string>
+    <string name="update_security_note">TgWsProxy does not silently download or install APKs. The update action only opens the official repository release page in your browser.</string>
+</resources>

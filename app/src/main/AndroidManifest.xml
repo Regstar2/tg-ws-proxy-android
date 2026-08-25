@@ -37,6 +37,11 @@
             android:exported="false"
             android:theme="@android:style/Theme.NoTitleBar" />
 
+        <activity
+            android:name="com.amurcanov.tgwsproxy.UpdateActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoTitleBar" />
+
         <service
             android:name="com.amurcanov.tgwsproxy.ProxyService"
             android:exported="false"
