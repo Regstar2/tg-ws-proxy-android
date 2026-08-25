@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val releaseVersionCode = 50
-val releaseVersionName = "1.10.12"
+val releaseVersionCode = 51
+val releaseVersionName = "1.10.13"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -123,6 +123,8 @@ android {
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.outputs.forEach { output ->
+            // Debug builds intentionally stay one code above the release code so they can be
+            // installed over the most recent release during pre-release Android acceptance.
             output.versionCode.set(releaseVersionCode + 1)
         }
     }
