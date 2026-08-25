@@ -239,6 +239,7 @@ fun SettingsHomeScreen(
             onDiagnosticsLogsClick = { onNavigate(SettingsPage.DIAGNOSTICS_LOGS) },
             onAppClick = { onNavigate(SettingsPage.APP) },
         )
+        FeedbackSettingsCard()
         SettingsQuickActionsCard(
             onApplyRecommendedRoutes = onApplyRecommendedRoutes,
             onCheckRoutes = { onNavigate(SettingsPage.DIAGNOSTICS_LOGS) },
