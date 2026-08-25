@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest an improvement for TgWsProxy Android
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first, then the change you would like to see.
+
+        **Privacy:** do not include proxy credentials, Telegram content, IP addresses, secrets/tokens, private domains, or unreviewed raw logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem would this feature solve?
+      placeholder: Explain the user need or limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or workflow you would like.
+      placeholder: A clear description of the requested change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Describe workarounds or other approaches you considered.
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Optional. You can copy this from Settings → Feedback → App and device info.
+      placeholder: 1.10.12 (50)
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add only information you have reviewed and intentionally want to make public.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I reviewed this request and removed credentials, Telegram content, IP addresses, secrets/tokens, private domains, and other sensitive data.
+          required: true
