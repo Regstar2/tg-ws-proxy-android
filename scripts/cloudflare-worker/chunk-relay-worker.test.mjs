@@ -151,6 +151,40 @@ test("top-level worker routes different sids through one named Durable Object hu
   assert.deepEqual(names, ["relay-hub-v1", "relay-hub-v1", "relay-hub-v1"]);
 });
 
+test("top-level worker materializes downstream payload before returning to HTTP/1.1 client", async () => {
+  const payload = new Uint8Array(12 * 1024).fill(0x5a);
+  const env = {
+    CHUNK_RELAY: {
+      getByName() {
+        return {
+          async fetch() {
+            const stream = new ReadableStream({
+              start(controller) {
+                controller.enqueue(payload);
+                controller.close();
+              },
+            });
+            return new Response(stream, {
+              status: 200,
+              headers: {
+                "Content-Type": "application/octet-stream",
+                "X-Tgws-Chunk-Seq": "7",
+              },
+            });
+          },
+        };
+      },
+    },
+  };
+
+  const response = await mod.default.fetch(relayRequest("down", "session_fixed_down", { ack: 6 }), env, {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Tgws-Chunk-Seq"), "7");
+  assert.equal(response.headers.get("X-Tgws-Down-Body-Mode"), "fixed-length-v1");
+  assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), null);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), payload);
+});
+
 test("three parallel sessions do not share an upload lock", async (t) => {
   const oldConnect = globalThis.__chunkRelayConnect;
   const writesByHost = new Map();
@@ -293,7 +327,7 @@ test("top-level worker maps Durable Object free-tier duration exhaustion to a re
 
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("X-Tgws-Worker-State"), "do-quota-exhausted");
-  assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), "chunk-relay-mtproto-v10");
+  assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), "chunk-relay-mtproto-v11");
   assert.equal(response.headers.get("X-Tgws-Relay-Hub-Revision"), "relay-hub-v1");
   assert.deepEqual(names, ["relay-hub-v1"]);
   assert.ok(Number.parseInt(response.headers.get("Retry-After") || "0", 10) >= 60);
