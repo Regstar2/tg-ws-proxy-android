@@ -2,7 +2,7 @@ import baseWorker from "./worker.js";
 import { connect } from "cloudflare:sockets";
 import { DurableObject } from "cloudflare:workers";
 
-const REVISION = "chunk-relay-mtproto-v10";
+const REVISION = "chunk-relay-mtproto-v11";
 const HUB_REVISION = "relay-hub-v1";
 const RELAY_HUB_NAME = "relay-hub-v1";
 const RELAY_MAX_UPLOAD_CHUNK_BYTES = 12 * 1024;
@@ -17,6 +17,7 @@ const ORPHAN_REAPER_GRACE_MS = 5 * 1000;
 const WORKER_STATE_HEADER = "X-Tgws-Worker-State";
 const QUOTA_RESET_HEADER = "X-Tgws-Quota-Reset";
 const HUB_REVISION_HEADER = "X-Tgws-Relay-Hub-Revision";
+const DOWN_BODY_MODE_HEADER = "X-Tgws-Down-Body-Mode";
 const DO_QUOTA_EXHAUSTED_STATE = "do-quota-exhausted";
 const DO_QUOTA_ERROR_FRAGMENT = "Exceeded allowed duration in Durable Objects free tier";
 
@@ -88,6 +89,18 @@ function durableObjectQuotaResponse(now = new Date()) {
       [QUOTA_RESET_HEADER]: reset.toISOString(),
       "Retry-After": String(retryAfterSeconds),
     }),
+  });
+}
+
+async function materializeDownstreamResponse(response) {
+  if (response.status !== 200) return response;
+  const body = new Uint8Array(await response.arrayBuffer());
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.set(DOWN_BODY_MODE_HEADER, "fixed-length-v1");
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
   });
 }
 
@@ -674,7 +687,11 @@ export default {
       const sid = (url.searchParams.get("sid") || "").trim();
       if (!validSessionId(sid)) return new Response("invalid sid", { status: 400, headers: headers() });
       try {
-        return await env.CHUNK_RELAY.getByName(RELAY_HUB_NAME).fetch(request);
+        const response = await env.CHUNK_RELAY.getByName(RELAY_HUB_NAME).fetch(request);
+        if (url.pathname.endsWith("/down")) {
+          return await materializeDownstreamResponse(response);
+        }
+        return response;
       } catch (error) {
         if (isDurableObjectQuotaError(error)) {
           console.log("chunk relay durable object quota exhausted", {
