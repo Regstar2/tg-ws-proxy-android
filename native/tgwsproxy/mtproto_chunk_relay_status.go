@@ -114,7 +114,9 @@ func logChunkRelayResponseDecision(
 		return
 	}
 	relayError := "transport_error"
-	if _, value, ok := chunkRelayHTTPErrorDetails(err); ok && value != "" {
+	if chunkRelayDownBodyTimeoutError(err) {
+		relayError = "down_body_timeout"
+	} else if _, value, ok := chunkRelayHTTPErrorDetails(err); ok && value != "" {
 		relayError = value
 	} else if circuit, ok := workerCircuitError(err); ok {
 		relayError = circuit.Reason
