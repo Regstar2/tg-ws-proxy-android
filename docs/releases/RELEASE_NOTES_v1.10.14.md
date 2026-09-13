@@ -1,33 +1,46 @@
 # TgWsProxy Android v1.10.14 — release candidate
 
-This release candidate stabilizes the working MTProto Worker transport from the Issue #29 investigation without merging the full experimental commit chain into `main`.
+Release metadata: `versionName 1.10.14`, `versionCode 52`.
 
-## What is included
+This release stabilizes the MTProto Worker path investigated in Issue #29 and replaces the failing long-lived `workers.dev` WebSocket data path with a short fresh-HTTPS chunk relay.
 
-- Fresh HTTPS chunk relay for MTProto Worker traffic. The Android/native side sends bounded short HTTPS requests while a Cloudflare Durable Object keeps the corresponding Telegram TCP stream.
-- Shared Durable Object relay hub (`relay-hub-v1`): multiple independent MTProto sessions now share one Durable Object instance while retaining separate Telegram sockets, ACK/reorder state, downstream queues, backpressure, and lifecycle state.
-- Stabilized upload profile: 12 KiB chunks, sliding window 3, ordered ACKs, bounded retry/backoff, HOL hedge for the oldest unacknowledged upload, and downstream queue backpressure.
-- Adaptive downstream long polling per MTProto session: active sessions use 6 s polls, three consecutive empty polls raise the wait to 12 s, eight raise it to 20 s, and the first valid payload immediately returns the session to 6 s. The native relay logs empty/payload poll counts, effective average wait, retries, timeouts, requests per MiB, and estimated idle requests per minute for A/B measurements.
-- Sticky Worker pool for `ROUND_ROBIN`: a stable opaque MTProto session id selects one primary Worker for the lifetime of that session. Chunks from one session are never split between Worker hosts.
-- Quota-aware Worker failover. Worker v9 keeps the v7 behavior that converts Cloudflare Durable Objects Free Tier duration exhaustion into a recoverable 503 response with reset metadata and raises the downstream long-poll ceiling to 20 s while retaining payload wakeups.
-- Hub diagnostics expose the relay/hub revisions and log active/opened/closed/reaped session counts plus per-session cumulative byte counters without logging payloads or opaque session ids.
-- Short cooldown for unclassified Worker 5xx responses to prevent reconnect storms while still allowing automatic recovery.
-- Worker preconnect disabled for the MTProto Worker route and strict preservation of explicit Worker-only route policy.
-- Go race tests and Worker handler tests in pull-request CI.
+## Worker transport
 
-## Device evidence before stabilization PR
+- MTProto Worker traffic uses bounded fresh HTTPS requests while a Cloudflare Durable Object keeps the corresponding Telegram TCP stream alive.
+- Upload uses the verified `12 KiB / window=3` profile with ordered sequence acknowledgements, bounded retries, primary/global request limits and HOL hedging for the oldest unacknowledged upload.
+- Worker revision `chunk-relay-mtproto-v10` uses a shared `relay-hub-v1` Durable Object so several independent MTProto sessions share one DO instance while keeping separate Telegram sockets, ACK/reorder state, downstream queues and lifecycle state.
+- Relay session cleanup tracks client activity separately from Telegram payload activity. Orphaned sessions are reaped after the 60 s timeout plus 5 s scheduling grace without closing healthy idle sessions that continue polling.
+- `ROUND_ROBIN` selection is sticky per opaque MTProto session id: one session stays on one Worker, while separate sessions can be distributed across the enabled pool.
+- Durable Objects quota exhaustion is returned as recoverable HTTP 503 with quota-reset metadata. Native routing opens a per-domain circuit breaker and skips the exhausted Worker for new sessions until reset.
+- Relay failures are status-aware and expose safe machine-readable error classes. Terminal session loss reconnects cleanly; transient failures remain bounded-retryable; non-success responses cannot win retry/hedge races merely because the transport call returned no local error.
 
-The source checkpoint used for this release candidate is `c59f860` from PR #51. On-device testing confirmed that a v7 Worker with exhausted Durable Objects quota was automatically removed from the candidate set and new MTProto sessions failed over to a healthy v7 Worker. The healthy Worker carried bidirectional MTProto traffic and multi-megabyte uploads through the chunk relay.
+## Downstream efficiency and stability
 
-The shared v8 Durable Object hub is covered by Worker unit tests, but its real Cloudflare duration reduction and A/B throughput still require deployment/device verification. The adaptive v9 downstream polling profile is also unit-tested but still requires the direct `*.workers.dev` network A/B from Issue #55 before release acceptance.
+- Adaptive downstream long polling uses 6 s while active, 12 s after three consecutive empty polls and 20 s after eight empty polls, returning immediately to 6 s when payload arrives.
+- Worker downstream payloads are coalesced for up to 8 ms to produce real responses up to the 12 KiB ceiling instead of forwarding each small TCP read as a separate HTTP response.
+- The native client limits reading an already-started HTTP 200 downstream body to 2500 ms. A stalled body is closed and the same ACK is retried through the fresh-request path instead of waiting for the full 10/16/24 s long-poll deadline.
+- The rejected HTTP/1.1 keep-alive experiment is not included. Device A/B showed repeated transport errors and MTProto churn; v1.10.14 keeps fresh TCP/TLS requests.
+
+## Acceptance evidence
+
+- Normal Telegram connection, messages and media were verified on Android through the Worker path.
+- The `12 KiB / window=3` upload scheduler is covered by regression tests and on-device transfer testing.
+- Shared RelayHub acceptance exercised concurrent sessions and repeated multi-MiB transfers without a sustained-throughput regression; observed Durable Objects duration pressure dropped substantially compared with the previous per-session DO model.
+- Orphan reaper acceptance confirmed healthy polling sessions survive the timeout boundary and abandoned sessions are reaped after the configured grace period.
+- 12 KiB downstream coalescing produced predominantly ~12 KiB payload responses, materially improving throughput and reducing requests per MiB compared with the previous small-read behavior.
+- The 2500 ms HTTP 200 body deadline recovered from real downstream stalls without visible sequence corruption or media-session teardown.
+- Worker quota/circuit failover and reconnect-storm protection were verified during the Issue #29 stabilization work.
+
+## CI and regression coverage
+
+Pull-request CI includes native Go tests with race detection, Cloudflare Worker Node tests, Android unit tests, debug APK assembly and release-readiness checks. The final release branch must pass CI again after the `1.10.14 / 52` metadata bump.
 
 ## Known limitations
 
-- The Worker route is currently slower than direct connectivity and still produces HOL hedges/timeouts under sustained bulk traffic.
-- Cloudflare Durable Objects quotas remain an operational constraint. The shared hub reduces concurrent Durable Object instances by design, but the actual billed-duration improvement is not yet measured.
-- Some relay sessions can still terminate with HTTP 502 and require further error classification and transport tuning.
-- The Worker route remains non-default. This PR is a stabilization baseline for further work, not a claim that Issue #29 is fully solved.
+- Worker transport remains slower than direct connectivity and is not promoted to the default route.
+- Fresh HTTPS requests intentionally trade raw throughput for reliability on networks where a long-lived `workers.dev` connection stalls.
+- Cloudflare Durable Objects quotas remain an operational constraint even though the shared hub and orphan cleanup substantially reduce quota pressure.
 
-## Release gate
+## Final release gate
 
-Do not merge or publish v1.10.14 until CI passes on the clean stabilization branch and a final Android smoke test confirms normal Telegram messages, media transfer, Worker failover, and no reconnect storm. Issue #53 additionally requires an A/B Worker check showing no material throughput regression and lower Durable Object pressure with concurrent sessions. Issue #55 additionally requires a direct `*.workers.dev` A/B confirming lower idle downstream request churn without worse message latency, sustained download throughput, timeout rate, or HTTP 502 rate.
+Before merging the release PR to `main`, build the final release-branch APK and run one last device smoke test covering Telegram connection, messages, media upload/download, reconnect, Worker pool/failover and, where available, both Wi-Fi and mobile data. After that acceptance, close #29/#33 and mark PR #52 ready for merge.
