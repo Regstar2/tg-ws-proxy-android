@@ -18,15 +18,16 @@ import (
 )
 
 const (
-	mtProtoChunkRelayBytes               = 8 * 1024
-	mtProtoChunkRelayDownBytes           = 12 * 1024
-	mtProtoChunkRelayMaxRetries          = 3
-	mtProtoChunkRelayOpenTimeout         = 10 * time.Second
-	mtProtoChunkRelayUpTimeout           = 5 * time.Second
-	mtProtoChunkRelayUpHedgeDelay        = 400 * time.Millisecond
-	mtProtoChunkRelayDownTimeout         = 10 * time.Second
-	mtProtoChunkRelayPollWaitMS          = 6000
-	mtProtoChunkRelayDownIdleConnTimeout = 30 * time.Second
+	mtProtoChunkRelayBytes                 = 8 * 1024
+	mtProtoChunkRelayDownBytes             = 12 * 1024
+	mtProtoChunkRelayMaxRetries            = 3
+	mtProtoChunkRelayOpenTimeout           = 10 * time.Second
+	mtProtoChunkRelayUpTimeout             = 5 * time.Second
+	mtProtoChunkRelayUpHedgeDelay          = 400 * time.Millisecond
+	mtProtoChunkRelayDownTimeout           = 10 * time.Second
+	mtProtoChunkRelayPollWaitMS            = 6000
+	mtProtoChunkRelayDownIdleConnTimeout   = 30 * time.Second
+	mtProtoChunkRelayDownHTTPReuseRevision = "chunk-relay-mtproto-v11"
 
 	chunkRelayWorkerStateHeader   = "X-Tgws-Worker-State"
 	chunkRelayQuotaResetHeader    = "X-Tgws-Quota-Reset"
@@ -35,7 +36,8 @@ const (
 
 // Fresh relay requests still share only the TLS client-session cache. The
 // downstream path may additionally reuse one HTTP/1.1 TCP/TLS connection per
-// relay session to avoid paying a handshake for every serial 12 KiB poll.
+// relay session when the Worker revision guarantees fixed-length downstream
+// responses at the public HTTP boundary.
 var mtProtoChunkRelayTLSCache = tls.NewLRUClientSessionCache(256)
 
 type chunkRelayRequestFunc func(
@@ -108,6 +110,10 @@ func chunkRelayCircuitErrorForResponse(domain string, status int, headers http.H
 	}
 }
 
+func chunkRelayDownHTTPReuseSupported(revision string) bool {
+	return strings.TrimSpace(revision) == mtProtoChunkRelayDownHTTPReuseRevision
+}
+
 func dialMtProtoChunkRelay(
 	ctx context.Context,
 	domain, sessionID, workerDst, logPrefix string,
@@ -128,15 +134,13 @@ func dialMtProtoChunkRelay(
 
 	lifeCtx, cancel := context.WithCancel(context.Background())
 	conn := &mtProtoChunkRelayConn{
-		domain:           domain,
-		sessionID:        sessionID,
-		workerDst:        workerDst,
-		lifeCtx:          lifeCtx,
-		cancel:           cancel,
-		useDownHTTPReuse: true,
+		domain:    domain,
+		sessionID: sessionID,
+		workerDst: workerDst,
+		lifeCtx:   lifeCtx,
+		cancel:    cancel,
 	}
 	conn.request = conn.freshHTTPRequest
-	conn.downTransport = conn.newDownHTTPTransport()
 
 	openQuery := url.Values{
 		"sid": {sessionID},
@@ -173,16 +177,21 @@ func dialMtProtoChunkRelay(
 		}
 		return nil, fmt.Errorf("open chunk relay: HTTP %d", status)
 	}
-	if strings.TrimSpace(headers.Get("X-Tgws-Chunk-Relay-Revision")) == "" {
+	relayRevision := strings.TrimSpace(headers.Get("X-Tgws-Chunk-Relay-Revision"))
+	if relayRevision == "" {
 		cancel()
 		conn.closeDownHTTPTransport()
 		return nil, fmt.Errorf("open chunk relay: missing relay revision header")
+	}
+	conn.useDownHTTPReuse = chunkRelayDownHTTPReuseSupported(relayRevision)
+	if conn.useDownHTTPReuse {
+		conn.downTransport = conn.newDownHTTPTransport()
 	}
 	clearWorkerCircuit(domain)
 
 	if logInfo != nil {
 		logInfo.Printf(
-			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true down_http_keepalive=true down_http_idle_timeout_ms=%d revision=%s",
+			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true down_http_keepalive=%t down_http_idle_timeout_ms=%d revision=%s",
 			logPrefix,
 			sessionID,
 			domain,
@@ -194,8 +203,9 @@ func dialMtProtoChunkRelay(
 			mtProtoChunkRelayUpTimeout.Milliseconds(),
 			mtProtoChunkRelayDownTimeout.Milliseconds(),
 			mtProtoChunkRelayUpHedgeDelay.Milliseconds(),
+			conn.useDownHTTPReuse,
 			mtProtoChunkRelayDownIdleConnTimeout.Milliseconds(),
-			mtProtoStatusField(headers.Get("X-Tgws-Chunk-Relay-Revision")),
+			mtProtoStatusField(relayRevision),
 		)
 	}
 	return conn, nil
