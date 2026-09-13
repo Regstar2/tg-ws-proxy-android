@@ -20,15 +20,15 @@ jobs:
     if: >
       github.actor == 'Regstar2' &&
       github.triggering_actor == 'Regstar2'
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
+    runs-on: windows-latest
     timeout-minutes: 120
 
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
 
     steps:
       - name: Checkout
@@ -36,6 +36,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native/tgwsproxy/go.mod
+          cache-dependency-path: native/tgwsproxy/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Validate and checkout exact release tag
         shell: pwsh
@@ -73,6 +91,36 @@ jobs:
           }
 
           ./scripts/ci.ps1
+
+      - name: Restore release signing keystore
+        shell: pwsh
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_KEYSTORE_BASE64)) {
+              throw 'GitHub Actions secret RELEASE_KEYSTORE_BASE64 is not configured.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:KEYSTORE_PASSWORD)) {
+              throw 'GitHub Actions secret RELEASE_KEYSTORE_PASSWORD is not configured.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:KEY_PASSWORD)) {
+              throw 'GitHub Actions secret RELEASE_KEY_PASSWORD is not configured.'
+          }
+
+          $keystorePath = Join-Path $env:RUNNER_TEMP 'tgwsproxy-release.jks'
+          try {
+              $bytes = [Convert]::FromBase64String($env:RELEASE_KEYSTORE_BASE64)
+          }
+          catch {
+              throw 'RELEASE_KEYSTORE_BASE64 is not valid Base64.'
+          }
+          [IO.File]::WriteAllBytes($keystorePath, $bytes)
+          if ((Get-Item $keystorePath).Length -le 0) {
+              throw 'Decoded release keystore is empty.'
+          }
+
+          "KEYSTORE_FILE=$keystorePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'Release keystore restored into the hosted runner temporary directory.'
 
       - name: Prepare release output
         shell: pwsh
