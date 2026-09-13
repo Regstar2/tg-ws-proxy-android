@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	mtProtoChunkRelayPollIdleWaitMS          = 12_000
-	mtProtoChunkRelayPollDeepIdleWaitMS      = 20_000
-	mtProtoChunkRelayPollIdleAfterEmpty      = 3
-	mtProtoChunkRelayPollDeepIdleAfterEmpty  = 8
+	mtProtoChunkRelayPollIdleWaitMS         = 12_000
+	mtProtoChunkRelayPollDeepIdleWaitMS     = 20_000
+	mtProtoChunkRelayPollIdleAfterEmpty     = 3
+	mtProtoChunkRelayPollDeepIdleAfterEmpty = 8
 )
 
 type chunkRelayDownPollState struct {
@@ -26,6 +26,7 @@ type chunkRelayDownPollState struct {
 	emptyWaitMS      int64
 	retries          int64
 	timeouts         int64
+	bodyTimeouts     int64
 }
 
 type chunkRelayDownPollSnapshot struct {
@@ -36,6 +37,7 @@ type chunkRelayDownPollSnapshot struct {
 	emptyWaitMS     int64
 	retries         int64
 	timeouts        int64
+	bodyTimeouts    int64
 }
 
 func chunkRelayDownPollWaitMS(consecutiveEmpty int) int {
@@ -107,11 +109,18 @@ func (s *chunkRelayDownPollState) recordRetry() {
 }
 
 func (s *chunkRelayDownPollState) recordAttemptFailure(err error) {
-	if !chunkRelayDownTimeoutError(err) {
+	isTimeout := chunkRelayDownTimeoutError(err)
+	isBodyTimeout := chunkRelayDownBodyTimeoutError(err)
+	if !isTimeout && !isBodyTimeout {
 		return
 	}
 	s.mu.Lock()
-	s.timeouts++
+	if isTimeout {
+		s.timeouts++
+	}
+	if isBodyTimeout {
+		s.bodyTimeouts++
+	}
 	s.mu.Unlock()
 }
 
@@ -126,6 +135,7 @@ func (s *chunkRelayDownPollState) snapshot() chunkRelayDownPollSnapshot {
 		emptyWaitMS:     s.emptyWaitMS,
 		retries:         s.retries,
 		timeouts:        s.timeouts,
+		bodyTimeouts:    s.bodyTimeouts,
 	}
 }
 
