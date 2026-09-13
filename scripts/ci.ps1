@@ -87,7 +87,18 @@ if ($LASTEXITCODE -ne 0) {
 
 Invoke-CheckedCommand -Label 'Install Python build dependencies' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'pip', 'install', '--disable-pip-version-check', '--requirement', $pythonRequirements)
 Invoke-CheckedCommand -Label 'Verify Go module' -FilePath $go.Source -Arguments @('mod', 'verify') -WorkingDirectory $nativeDir
-Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
+
+$isWindowsHost = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+if ($isWindowsHost) {
+    # The root package is a c-shared Android entry point and requires cgo. Full root/race
+    # coverage runs in the Linux worker-transport job; Windows validates portable packages
+    # here and compiles the production cgo path with the Android NDK during assembleDebug.
+    Invoke-CheckedCommand -Label 'Run portable native Go tests' -FilePath $go.Source -Arguments @('test', './mtproxyfrontend', './tgwsroute') -WorkingDirectory $nativeDir
+}
+else {
+    Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
+}
+
 Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
 
 $debugApk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
