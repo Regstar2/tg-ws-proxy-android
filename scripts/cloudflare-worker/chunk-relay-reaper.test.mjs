@@ -66,7 +66,7 @@ function relayRequest(action, sid, { dst = "149.154.167.51", seq = null, ack = n
   return new Request(url, { method, body: method === "POST" ? body : null });
 }
 
-test("orphaned session is reaped after 60 seconds without client relay touches", async (t) => {
+test("orphaned session is reaped after timeout plus scheduling grace", async (t) => {
   const oldConnect = globalThis.__chunkRelayConnect;
   const tracked = makeTrackedSocket();
   globalThis.__chunkRelayConnect = () => tracked.socket;
@@ -80,9 +80,14 @@ test("orphaned session is reaped after 60 seconds without client relay touches",
 
   assert.equal((await relay.fetch(relayRequest("open", sid))).status, 204);
   assert.equal(relay.sessions.has(sid), true);
-  assert.deepEqual(storage.scheduled, [now + 60_000]);
+  assert.deepEqual(storage.scheduled, [now + 65_000]);
 
-  now += 60_001;
+  now += 64_999;
+  await relay.alarm();
+  assert.equal(relay.sessions.has(sid), true);
+  assert.equal(tracked.state.closeCount, 0);
+
+  now += 2;
   await relay.alarm();
 
   assert.equal(relay.sessions.has(sid), false);
@@ -118,7 +123,32 @@ test("idle Telegram session stays alive while down polling keeps touching the re
   assert.equal(session.lastPayloadActivity, 0);
   assert.equal(tracked.state.closeCount, 0);
   assert.equal(relay.reapedSessions, 0);
-  assert.equal(storage.scheduled.at(-1), 2_119_000);
+  assert.equal(storage.scheduled.at(-1), 2_124_000);
+});
+
+test("down poll at the orphan boundary refreshes the existing session instead of reaping it", async (t) => {
+  const oldConnect = globalThis.__chunkRelayConnect;
+  const tracked = makeTrackedSocket();
+  globalThis.__chunkRelayConnect = () => tracked.socket;
+  t.after(() => { globalThis.__chunkRelayConnect = oldConnect; });
+
+  let now = 2_500_000;
+  const relay = new mod.ChunkRelayHub({ storage: createStorage() }, {});
+  relay.now = () => now;
+  const sid = "session_boundary_poll";
+
+  assert.equal((await relay.fetch(relayRequest("open", sid))).status, 204);
+  const original = relay.sessions.get(sid);
+
+  now += 60_001;
+  assert.equal((await relay.fetch(relayRequest("down", sid, { ack: 0 }))).status, 204);
+  assert.equal(relay.sessions.get(sid), original);
+  assert.equal(original.lastClientTouch, now);
+
+  await relay.alarm();
+  assert.equal(relay.sessions.get(sid), original);
+  assert.equal(relay.reapedSessions, 0);
+  assert.equal(tracked.state.closeCount, 0);
 });
 
 test("concurrent client close and orphan reaper clean one session exactly once", async (t) => {
@@ -133,7 +163,7 @@ test("concurrent client close and orphan reaper clean one session exactly once",
   const sid = "session_close_race";
 
   assert.equal((await relay.fetch(relayRequest("open", sid))).status, 204);
-  now += 60_001;
+  now += 65_001;
 
   const [, closeResponse] = await Promise.all([
     relay.alarm(),
@@ -178,7 +208,7 @@ test("orphan cleanup unblocks upload and downstream waiters and a late touch rec
   const drainWaiter = oldSession.waitForDrain(1);
   const downWaiter = oldSession.wait(6000);
 
-  now += 60_001;
+  now += 65_001;
   const reopened = await relay.fetch(relayRequest("open", sid));
   await Promise.all([uploadRejected, drainWaiter, downWaiter]);
 

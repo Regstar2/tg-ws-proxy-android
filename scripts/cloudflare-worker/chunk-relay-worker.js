@@ -12,6 +12,7 @@ const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
 const MAX_POLL_WAIT_MS = 6000;
 const MAX_UPLOAD_REORDER_WINDOW = 16;
 const ORPHAN_TIMEOUT_MS = 60 * 1000;
+const ORPHAN_REAPER_GRACE_MS = 5 * 1000;
 const WORKER_STATE_HEADER = "X-Tgws-Worker-State";
 const QUOTA_RESET_HEADER = "X-Tgws-Quota-Reset";
 const HUB_REVISION_HEADER = "X-Tgws-Relay-Hub-Revision";
@@ -122,7 +123,8 @@ class RelaySession {
   }
 
   isOrphaned(now) {
-    return this.state === "active" && now - this.lastClientTouch >= ORPHAN_TIMEOUT_MS;
+    return this.state === "active"
+      && now - this.lastClientTouch >= ORPHAN_TIMEOUT_MS + ORPHAN_REAPER_GRACE_MS;
   }
 
   wake() {
@@ -215,6 +217,7 @@ class RelaySession {
 
   summary(now = this.now()) {
     return {
+      sid: this.sid,
       target: this.target,
       up_seq: this.upSeq,
       up_bytes: this.upBytes,
@@ -491,6 +494,7 @@ export class ChunkRelayHub extends DurableObject {
     console.log("chunk relay hub session opened", {
       revision: REVISION,
       hub_revision: HUB_REVISION,
+      sid: session.sid,
       active_sessions: this.sessions.size,
       opened_sessions: this.openedSessions,
       closed_sessions: this.closedSessions,
@@ -520,7 +524,7 @@ export class ChunkRelayHub extends DurableObject {
   nextReaperTime(now = this.now()) {
     let next = null;
     for (const session of this.sessions.values()) {
-      const deadline = session.lastClientTouch + ORPHAN_TIMEOUT_MS;
+      const deadline = session.lastClientTouch + ORPHAN_TIMEOUT_MS + ORPHAN_REAPER_GRACE_MS;
       if (next === null || deadline < next) next = deadline;
     }
     return next === null ? null : Math.max(now + 1, next);
