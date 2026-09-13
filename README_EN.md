@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="icon.png" width="128" alt="TgWsProxy application icon">
 
@@ -8,7 +8,7 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 [Русский](README.md) · **English**
 
-[![Version](https://img.shields.io/badge/source-1.10.13-0969DA?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/source-1.10.14-0969DA?style=for-the-badge)](CHANGELOG.md)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](app/build.gradle.kts)
 [![ABI](https://img.shields.io/badge/ABI-arm64--v8a-7B61FF?style=for-the-badge)](app/build.gradle.kts)
 [![Documentation](https://img.shields.io/badge/docs-open-4C8BF5?style=for-the-badge&logo=readthedocs&logoColor=white)](#documentation)
@@ -29,12 +29,12 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 TgWsProxy runs a local proxy on an Android device. Telegram connects through the MTProto Proxy frontend or the compatible SOCKS5 mode, and the native runtime selects an allowed route to Telegram infrastructure.
 
-The primary use case in version `1.10.13` is **MTProto Proxy → Cloudflare Proxy** on `127.0.0.1:1443`. The application does not create a system VPN tunnel or route all device traffic.
+The primary use case in version `1.10.14` is **MTProto Proxy → Cloudflare Proxy** on `127.0.0.1:1443`. The application does not create a system VPN tunnel or route all device traffic.
 
 ## Project status
 
-**Source version:** `1.10.13` (`versionCode 51`)  
-**Stage:** stable release; v1.10.13 was published on August 25, 2026
+**Source version:** `1.10.14` (`versionCode 52`)  
+**Stage:** release candidate; final device smoke-test is required before publication
 
 | Area | Status |
 |---|---|
@@ -158,7 +158,7 @@ WebSocket is a transport. The interface and diagnostics identify the actual path
 
 ## Configuration
 
-Defaults for version `1.10.13`:
+Defaults for version `1.10.14`:
 
 | Setting | Value |
 |---|---|
@@ -264,7 +264,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.10.13
+.\scripts\release.ps1 -Version v1.10.14
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -299,7 +299,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.10.13` release notes | [docs/releases/RELEASE_NOTES_v1.10.13.md](docs/releases/RELEASE_NOTES_v1.10.13.md) |
+| `1.10.14` release notes | [docs/releases/RELEASE_NOTES_v1.10.14.md](docs/releases/RELEASE_NOTES_v1.10.14.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -325,4 +325,3 @@ AI tools were used for selected parts of the code, tests, and documentation. The
 ## License
 
 The project is distributed under the [GNU General Public License v3.0](LICENSE).
-
