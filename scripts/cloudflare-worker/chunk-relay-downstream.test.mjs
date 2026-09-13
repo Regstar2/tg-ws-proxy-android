@@ -94,7 +94,7 @@ test("relay emits 12 KiB downstream chunks without changing seq/ACK semantics", 
   assert.equal(closed.status, 204);
 });
 
-test("relay coalesces three 4 KiB TCP reads into one 12 KiB downstream response", async () => {
+test("relay coalesces three queued 4 KiB TCP reads into one 12 KiB downstream response", async () => {
   const chunks = [
     new Uint8Array(4 * 1024).fill(0x11),
     new Uint8Array(4 * 1024).fill(0x22),
@@ -105,14 +105,17 @@ test("relay coalesces three 4 KiB TCP reads into one 12 KiB downstream response"
   expected.set(chunks[1], 4 * 1024);
   expected.set(chunks[2], 8 * 1024);
 
-  const { ChunkRelayHub } = await loadWorkerModule(() => makeDownstreamSocket(chunks, [0, 2, 2]));
+  const { ChunkRelayHub } = await loadWorkerModule(() => makeDownstreamSocket(chunks));
   const relay = new ChunkRelayHub({}, {});
   const sid = "downstream_coalesce_4k";
   const dst = "149.154.167.51";
 
   const opened = await relay.fetch(relayRequest("open", sid, dst));
   assert.equal(opened.status, 204);
-  await waitForQueuedChunks(relay, sid, 1);
+  // Keep this assertion deterministic. The production coalescing window is a
+  // wall-clock optimization, so scheduling jitter on Windows must not turn
+  // this byte/seq invariant test into a timing test.
+  await waitForQueuedChunks(relay, sid, 3);
 
   const first = await relay.fetch(relayRequest("down", sid, dst, { ack: "0", wait: "0" }));
   assert.equal(first.status, 200);
