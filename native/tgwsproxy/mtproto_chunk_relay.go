@@ -19,6 +19,7 @@ import (
 
 const (
 	mtProtoChunkRelayBytes        = 8 * 1024
+	mtProtoChunkRelayDownBytes    = 12 * 1024
 	mtProtoChunkRelayMaxRetries   = 3
 	mtProtoChunkRelayOpenTimeout  = 10 * time.Second
 	mtProtoChunkRelayUpTimeout    = 5 * time.Second
@@ -168,12 +169,13 @@ func dialMtProtoChunkRelay(
 
 	if logInfo != nil {
 		logInfo.Printf(
-			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true revision=%s",
+			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true revision=%s",
 			logPrefix,
 			sessionID,
 			domain,
 			workerDst,
 			mtProtoChunkRelayBytes,
+			mtProtoChunkRelayDownBytes,
 			mtProtoChunkRelayMaxRetries,
 			mtProtoChunkRelayPollWaitMS,
 			mtProtoChunkRelayUpTimeout.Milliseconds(),
@@ -238,7 +240,7 @@ func (c *mtProtoChunkRelayConn) freshHTTPRequest(
 		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, mtProtoChunkRelayBytes+4096))
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, mtProtoChunkRelayDownBytes+4096))
 	headers := resp.Header.Clone()
 	if err != nil {
 		return resp.StatusCode, headers, nil, err
@@ -555,7 +557,7 @@ func (c *mtProtoChunkRelayConn) Read(dst []byte) (int, error) {
 		if err != nil || seq <= 0 {
 			return 0, fmt.Errorf("chunk relay down: invalid seq %q", headers.Get("X-Tgws-Chunk-Seq"))
 		}
-		if len(body) == 0 || len(body) > mtProtoChunkRelayBytes {
+		if len(body) == 0 || len(body) > mtProtoChunkRelayDownBytes {
 			return 0, fmt.Errorf("chunk relay down seq %d: invalid body size %d", seq, len(body))
 		}
 		if seq <= c.ackSeq {

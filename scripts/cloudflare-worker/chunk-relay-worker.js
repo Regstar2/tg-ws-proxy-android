@@ -6,7 +6,7 @@ const REVISION = "chunk-relay-mtproto-v8";
 const HUB_REVISION = "relay-hub-v1";
 const RELAY_HUB_NAME = "relay-hub-v1";
 const RELAY_MAX_UPLOAD_CHUNK_BYTES = 12 * 1024;
-const RELAY_MAX_DOWN_CHUNK_BYTES = 8 * 1024;
+const RELAY_MAX_DOWN_CHUNK_BYTES = 12 * 1024;
 const DIAG_MAX_CHUNK_BYTES = 12 * 1024;
 const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
 const MAX_POLL_WAIT_MS = 6000;
@@ -223,6 +223,7 @@ class RelaySession {
       up_bytes: this.upBytes,
       down_seq: this.downSeq,
       down_bytes: this.downBytes,
+      down_chunk_bytes: RELAY_MAX_DOWN_CHUNK_BYTES,
       last_client_touch_age_ms: Math.max(0, now - this.lastClientTouch),
       last_payload_activity_age_ms: this.lastPayloadActivity > 0
         ? Math.max(0, now - this.lastPayloadActivity)
@@ -500,6 +501,7 @@ export class ChunkRelayHub extends DurableObject {
       closed_sessions: this.closedSessions,
       reaped_sessions: this.reapedSessions,
       target: session.target,
+      down_chunk_bytes: RELAY_MAX_DOWN_CHUNK_BYTES,
     });
   }
 
