@@ -18,23 +18,24 @@ import (
 )
 
 const (
-	mtProtoChunkRelayBytes        = 8 * 1024
-	mtProtoChunkRelayDownBytes    = 12 * 1024
-	mtProtoChunkRelayMaxRetries   = 3
-	mtProtoChunkRelayOpenTimeout  = 10 * time.Second
-	mtProtoChunkRelayUpTimeout    = 5 * time.Second
-	mtProtoChunkRelayUpHedgeDelay = 400 * time.Millisecond
-	mtProtoChunkRelayDownTimeout  = 10 * time.Second
-	mtProtoChunkRelayPollWaitMS   = 6000
+	mtProtoChunkRelayBytes               = 8 * 1024
+	mtProtoChunkRelayDownBytes           = 12 * 1024
+	mtProtoChunkRelayMaxRetries          = 3
+	mtProtoChunkRelayOpenTimeout         = 10 * time.Second
+	mtProtoChunkRelayUpTimeout           = 5 * time.Second
+	mtProtoChunkRelayUpHedgeDelay        = 400 * time.Millisecond
+	mtProtoChunkRelayDownTimeout         = 10 * time.Second
+	mtProtoChunkRelayPollWaitMS          = 6000
+	mtProtoChunkRelayDownIdleConnTimeout = 30 * time.Second
 
 	chunkRelayWorkerStateHeader   = "X-Tgws-Worker-State"
 	chunkRelayQuotaResetHeader    = "X-Tgws-Quota-Reset"
 	chunkRelayQuotaExhaustedState = "do-quota-exhausted"
 )
 
-// Each relay request still uses a fresh TCP/TLS connection. Sharing only the
-// client-session cache allows TLS resumption without reintroducing a long-lived
-// workers.dev byte stream.
+// Fresh relay requests still share only the TLS client-session cache. The
+// downstream path may additionally reuse one HTTP/1.1 TCP/TLS connection per
+// relay session to avoid paying a handshake for every serial 12 KiB poll.
 var mtProtoChunkRelayTLSCache = tls.NewLRUClientSessionCache(256)
 
 type chunkRelayRequestFunc func(
@@ -51,6 +52,12 @@ type mtProtoChunkRelayConn struct {
 	request   chunkRelayRequestFunc
 	cancel    context.CancelFunc
 	lifeCtx   context.Context
+
+	useDownHTTPReuse bool
+	downTransport    *http.Transport
+	downHTTPMu       sync.Mutex
+	downHTTPAttempts int64
+	downHTTPDials    int64
 
 	writeMu sync.Mutex
 	upSeq   int64
@@ -121,13 +128,15 @@ func dialMtProtoChunkRelay(
 
 	lifeCtx, cancel := context.WithCancel(context.Background())
 	conn := &mtProtoChunkRelayConn{
-		domain:    domain,
-		sessionID: sessionID,
-		workerDst: workerDst,
-		lifeCtx:   lifeCtx,
-		cancel:    cancel,
+		domain:           domain,
+		sessionID:        sessionID,
+		workerDst:        workerDst,
+		lifeCtx:          lifeCtx,
+		cancel:           cancel,
+		useDownHTTPReuse: true,
 	}
 	conn.request = conn.freshHTTPRequest
+	conn.downTransport = conn.newDownHTTPTransport()
 
 	openQuery := url.Values{
 		"sid": {sessionID},
@@ -136,6 +145,7 @@ func dialMtProtoChunkRelay(
 	status, headers, _, err := conn.requestWithRetry(ctx, "open", openQuery, nil, "open", 0)
 	if err != nil {
 		cancel()
+		conn.closeDownHTTPTransport()
 		if _, circuitOpen := workerCircuitError(err); !circuitOpen {
 			if responseStatus, _, ok := chunkRelayHTTPErrorDetails(err); ok && responseStatus >= 500 {
 				until := markWorkerTemporaryFailure(domain, time.Now())
@@ -151,6 +161,7 @@ func dialMtProtoChunkRelay(
 	}
 	if status != http.StatusNoContent {
 		cancel()
+		conn.closeDownHTTPTransport()
 		if status >= 500 {
 			until := markWorkerTemporaryFailure(domain, time.Now())
 			return nil, fmt.Errorf("open chunk relay: %w", &workerCircuitOpenError{
@@ -164,13 +175,14 @@ func dialMtProtoChunkRelay(
 	}
 	if strings.TrimSpace(headers.Get("X-Tgws-Chunk-Relay-Revision")) == "" {
 		cancel()
+		conn.closeDownHTTPTransport()
 		return nil, fmt.Errorf("open chunk relay: missing relay revision header")
 	}
 	clearWorkerCircuit(domain)
 
 	if logInfo != nil {
 		logInfo.Printf(
-			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true revision=%s",
+			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true down_http_keepalive=true down_http_idle_timeout_ms=%d revision=%s",
 			logPrefix,
 			sessionID,
 			domain,
@@ -182,6 +194,7 @@ func dialMtProtoChunkRelay(
 			mtProtoChunkRelayUpTimeout.Milliseconds(),
 			mtProtoChunkRelayDownTimeout.Milliseconds(),
 			mtProtoChunkRelayUpHedgeDelay.Milliseconds(),
+			mtProtoChunkRelayDownIdleConnTimeout.Milliseconds(),
 			mtProtoStatusField(headers.Get("X-Tgws-Chunk-Relay-Revision")),
 		)
 	}
@@ -255,6 +268,110 @@ func (c *mtProtoChunkRelayConn) freshHTTPRequest(
 	return resp.StatusCode, headers, responseBody, nil
 }
 
+func (c *mtProtoChunkRelayConn) newDownHTTPTransport() *http.Transport {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			c.recordDownHTTPDial()
+			return dialer.DialContext(ctx, network, address)
+		},
+		DisableKeepAlives:     false,
+		ForceAttemptHTTP2:     false,
+		MaxIdleConns:          1,
+		MaxIdleConnsPerHost:   1,
+		MaxConnsPerHost:       1,
+		IdleConnTimeout:       mtProtoChunkRelayDownIdleConnTimeout,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 0,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Match the existing Flowseal Worker TLS policy in this experiment.
+			ServerName:         c.domain,
+			NextProtos:         []string{"http/1.1"},
+			ClientSessionCache: mtProtoChunkRelayTLSCache,
+		},
+	}
+}
+
+func (c *mtProtoChunkRelayConn) reusedDownHTTPRequest(
+	ctx context.Context,
+	action string,
+	query url.Values,
+	body []byte,
+) (int, http.Header, []byte, error) {
+	if action != "down" {
+		return c.freshHTTPRequest(ctx, action, query, body)
+	}
+	c.recordDownHTTPAttempt()
+	if c.downTransport == nil {
+		c.downTransport = c.newDownHTTPTransport()
+	}
+
+	endpoint := url.URL{
+		Scheme:   "https",
+		Host:     c.domain,
+		Path:     "/chunk-relay/down",
+		RawQuery: query.Encode(),
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	req.Header.Set("Cache-Control", "no-store")
+
+	client := &http.Client{Transport: c.downTransport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, mtProtoChunkRelayDownBytes+4096))
+	headers := resp.Header.Clone()
+	if err != nil {
+		return resp.StatusCode, headers, nil, err
+	}
+	if circuitErr := chunkRelayCircuitErrorForResponse(c.domain, resp.StatusCode, headers, time.Now()); circuitErr != nil {
+		return resp.StatusCode, headers, responseBody, circuitErr
+	}
+	if responseErr := chunkRelayResponseError(action, resp.StatusCode, headers); responseErr != nil {
+		return resp.StatusCode, headers, responseBody, responseErr
+	}
+	return resp.StatusCode, headers, responseBody, nil
+}
+
+func (c *mtProtoChunkRelayConn) recordDownHTTPAttempt() {
+	c.downHTTPMu.Lock()
+	c.downHTTPAttempts++
+	c.downHTTPMu.Unlock()
+}
+
+func (c *mtProtoChunkRelayConn) recordDownHTTPDial() {
+	c.downHTTPMu.Lock()
+	c.downHTTPDials++
+	c.downHTTPMu.Unlock()
+}
+
+func (c *mtProtoChunkRelayConn) downHTTPStats() (attempts, dials int64, reuseEstimatePct float64) {
+	c.downHTTPMu.Lock()
+	attempts = c.downHTTPAttempts
+	dials = c.downHTTPDials
+	c.downHTTPMu.Unlock()
+	if attempts > 0 {
+		reused := attempts - dials
+		if reused < 0 {
+			reused = 0
+		}
+		reuseEstimatePct = float64(reused) * 100 / float64(attempts)
+	}
+	return attempts, dials, reuseEstimatePct
+}
+
+func (c *mtProtoChunkRelayConn) closeDownHTTPTransport() {
+	if c.downTransport != nil {
+		c.downTransport.CloseIdleConnections()
+	}
+}
+
 func (c *mtProtoChunkRelayConn) requestWithRetry(
 	parent context.Context,
 	action string,
@@ -279,7 +396,11 @@ func (c *mtProtoChunkRelayConn) requestWithRetry(
 			status, headers, responseBody, err = c.requestUpHedgeRound(parent, query, body, seq)
 		} else {
 			ctx, cancel := c.requestContext(parent, direction)
-			status, headers, responseBody, err = c.request(ctx, action, query, body)
+			request := c.request
+			if action == "down" && c.useDownHTTPReuse {
+				request = c.reusedDownHTTPRequest
+			}
+			status, headers, responseBody, err = request(ctx, action, query, body)
 			cancel()
 			if err == nil {
 				err = chunkRelayResponseError(action, status, headers)
@@ -601,10 +722,12 @@ func (c *mtProtoChunkRelayConn) Close() error {
 	defer cancel()
 	query := url.Values{"sid": {c.sessionID}, "dst": {c.workerDst}}
 	_, _, _, _ = c.request(ctx, "close", query, nil)
+	c.closeDownHTTPTransport()
 	if logInfo != nil {
 		downPoll := c.downPoll.snapshot()
+		downHTTPAttempts, downHTTPDials, downHTTPReusePct := c.downHTTPStats()
 		logInfo.Printf(
-			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d down_polls=%d down_empty_polls=%d down_payload_polls=%d down_poll_wait_ms_avg=%d down_retries=%d down_timeouts=%d down_requests_per_mib=%.2f idle_requests_per_min=%.2f",
+			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d down_polls=%d down_empty_polls=%d down_payload_polls=%d down_poll_wait_ms_avg=%d down_retries=%d down_timeouts=%d down_requests_per_mib=%.2f idle_requests_per_min=%.2f down_http_attempts=%d down_http_dials=%d down_http_reuse_estimate_pct=%.2f",
 			c.sessionID,
 			c.workerDst,
 			c.upBytes,
@@ -619,6 +742,9 @@ func (c *mtProtoChunkRelayConn) Close() error {
 			downPoll.timeouts,
 			downPoll.requestsPerMiB(c.downBytes),
 			downPoll.idleRequestsPerMinute(),
+			downHTTPAttempts,
+			downHTTPDials,
+			downHTTPReusePct,
 		)
 	}
 	return nil
