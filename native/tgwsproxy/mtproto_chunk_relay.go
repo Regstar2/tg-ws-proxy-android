@@ -61,6 +61,7 @@ type mtProtoChunkRelayConn struct {
 	pendingSeq int64
 	ackSeq     int64
 	downBytes  int64
+	downPoll   chunkRelayDownPollState
 
 	deadlineMu    sync.RWMutex
 	readDeadline  time.Time
@@ -292,6 +293,9 @@ func (c *mtProtoChunkRelayConn) requestWithRetry(
 		lastHeaders = headers
 		lastBody = responseBody
 		logChunkRelayResponseDecision(c, action, direction, seq, status, err, attempt)
+		if direction == "down" {
+			c.recordDownAttemptFailure(err)
+		}
 		if _, circuitOpen := workerCircuitError(err); circuitOpen {
 			return status, headers, responseBody, err
 		}
@@ -300,6 +304,9 @@ func (c *mtProtoChunkRelayConn) requestWithRetry(
 		}
 		if attempt >= mtProtoChunkRelayMaxRetries {
 			break
+		}
+		if direction == "down" {
+			c.recordDownRetry()
 		}
 		backoff := 300 * time.Millisecond * time.Duration(1<<attempt)
 		timer := time.NewTimer(backoff)
@@ -437,7 +444,7 @@ func (c *mtProtoChunkRelayConn) requestContext(parent context.Context, direction
 	case "up":
 		timeout = mtProtoChunkRelayUpTimeout
 	case "down":
-		timeout = mtProtoChunkRelayDownTimeout
+		timeout = c.downRequestTimeout()
 	}
 	deadline := time.Now().Add(timeout)
 	c.deadlineMu.RLock()
@@ -531,14 +538,17 @@ func (c *mtProtoChunkRelayConn) Read(dst []byte) (int, error) {
 			return 0, net.ErrClosed
 		}
 
+		pollWaitMS := c.nextDownPollWaitMS()
 		query := url.Values{
 			"sid":  {c.sessionID},
 			"dst":  {c.workerDst},
 			"ack":  {strconv.FormatInt(c.ackSeq, 10)},
-			"wait": {strconv.Itoa(mtProtoChunkRelayPollWaitMS)},
+			"wait": {strconv.Itoa(pollWaitMS)},
 		}
+		c.recordDownPollStarted(pollWaitMS)
 		status, headers, body, err := c.requestWithRetry(context.Background(), "down", query, nil, "down", c.ackSeq)
 		if err != nil {
+			c.resetDownPollAfterError()
 			if chunkRelayTerminalSessionError(err) {
 				return 0, io.EOF
 			}
@@ -546,6 +556,7 @@ func (c *mtProtoChunkRelayConn) Read(dst []byte) (int, error) {
 		}
 		switch status {
 		case http.StatusNoContent:
+			c.recordDownPollEmpty(pollWaitMS)
 			continue
 		case http.StatusGone:
 			return 0, io.EOF
@@ -560,6 +571,7 @@ func (c *mtProtoChunkRelayConn) Read(dst []byte) (int, error) {
 		if len(body) == 0 || len(body) > mtProtoChunkRelayDownBytes {
 			return 0, fmt.Errorf("chunk relay down seq %d: invalid body size %d", seq, len(body))
 		}
+		c.recordDownPollPayload()
 		if seq <= c.ackSeq {
 			continue
 		}
@@ -590,9 +602,23 @@ func (c *mtProtoChunkRelayConn) Close() error {
 	query := url.Values{"sid": {c.sessionID}, "dst": {c.workerDst}}
 	_, _, _, _ = c.request(ctx, "close", query, nil)
 	if logInfo != nil {
+		downPoll := c.downPoll.snapshot()
 		logInfo.Printf(
-			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d",
-			c.sessionID, c.workerDst, c.upBytes, c.downBytes, c.upSeq, c.ackSeq,
+			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d down_polls=%d down_empty_polls=%d down_payload_polls=%d down_poll_wait_ms_avg=%d down_retries=%d down_timeouts=%d down_requests_per_mib=%.2f idle_requests_per_min=%.2f",
+			c.sessionID,
+			c.workerDst,
+			c.upBytes,
+			c.downBytes,
+			c.upSeq,
+			c.ackSeq,
+			downPoll.polls,
+			downPoll.emptyPolls,
+			downPoll.payloadPolls,
+			downPoll.averageWaitMS(),
+			downPoll.retries,
+			downPoll.timeouts,
+			downPoll.requestsPerMiB(c.downBytes),
+			downPoll.idleRequestsPerMinute(),
 		)
 	}
 	return nil
