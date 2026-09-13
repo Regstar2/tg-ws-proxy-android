@@ -1,6 +1,6 @@
 import chunkRelayWorker, { ChunkRelayHub } from "./chunk-relay-worker.js";
 
-const REVISION = "chunk-relay-mtproto-v10";
+const REVISION = "chunk-relay-mtproto-v11";
 const HUB_REVISION = "relay-hub-v1";
 const RELAY_ERROR_HEADER = "X-Tgws-Relay-Error";
 
