@@ -2,11 +2,12 @@ import baseWorker from "./worker.js";
 import { connect } from "cloudflare:sockets";
 import { DurableObject } from "cloudflare:workers";
 
-const REVISION = "chunk-relay-mtproto-v9";
+const REVISION = "chunk-relay-mtproto-v10";
 const HUB_REVISION = "relay-hub-v1";
 const RELAY_HUB_NAME = "relay-hub-v1";
 const RELAY_MAX_UPLOAD_CHUNK_BYTES = 12 * 1024;
 const RELAY_MAX_DOWN_CHUNK_BYTES = 12 * 1024;
+const DOWN_COALESCE_WAIT_MS = 8;
 const DIAG_MAX_CHUNK_BYTES = 12 * 1024;
 const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
 const MAX_POLL_WAIT_MS = 20_000;
@@ -230,6 +231,7 @@ class RelaySession {
       down_seq: this.downSeq,
       down_bytes: this.downBytes,
       down_chunk_bytes: RELAY_MAX_DOWN_CHUNK_BYTES,
+      down_coalesce_wait_ms: DOWN_COALESCE_WAIT_MS,
       last_client_touch_age_ms: Math.max(0, now - this.lastClientTouch),
       last_payload_activity_age_ms: this.lastPayloadActivity > 0
         ? Math.max(0, now - this.lastPayloadActivity)
@@ -332,6 +334,49 @@ class RelaySession {
       const timer = setTimeout(done, waitMS);
       this.waiters.add(done);
     });
+  }
+
+  async waitForDownCoalesce() {
+    if (this.pending || this.closed || this.queueBytes <= 0 || this.queueBytes >= RELAY_MAX_DOWN_CHUNK_BYTES) return;
+    const deadline = Date.now() + DOWN_COALESCE_WAIT_MS;
+    while (!this.closed && this.queueBytes > 0 && this.queueBytes < RELAY_MAX_DOWN_CHUNK_BYTES) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      await new Promise((resolve) => {
+        const done = () => { clearTimeout(timer); this.waiters.delete(done); resolve(); };
+        const timer = setTimeout(done, remaining);
+        this.waiters.add(done);
+      });
+    }
+  }
+
+  takeDownChunk() {
+    if (!this.queue.length || this.queueBytes <= 0) return null;
+    const size = Math.min(this.queueBytes, RELAY_MAX_DOWN_CHUNK_BYTES);
+    const first = this.queue[0];
+    if (first.byteLength === size) {
+      this.queue.shift();
+      this.queueBytes -= size;
+      this.wakeDrain();
+      return first;
+    }
+
+    const data = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size && this.queue.length) {
+      const chunk = this.queue[0];
+      const take = Math.min(chunk.byteLength, size - offset);
+      data.set(chunk.subarray(0, take), offset);
+      offset += take;
+      this.queueBytes -= take;
+      if (take === chunk.byteLength) {
+        this.queue.shift();
+      } else {
+        this.queue[0] = chunk.slice(take);
+      }
+    }
+    this.wakeDrain();
+    return data;
   }
 
   async drainUploads() {
@@ -438,10 +483,9 @@ class RelaySession {
         if (this.pending && ack === this.pending.seq) this.pending = null;
         await this.wait(url.searchParams.get("wait"));
         if (!this.pending && this.queue.length) {
-          const data = this.queue.shift();
-          this.queueBytes -= data.byteLength;
-          this.wakeDrain();
-          this.pending = { seq: ++this.downSeq, data };
+          await this.waitForDownCoalesce();
+          const data = this.takeDownChunk();
+          if (data) this.pending = { seq: ++this.downSeq, data };
         }
         if (this.pending) {
           return new Response(this.pending.data, {
@@ -509,6 +553,7 @@ export class ChunkRelayHub extends DurableObject {
       reaped_sessions: this.reapedSessions,
       target: session.target,
       down_chunk_bytes: RELAY_MAX_DOWN_CHUNK_BYTES,
+      down_coalesce_wait_ms: DOWN_COALESCE_WAIT_MS,
     });
   }
 
