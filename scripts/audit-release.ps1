@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ExpectedVersion = '1.10.13',
-    [int]$ExpectedVersionCode = 51
+    [string]$ExpectedVersion = '1.10.14',
+    [int]$ExpectedVersionCode = 52
 )
 
 Set-StrictMode -Version Latest
@@ -92,7 +92,7 @@ Assert-NormalizedContains -Path (Join-Path $root 'README_EN.md') -ExpectedText $
 $escapedVersion = [regex]::Escape($ExpectedVersion)
 Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##[^\r\n]*$escapedVersion\b" -Description 'CHANGELOG version section'
 
-$releaseNotesPath = Join-Path $root 'docs\releases\RELEASE_NOTES_v1.10.13.md'
+$releaseNotesPath = Join-Path $root ("docs\releases\RELEASE_NOTES_v$ExpectedVersion.md")
 Assert-NormalizedContains -Path $releaseNotesPath -ExpectedText "versionName $ExpectedVersion" -Description 'Release notes versionName'
 Assert-NormalizedContains -Path $releaseNotesPath -ExpectedText "versionCode $ExpectedVersionCode" -Description 'Release notes versionCode'
 
