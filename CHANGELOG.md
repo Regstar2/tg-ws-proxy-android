@@ -1,6 +1,22 @@
-﻿# Changelog
+# Changelog
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
+
+## 1.10.14 - Unreleased
+- MTProto Worker traffic now uses a fresh-HTTPS chunk relay instead of one long-lived `workers.dev` WebSocket while preserving the Telegram TCP session inside Cloudflare Durable Objects.
+- Verified upload profile: 12 KiB chunks, sliding window 3, ordered sequence acknowledgements, bounded retries, primary/global request limits and HOL hedging for the oldest unacknowledged upload.
+- Worker revision `chunk-relay-mtproto-v10` uses shared `relay-hub-v1`: multiple independent MTProto sessions share one Durable Object instance without sharing Telegram sockets, seq/ACK state, downstream queues or lifecycle state.
+- `ROUND_ROBIN` assigns a stable primary Worker per opaque MTProto session id; chunks from one session stay on the same Worker while separate sessions distribute across the enabled pool.
+- Durable Objects quota exhaustion is mapped to recoverable HTTP 503 responses with reset metadata; native per-domain circuit breakers skip exhausted Workers until reset and prevent reconnect storms.
+- Relay failures are status-aware: terminal session loss reconnects cleanly, transient failures remain bounded-retryable and non-success HTTP responses cannot win hedge races just because the local transport call returned no error.
+- Orphaned relay sessions are reaped using client activity rather than Telegram payload activity, with a 60 s timeout plus 5 s scheduling grace so healthy idle sessions remain connected while polling.
+- Downstream polling adapts from 6 s to 12 s and 20 s during idle periods, then immediately returns to 6 s when payload arrives.
+- Downstream TCP reads are coalesced for up to 8 ms into real responses up to 12 KiB, materially reducing request pressure and improving media throughput compared with forwarding ~4 KiB reads individually.
+- A stalled HTTP 200 downstream body is bounded by a separate 2500 ms read deadline; the same ACK is retried over the fresh-request path instead of waiting for the full long-poll deadline.
+- The HTTP/1.1 downstream keep-alive experiment was rejected after Android device regression and is not part of the release.
+- Worker preconnect remains disabled for the MTProto Worker route, and an explicit Worker-only policy does not silently add direct/TCP fallback routes.
+- PR CI includes Go race tests, Cloudflare Worker tests, Android unit tests, debug APK assembly and release-readiness checks.
+- Known limitation: Worker transport remains slower than direct connectivity and still depends on Cloudflare Durable Objects quotas; it is not promoted to the default route.
 
 ## 1.10.13 - 2026-08-26
 - MTProto WebSocket receive path now reassembles fragmented/continuation messages instead of dropping continuation frames.
@@ -105,7 +121,7 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## 1.8.3
 
-- Route diagnostics screen with probe result cards, step details, and read-only runtime route block.
+- Route diagnostics screen with probe result cards, step details, read-only runtime route block.
 - Entry from main screen and Settings; uses `RouteDiagnosticsRepository` (no duplicate network checks in UI).
 
 ## 1.8.2
@@ -148,4 +164,3 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - “Recommended” preset in route policy UI.
 
 Earlier versions: see [docs/releases/](docs/releases/).
-

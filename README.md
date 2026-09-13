@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="icon.png" width="128" alt="Иконка приложения TgWsProxy">
 
@@ -8,7 +8,7 @@
 
 **Русский** · [English](README_EN.md)
 
-[![Version](https://img.shields.io/badge/source-1.10.13-0969DA?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/source-1.10.14-0969DA?style=for-the-badge)](CHANGELOG.md)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](app/build.gradle.kts)
 [![ABI](https://img.shields.io/badge/ABI-arm64--v8a-7B61FF?style=for-the-badge)](app/build.gradle.kts)
 [![Documentation](https://img.shields.io/badge/docs-open-4C8BF5?style=for-the-badge&logo=readthedocs&logoColor=white)](#документация)
@@ -29,20 +29,20 @@
 
 TgWsProxy запускает локальный прокси на Android-устройстве. Telegram подключается к нему через MTProto Proxy или совместимый SOCKS5-режим, после чего нативный runtime выбирает разрешённый маршрут к инфраструктуре Telegram.
 
-Основной сценарий версии `1.10.13` — **MTProto Proxy → Cloudflare Proxy** на локальном адресе `127.0.0.1:1443`. Приложение не создаёт системный VPN-туннель и не перенаправляет весь трафик устройства.
+Основной сценарий версии `1.10.14` — **MTProto Proxy → Cloudflare Proxy** на локальном адресе `127.0.0.1:1443`. Приложение не создаёт системный VPN-туннель и не перенаправляет весь трафик устройства.
 
 ## Статус проекта
 
-**Версия исходников:** `1.10.13` (`versionCode 51`)  
-**Стадия:** стабильный релиз; v1.10.13 опубликован 25 августа 2026 года
+**Версия исходников:** `1.10.14` (`versionCode 52`)  
+**Стадия:** release candidate; перед публикацией требуется финальный device smoke-test
 
 | Область | Статус |
 |---|---|
 | MTProto Proxy через `cf_proxy_ws` | Основной сценарий; ранее вручную проверен на мобильной сети и Wi-Fi |
 | SOCKS5 / WebSocket frontend | Реализован как режим совместимости |
 | `direct_ws` и `tcp_fallback` | Реализованы; доступность зависит от сети |
-| Cloudflare Worker | Реализован как необязательный маршрут |
-| Worker Pool | Реализован, но остаётся медленным и не рекомендуется как основной маршрут |
+| Cloudflare Worker | Реализован как необязательный маршрут; v1.10.14 использует fresh-HTTPS chunk relay |
+| Worker Pool | Работает, но остаётся медленнее прямого соединения и не рекомендуется как основной маршрут |
 | Feedback | Отдельный экран; GitHub Issue Forms без встроенного PAT |
 | Updates | Проверка официальных GitHub Releases с SemVer и открытием официальной страницы релиза |
 
@@ -158,7 +158,7 @@ WebSocket — транспорт. Фактический путь в интер�
 
 ## Конфигурация
 
-Значения по умолчанию для версии `1.10.13`:
+Значения по умолчанию для версии `1.10.14`:
 
 | Параметр | Значение |
 |---|---|
@@ -264,7 +264,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.10.13
+.\scripts\release.ps1 -Version v1.10.14
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -299,7 +299,7 @@ app\build\outputs\apk\debug\app-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.10.13` | [docs/releases/RELEASE_NOTES_v1.10.13.md](docs/releases/RELEASE_NOTES_v1.10.13.md) |
+| Release notes `1.10.14` | [docs/releases/RELEASE_NOTES_v1.10.14.md](docs/releases/RELEASE_NOTES_v1.10.14.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -316,7 +316,7 @@ app\build\outputs\apk\debug\app-debug.apk
 - поддерживается только ABI `arm64-v8a`;
 - приложение является прокси для Telegram, а не системным VPN;
 - доступность маршрутов зависит от сети и внешней инфраструктуры;
-- Worker Pool остаётся медленным и не предназначен для основного сценария;
+- Worker Pool остаётся медленнее прямого соединения и не предназначен для основного сценария;
 - порт `1443` нужно изменить, если его уже использует другой локальный сервис;
 - native build script ориентирован на Windows; поддержка Linux и macOS не подтверждена;
 - masking-domain passthrough создаёт соединения с указанным доменом;
@@ -325,4 +325,3 @@ app\build\outputs\apk\debug\app-debug.apk
 ## Лицензия
 
 Проект распространяется по лицензии [GNU General Public License v3.0](LICENSE).
-
