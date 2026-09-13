@@ -46,6 +46,18 @@ func TestChunkRelayDownTransportEnablesHTTP11KeepAlive(t *testing.T) {
 	}
 }
 
+func TestChunkRelayDownHTTPReuseRequiresFixedLengthWorkerRevision(t *testing.T) {
+	if chunkRelayDownHTTPReuseSupported("chunk-relay-mtproto-v10") {
+		t.Fatal("v10 must stay on the fresh downstream request path")
+	}
+	if !chunkRelayDownHTTPReuseSupported("chunk-relay-mtproto-v11") {
+		t.Fatal("v11 must enable downstream HTTP reuse")
+	}
+	if chunkRelayDownHTTPReuseSupported("chunk-relay-mtproto-v12") {
+		t.Fatal("unknown future revisions must opt in explicitly")
+	}
+}
+
 func TestChunkRelayDownHTTPReuseStats(t *testing.T) {
 	conn := newTestChunkRelayConn(t, func(_ context.Context, _ string, _ url.Values, _ []byte) (int, http.Header, []byte, error) {
 		return http.StatusNoContent, make(http.Header), nil, nil
