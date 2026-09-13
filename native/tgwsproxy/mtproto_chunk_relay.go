@@ -170,7 +170,7 @@ func dialMtProtoChunkRelay(
 
 	if logInfo != nil {
 		logInfo.Printf(
-			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true revision=%s",
+			"%s MTProto Worker chunk relay ready session_id=%s worker_host=%s worker_dst=%s serial_chunk_bytes=%d down_chunk_bytes=%d max_retries=%d poll_wait_ms=%d up_timeout_ms=%d down_timeout_ms=%d down_body_timeout_ms=%d up_hedge_delay_ms=%d tls_session_cache=true revision=%s",
 			logPrefix,
 			sessionID,
 			domain,
@@ -181,6 +181,7 @@ func dialMtProtoChunkRelay(
 			mtProtoChunkRelayPollWaitMS,
 			mtProtoChunkRelayUpTimeout.Milliseconds(),
 			mtProtoChunkRelayDownTimeout.Milliseconds(),
+			mtProtoChunkRelayDownBodyTimeout.Milliseconds(),
 			mtProtoChunkRelayUpHedgeDelay.Milliseconds(),
 			mtProtoStatusField(headers.Get("X-Tgws-Chunk-Relay-Revision")),
 		)
@@ -241,7 +242,7 @@ func (c *mtProtoChunkRelayConn) freshHTTPRequest(
 		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, mtProtoChunkRelayDownBytes+4096))
+	responseBody, err := readChunkRelayResponseBody(ctx, action, resp, mtProtoChunkRelayDownBytes+4096)
 	headers := resp.Header.Clone()
 	if err != nil {
 		return resp.StatusCode, headers, nil, err
@@ -604,7 +605,7 @@ func (c *mtProtoChunkRelayConn) Close() error {
 	if logInfo != nil {
 		downPoll := c.downPoll.snapshot()
 		logInfo.Printf(
-			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d down_polls=%d down_empty_polls=%d down_payload_polls=%d down_poll_wait_ms_avg=%d down_retries=%d down_timeouts=%d down_requests_per_mib=%.2f idle_requests_per_min=%.2f",
+			"MTProto Worker chunk relay closed session_id=%s worker_dst=%s up_bytes=%d down_bytes=%d up_seq=%d down_ack=%d down_polls=%d down_empty_polls=%d down_payload_polls=%d down_poll_wait_ms_avg=%d down_retries=%d down_timeouts=%d down_body_timeouts=%d down_requests_per_mib=%.2f idle_requests_per_min=%.2f",
 			c.sessionID,
 			c.workerDst,
 			c.upBytes,
@@ -617,6 +618,7 @@ func (c *mtProtoChunkRelayConn) Close() error {
 			downPoll.averageWaitMS(),
 			downPoll.retries,
 			downPoll.timeouts,
+			downPoll.bodyTimeouts,
 			downPoll.requestsPerMiB(c.downBytes),
 			downPoll.idleRequestsPerMinute(),
 		)
