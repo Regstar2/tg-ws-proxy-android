@@ -293,7 +293,7 @@ test("top-level worker maps Durable Object free-tier duration exhaustion to a re
 
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("X-Tgws-Worker-State"), "do-quota-exhausted");
-  assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), "chunk-relay-mtproto-v8");
+  assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), "chunk-relay-mtproto-v9");
   assert.equal(response.headers.get("X-Tgws-Relay-Hub-Revision"), "relay-hub-v1");
   assert.deepEqual(names, ["relay-hub-v1"]);
   assert.ok(Number.parseInt(response.headers.get("Retry-After") || "0", 10) >= 60);

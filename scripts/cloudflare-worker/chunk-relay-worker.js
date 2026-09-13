@@ -2,14 +2,14 @@ import baseWorker from "./worker.js";
 import { connect } from "cloudflare:sockets";
 import { DurableObject } from "cloudflare:workers";
 
-const REVISION = "chunk-relay-mtproto-v8";
+const REVISION = "chunk-relay-mtproto-v9";
 const HUB_REVISION = "relay-hub-v1";
 const RELAY_HUB_NAME = "relay-hub-v1";
 const RELAY_MAX_UPLOAD_CHUNK_BYTES = 12 * 1024;
 const RELAY_MAX_DOWN_CHUNK_BYTES = 12 * 1024;
 const DIAG_MAX_CHUNK_BYTES = 12 * 1024;
 const MAX_QUEUE_BYTES = 2 * 1024 * 1024;
-const MAX_POLL_WAIT_MS = 6000;
+const MAX_POLL_WAIT_MS = 20_000;
 const MAX_UPLOAD_REORDER_WINDOW = 16;
 const ORPHAN_TIMEOUT_MS = 60 * 1000;
 const ORPHAN_REAPER_GRACE_MS = 5 * 1000;
@@ -26,6 +26,12 @@ function headers(extra = {}) {
     [HUB_REVISION_HEADER]: HUB_REVISION,
     ...extra,
   };
+}
+
+function clampPollWaitMS(value) {
+  const parsed = Number.parseInt(String(value ?? "0"), 10);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(Math.max(parsed, 0), MAX_POLL_WAIT_MS);
 }
 
 function randomBytes(size) {
@@ -320,9 +326,10 @@ class RelaySession {
 
   async wait(ms) {
     if (this.pending || this.queue.length || this.closed) return;
+    const waitMS = clampPollWaitMS(ms);
     await new Promise((resolve) => {
       const done = () => { clearTimeout(timer); this.waiters.delete(done); resolve(); };
-      const timer = setTimeout(done, Math.min(Math.max(ms, 0), MAX_POLL_WAIT_MS));
+      const timer = setTimeout(done, waitMS);
       this.waiters.add(done);
     });
   }
@@ -429,7 +436,7 @@ class RelaySession {
         this.touchClient();
         await this.ensureSocket(url.searchParams.get("dst"));
         if (this.pending && ack === this.pending.seq) this.pending = null;
-        await this.wait(Number.parseInt(url.searchParams.get("wait") || "0", 10));
+        await this.wait(url.searchParams.get("wait"));
         if (!this.pending && this.queue.length) {
           const data = this.queue.shift();
           this.queueBytes -= data.byteLength;
