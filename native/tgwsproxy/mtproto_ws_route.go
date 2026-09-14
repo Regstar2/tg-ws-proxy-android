@@ -85,17 +85,13 @@ func (c *mtProtoDirectWSConnector) Connect(
 	timedOut := false
 	for _, domain := range domains {
 		prefix := fmt.Sprintf("[MTProto] DC%d%s direct_ws", request.DCID, mediaTag(request.IsMedia))
-		if logInfo != nil {
-			logInfo.Printf(
-				"MTProto route truth frontend=MTProto selected_backend=%s actual_backend=none fallback_used=false reason=connecting dc=%d media=%t transport=%s target=%s domain=%s",
-				mtProtoDirectWSBackend,
-				request.DCID,
-				request.IsMedia,
-				request.Transport,
-				target,
-				domain,
-			)
-		}
+		logMtProtoRouteAttempt(
+			request,
+			routeDirectWS,
+			"target=%s domain=%s",
+			target,
+			domain,
+		)
 
 		ws, err := c.dial(target, domain, path, 10)
 		if err != nil {
@@ -218,18 +214,14 @@ func (c *mtProtoCFProxyConnector) Connect(
 		baseDomain := candidate.Domain
 		host := cfProxyHost(wsDC, baseDomain)
 		prefix := fmt.Sprintf("[MTProto] DC%d%s cfproxy", request.DCID, mediaTag(request.IsMedia))
-		if logInfo != nil {
-			logInfo.Printf(
-				"MTProto route truth frontend=MTProto selected_backend=%s actual_backend=none fallback_used=false reason=connecting dc=%d media=%t transport=%s host=%s pool_domain=%s source=%s",
-				mtProtoCFProxyBackend,
-				request.DCID,
-				request.IsMedia,
-				request.Transport,
-				host,
-				baseDomain,
-				candidate.Source,
-			)
-		}
+		logMtProtoRouteAttempt(
+			request,
+			routeCFProxyWS,
+			"host=%s pool_domain=%s source=%s",
+			host,
+			baseDomain,
+			candidate.Source,
+		)
 
 		ws, err := c.dial(host, "/apiws", prefix)
 		if err != nil {
