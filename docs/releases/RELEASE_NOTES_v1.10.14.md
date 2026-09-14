@@ -17,7 +17,7 @@ The previous long-lived WebSocket Worker transport is not the v1.10.14 MTProto W
 
 For regular use, deploying **multiple Worker instances/domains** and adding them to the TgWsProxy Worker pool is recommended. `ROUND_ROBIN` selection remains sticky per MTProto session, so one live session stays on one Worker while independent sessions can be distributed across the pool. Per-domain quota circuit breaking can temporarily skip an exhausted Worker for new sessions.
 
-Deployment and architecture guide: [`docs/worker-deployment.md`](../worker-deployment.md).
+Deployment and architecture guide: [`docs/cloudflare-worker.md`](../cloudflare-worker.md).
 
 ## Worker transport
 
