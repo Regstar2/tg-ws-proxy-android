@@ -2,7 +2,7 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
-## 1.10.14 - Unreleased
+## 1.10.14 - 2026-09-14
 - MTProto Worker traffic now uses a fresh-HTTPS chunk relay instead of one long-lived `workers.dev` WebSocket while preserving the Telegram TCP session inside Cloudflare Durable Objects.
 - Verified upload profile: 12 KiB chunks, sliding window 3, ordered sequence acknowledgements, bounded retries, primary/global request limits and HOL hedging for the oldest unacknowledged upload.
 - Worker revision `chunk-relay-mtproto-v10` uses shared `relay-hub-v1`: multiple independent MTProto sessions share one Durable Object instance without sharing Telegram sockets, seq/ACK state, downstream queues or lifecycle state.

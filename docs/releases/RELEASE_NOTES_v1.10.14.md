@@ -1,4 +1,4 @@
-# TgWsProxy Android v1.10.14 — release candidate
+# TgWsProxy Android v1.10.14
 
 Release metadata: `versionName 1.10.14`, `versionCode 52`.
 
@@ -41,6 +41,8 @@ Pull-request CI includes native Go tests with race detection, Cloudflare Worker 
 - Fresh HTTPS requests intentionally trade raw throughput for reliability on networks where a long-lived `workers.dev` connection stalls.
 - Cloudflare Durable Objects quotas remain an operational constraint even though the shared hub and orphan cleanup substantially reduce quota pressure.
 
-## Final release gate
+## Release status
 
-Before merging the release PR to `main`, build the final release-branch APK and run one last device smoke test covering Telegram connection, messages, media upload/download, reconnect, Worker pool/failover and, where available, both Wi-Fi and mobile data. After that acceptance, close #29/#33 and mark PR #52 ready for merge.
+Final Android device smoke testing passed. Telegram connection, messages and media were verified through the Worker path. Issues #29 and #33 are closed and PR #52 has been merged.
+
+Worker transport is functional in v1.10.14, with lower throughput than direct connectivity remaining a known limitation.
