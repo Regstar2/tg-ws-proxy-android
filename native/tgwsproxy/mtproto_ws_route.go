@@ -228,7 +228,7 @@ func (c *mtProtoCFProxyConnector) Connect(
 			lastErr = err
 			kind := classifyCFFailure(err)
 			lastReason = string(kind)
-			health := cfPool.MarkFailure(baseDomain, kind, 0)
+			health := cfPool.MarkFailure(wsDC, baseDomain, kind, 0)
 			if logInfo != nil {
 				logInfo.Printf("MTProto CF domain cooldown domain=%s reason=%s until=%s",
 					baseDomain, kind, formatCooldownUntil(health.CooldownUntil))
@@ -247,7 +247,7 @@ func (c *mtProtoCFProxyConnector) Connect(
 			ws.Close()
 			lastErr = err
 			lastReason = "packet_splitter_failed"
-			cfPool.MarkFailure(baseDomain, tgwsroute.CFFailureWebSocket, 0)
+			cfPool.MarkFailure(wsDC, baseDomain, tgwsroute.CFFailureWebSocket, 0)
 			continue
 		}
 
