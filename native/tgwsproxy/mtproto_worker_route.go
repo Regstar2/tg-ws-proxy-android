@@ -86,17 +86,19 @@ func (c *mtProtoRouteConnector) Connect(
 			continue
 		}
 
-		if attempts > 0 && logInfo != nil {
-			logInfo.Printf("MTProto fallback activated selected_backend=%s next_backend=%s previous_reason=%s",
-				selectedBackend, mtProtoBackendForRoute(route), mtProtoStatusField(lastResult.Reason))
+		attemptBackend := mtProtoBackendForRoute(route)
+		fallbackUsed := attempts > 0
+		if fallbackUsed && logInfo != nil {
+			logInfo.Printf("MTProto fallback activated selected_backend=%s attempt_backend=%s previous_reason=%s",
+				selectedBackend, attemptBackend, mtProtoStatusField(lastResult.Reason))
 		}
 		attempts++
 
 		conn, result := connector.Connect(ctx, request)
 		result.SelectedBackend = selectedBackend
-		result.FallbackUsed = attempts > 1
+		result.FallbackUsed = fallbackUsed
 		if result.ActualBackend == "" && conn != nil && result.Err == nil {
-			result.ActualBackend = mtProtoBackendForRoute(route)
+			result.ActualBackend = attemptBackend
 		}
 		if result.Reason == "" && result.Err == nil {
 			result.Reason = "connected"
@@ -111,8 +113,8 @@ func (c *mtProtoRouteConnector) Connect(
 			lastErr = fmt.Errorf("MTProto route %s failed: %s", route, result.Reason)
 		}
 		if logInfo != nil {
-			logInfo.Printf("MTProto route candidate failed route=%s selected_backend=%s reason=%s error=%v",
-				route, selectedBackend, mtProtoStatusField(lastResult.Reason), lastErr)
+			logInfo.Printf("MTProto route candidate failed route=%s selected_backend=%s attempt_backend=%s fallback_used=%t reason=%s error=%v",
+				route, selectedBackend, attemptBackend, fallbackUsed, mtProtoStatusField(lastResult.Reason), lastErr)
 		}
 	}
 
@@ -330,24 +332,20 @@ func (c *mtProtoWorkerConnector) Connect(
 			request.DCID,
 			mediaTag(request.IsMedia),
 		)
-		if logInfo != nil {
-			logInfo.Printf(
-				"MTProto route truth frontend=MTProto session_id=%s signed_dc=%d selected_backend=%s actual_backend=none fallback_used=false reason=connecting dc=%d media=%t effective_dc=%d effective_media=%t transport=%s worker_host=%s worker_dst=%s destination_mode=%s effective_destination_mode=%s attempt=%d",
-				sessionID,
-				request.SignedDC,
-				mtProtoWorkerBackend,
-				request.DCID,
-				request.IsMedia,
-				effectiveDC,
-				effectiveMedia,
-				request.Transport,
-				candidate.Domain,
-				target,
-				destination.ConfiguredDestinationMode,
-				destination.EffectiveDestinationMode,
-				i+1,
-			)
-		}
+		logMtProtoRouteAttempt(
+			request,
+			routeCFWorkerWS,
+			"session_id=%s signed_dc=%d effective_dc=%d effective_media=%t worker_host=%s worker_dst=%s destination_mode=%s effective_destination_mode=%s attempt=%d",
+			sessionID,
+			request.SignedDC,
+			effectiveDC,
+			effectiveMedia,
+			candidate.Domain,
+			target,
+			destination.ConfiguredDestinationMode,
+			destination.EffectiveDestinationMode,
+			i+1,
+		)
 
 		var ws mtProtoFrameSocket
 		var err error
