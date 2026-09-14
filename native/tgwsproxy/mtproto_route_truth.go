@@ -1,6 +1,11 @@
 package main
 
-import "tg-ws-proxy/mtproxyfrontend"
+import (
+	"fmt"
+	"strings"
+
+	"tg-ws-proxy/mtproxyfrontend"
+)
 
 type mtProtoAttemptTruth struct {
 	SelectedBackend string
@@ -25,18 +30,29 @@ func mtProtoAttemptTruthForRoutes(routes []routeKind, attempt routeKind) mtProto
 
 func logMtProtoRouteAttempt(
 	request mtproxyfrontend.OutboundRequest,
-	truth mtProtoAttemptTruth,
+	attempt routeKind,
+	detailsFormat string,
+	detailsArgs ...any,
 ) {
 	if logInfo == nil {
 		return
 	}
+	truth := mtProtoAttemptTruthForRoutes(
+		mtProtoRoutesForRequest(getRuntimeSettings(), request),
+		attempt,
+	)
+	details := strings.TrimSpace(fmt.Sprintf(detailsFormat, detailsArgs...))
+	if details != "" {
+		details = " " + details
+	}
 	logInfo.Printf(
-		"MTProto route truth frontend=MTProto selected_backend=%s attempt_backend=%s actual_backend=none fallback_used=%t reason=connecting dc=%d media=%t transport=%s",
+		"MTProto route truth frontend=MTProto selected_backend=%s attempt_backend=%s actual_backend=none fallback_used=%t reason=connecting dc=%d media=%t transport=%s%s",
 		truth.SelectedBackend,
 		truth.AttemptBackend,
 		truth.FallbackUsed,
 		request.DCID,
 		request.IsMedia,
 		request.Transport,
+		details,
 	)
 }
