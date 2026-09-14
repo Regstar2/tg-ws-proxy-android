@@ -9,7 +9,8 @@
 Используйте:
 
 - `scripts/cloudflare-worker/chunk-relay-status-worker.js` — актуальный Worker entry point;
-- `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
+- `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для ручного deploy;
+- `scripts/cloudflare-worker/wrangler.jsonc` — тот же конфиг в стандартном имени для Deploy to Cloudflare.
 
 Не используйте старую Worker-конфигурацию как замену новой схеме chunk relay для MTProto Worker v1.10.14.
 
@@ -61,7 +62,32 @@ Telegram DC
 
 ## Развёртывание одного Worker
 
-Требуется Cloudflare Workers с поддержкой Durable Objects и установленный Wrangler.
+### Deploy to Cloudflare без локального Wrangler
+
+Для обычной установки используйте Deploy to Cloudflare:
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Regstar2/tg-ws-proxy-android/tree/main/scripts/cloudflare-worker)
+
+Cloudflare использует `scripts/cloudflare-worker/` как самостоятельный Worker-проект. Подкаталог содержит Worker entry point, его локальные модули и стандартный `wrangler.jsonc`, поэтому отдельный репозиторий не требуется.
+
+Во время установки Cloudflare:
+
+1. предлагает войти в Cloudflare и GitHub/GitLab;
+2. создаёт копию Worker-подпроекта в аккаунте пользователя;
+3. читает `wrangler.jsonc`;
+4. создаёт Worker;
+5. автоматически создаёт SQLite-backed Durable Object namespace для `ChunkRelaySession`;
+6. привязывает его к Worker как `CHUNK_RELAY`;
+7. выполняет deploy через Workers Builds.
+
+После deploy скопируйте выданный `*.workers.dev` домен и добавьте его в Worker-пул TgWsProxy.
+
+> [!NOTE]
+> Deploy to Cloudflare работает только с публичным исходным репозиторием. При deploy из подкаталога Cloudflare рассматривает этот подкаталог как корень создаваемого Worker-проекта.
+
+### Ручной deploy через Wrangler
+
+Если нужен ручной deploy или обновление существующего Worker, используйте Wrangler.
 
 Из корня репозитория:
 
@@ -83,6 +109,12 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
         "class_name": "ChunkRelaySession"
       }
     ]
+  },
+  "exports": {
+    "ChunkRelaySession": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
   }
 }
 ```
@@ -105,7 +137,7 @@ tgproxy-backup.<account>.workers.dev
 
 Все Worker должны использовать актуальный код v1.10.14+ и новую chunk-relay/Durable Object конфигурацию.
 
-Для отдельных deployment задайте разные Worker names. Это можно сделать отдельными копиями `wrangler.chunk-relay.jsonc` с разным полем `name` либо эквивалентной настройкой Wrangler.
+Для отдельных deployment задайте разные Worker names. Это можно сделать отдельными копиями `wrangler.chunk-relay.jsonc` с разным полем `name` либо эквивалентной настройкой Wrangler. В Deploy to Cloudflare имя Worker можно изменить на странице настройки перед запуском deployment.
 
 После развёртывания добавьте все домены в Worker-пул TgWsProxy и используйте стратегию распределения, поддерживающую несколько Worker.
 
