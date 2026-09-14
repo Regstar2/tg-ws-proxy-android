@@ -4,6 +4,21 @@ Release metadata: `versionName 1.10.14`, `versionCode 52`.
 
 This release stabilizes the MTProto Worker path investigated in Issue #29 and replaces the failing long-lived `workers.dev` WebSocket data path with a short fresh-HTTPS chunk relay.
 
+## Worker update required
+
+If you used the Worker route with an earlier TgWsProxy version, updating the Android APK alone is not enough.
+
+For v1.10.14, redeploy the Worker using the current chunk-relay code and Durable Object configuration from this repository:
+
+- `scripts/cloudflare-worker/chunk-relay-status-worker.js` — current Worker entry point;
+- `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — current `CHUNK_RELAY` / `ChunkRelaySession` Durable Object configuration.
+
+The previous long-lived WebSocket Worker transport is not the v1.10.14 MTProto Worker data path.
+
+For regular use, deploying **multiple Worker instances/domains** and adding them to the TgWsProxy Worker pool is recommended. `ROUND_ROBIN` selection remains sticky per MTProto session, so one live session stays on one Worker while independent sessions can be distributed across the pool. Per-domain quota circuit breaking can temporarily skip an exhausted Worker for new sessions.
+
+Deployment and architecture guide: [`docs/worker-deployment.md`](../worker-deployment.md).
+
 ## Worker transport
 
 - MTProto Worker traffic uses bounded fresh HTTPS requests while a Cloudflare Durable Object keeps the corresponding Telegram TCP stream alive.
