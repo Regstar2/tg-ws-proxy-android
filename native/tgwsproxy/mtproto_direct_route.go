@@ -81,16 +81,7 @@ func (c *mtProtoDirectConnector) Connect(
 	}
 
 	address := net.JoinHostPort(host, strconv.Itoa(port))
-	if logInfo != nil {
-		logInfo.Printf(
-			"MTProto route truth frontend=MTProto selected_backend=%s actual_backend=none fallback_used=false reason=connecting dc=%d media=%t transport=%s target=%s",
-			mtProtoDirectBackend,
-			request.DCID,
-			request.IsMedia,
-			request.Transport,
-			address,
-		)
-	}
+	logMtProtoRouteAttempt(request, routeTCPFallback, "target=%s", address)
 
 	conn, err := c.dialContext(ctx, "tcp", address)
 	if err != nil {
