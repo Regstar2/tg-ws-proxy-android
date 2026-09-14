@@ -7,10 +7,11 @@ import (
 	"time"
 )
 
-// Runtime route truth (v1.8.1): configured vs selected vs active, exported via GetProxyStatus.
+// Runtime route truth (v1.8.1): configured vs selected vs attempted vs active, exported via GetProxyStatus.
 var (
 	rtConfiguredMode      atomic.Value // string
 	rtSelectedRoute       atomic.Value // string
+	rtAttemptRoute        atomic.Value // string
 	rtActiveRoute         atomic.Value // string
 	rtLastSuccessRoute    atomic.Value // string
 	rtLastFailedRoute     atomic.Value // string
@@ -24,6 +25,7 @@ func initRouteRuntimeState() {
 	empty := ""
 	rtConfiguredMode.Store(empty)
 	rtSelectedRoute.Store(empty)
+	rtAttemptRoute.Store(empty)
 	rtActiveRoute.Store(empty)
 	rtLastSuccessRoute.Store(empty)
 	rtLastFailedRoute.Store(empty)
@@ -78,8 +80,10 @@ func noteRouteConnectStarted(route routeKind) {
 	if route == "" {
 		return
 	}
+	k := string(route)
+	rtAttemptRoute.Store(k)
 	touchRouteRuntimeUpdated()
-	logInfo.Printf("Route connect started: %s", route)
+	logInfo.Printf("Route connect started: %s", k)
 }
 
 func noteRouteConnectSucceeded(route routeKind) {
@@ -87,6 +91,7 @@ func noteRouteConnectSucceeded(route routeKind) {
 		return
 	}
 	k := string(route)
+	rtAttemptRoute.Store(k)
 	rtLastSuccessRoute.Store(k)
 	rtFallbackReason.Store("")
 	touchRouteRuntimeUpdated()
@@ -98,6 +103,7 @@ func noteRouteConnectFailed(route routeKind, reason string) {
 		return
 	}
 	k := string(route)
+	rtAttemptRoute.Store(k)
 	rtLastFailedRoute.Store(k)
 	touchRouteRuntimeUpdated()
 	logInfo.Printf("Route failed: %s, reason=%s", k, reason)
@@ -110,7 +116,7 @@ func noteFallbackActivated(toRoute routeKind, reason string) {
 	}
 	rtFallbackReason.Store(reason)
 	if toRoute != "" {
-		rtSelectedRoute.Store(string(toRoute))
+		rtAttemptRoute.Store(string(toRoute))
 	}
 	touchRouteRuntimeUpdated()
 	logInfo.Printf("Fallback activated: %s, reason=%s", toRoute, reason)
@@ -143,6 +149,7 @@ func appendRouteRuntimeStatusFields(parts []string) []string {
 	return append(parts,
 		"configured_mode="+escapeStatusField(routeRuntimeString(rtConfiguredMode)),
 		"selected_route="+escapeStatusField(routeRuntimeString(rtSelectedRoute)),
+		"attempt_route="+escapeStatusField(routeRuntimeString(rtAttemptRoute)),
 		"active_route_kind="+escapeStatusField(active),
 		"last_success_route="+escapeStatusField(routeRuntimeString(rtLastSuccessRoute)),
 		"last_failed_route="+escapeStatusField(routeRuntimeString(rtLastFailedRoute)),
