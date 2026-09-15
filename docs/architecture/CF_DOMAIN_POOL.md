@@ -10,17 +10,29 @@ https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-doma
 
 GitHub is an update source, not a runtime dependency. If the request fails, the app keeps the last cached upstream list. If there is no cached list yet, the built-in list remains available. A manual user domain is never overwritten by upstream refreshes.
 
-## Sources and order
+## Sources and runtime selection
 
-The selector uses:
+The selector uses three sources:
 
-1. Manual domain
+1. Manual domains
 2. Cached upstream domains
 3. Built-in domains
 
-The resulting fallback order is `Manual -> Cached upstream -> Built-in`.
+Manual domains are an absolute user override while they are eligible for the affected DC. They always stay ahead of non-manual candidates, although cooldown or an in-flight reservation can temporarily remove a manual endpoint from the current selection.
 
-Source ownership and priority remain attached to the base domain. Runtime health is endpoint-specific and is keyed by `(wsDC, baseDomain)`, matching the actual `kws<wsDC>.<baseDomain>` endpoint.
+Cached upstream and built-in candidates share one health-aware ranking. Runtime health is the primary ordering signal; cached upstream receives only a small source-score bonus rather than an absolute priority. This allows a recently successful built-in endpoint to move ahead of a degraded cached endpoint.
+
+Health scoring uses bounded historical counters together with runtime recency:
+
+- a recent success receives a temporary bonus that decays over time;
+- recent failures and consecutive failures apply a penalty;
+- failure penalties decay in stages and stop affecting ranking after six hours without another failure;
+- cached upstream receives a small bounded source bonus;
+- latency contributes a bounded penalty.
+
+Every fifth selection performs bounded exploration among non-manual candidates whose score remains reasonably close to the current leader. The least recently observed eligible candidate is temporarily promoted for that selection. This prevents a lower-priority source from being starved indefinitely without allowing a badly degraded endpoint to bypass a clearly healthier candidate. Exploration never moves a candidate ahead of manual domains.
+
+Source ownership remains attached to the base domain. Runtime health is endpoint-specific and is keyed by `(wsDC, baseDomain)`, matching the actual `kws<wsDC>.<baseDomain>` endpoint.
 
 Every selected endpoint keeps its own health model:
 
@@ -35,7 +47,7 @@ Every selected endpoint keeps its own health model:
 
 A failure or cooldown for one DC does not penalize the same base domain on another DC. `dcPreferred` remains per-DC, and snapshots include the DC so diagnostics can distinguish health for endpoints that share one base domain.
 
-If the manual domain receives `429`, `403`, `5xx`, or repeated transport failures, it can cool down for the affected DC and yield to cached upstream domains. If cached upstream domains are unavailable, built-in domains remain the emergency fallback.
+If the manual domain receives `429`, `403`, `5xx`, or repeated transport failures, it can cool down for the affected DC and yield to cached upstream or built-in domains according to their health. If cached upstream domains are unavailable or unhealthy, built-in domains remain available as runtime fallbacks.
 
 ## Update policy
 
