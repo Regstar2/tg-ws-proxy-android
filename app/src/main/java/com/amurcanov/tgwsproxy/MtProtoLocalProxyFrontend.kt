@@ -19,9 +19,15 @@ internal object DefaultLocalPortAvailabilityChecker : LocalPortAvailabilityCheck
     }
 }
 
+internal object NoOpAwgWarpRuntime : AwgWarpNativeRuntime {
+    override fun configure(config: AwgWarpRuntimeConfig): Int = 0
+    override fun reset(): Int = 0
+}
+
 internal class MtProtoLocalProxyFrontend(
     private val runtimeAdapter: MtProtoRuntimeAdapter = NativeMtProtoRuntimeAdapter(),
     private val portAvailabilityChecker: LocalPortAvailabilityChecker = DefaultLocalPortAvailabilityChecker,
+    private val awgRuntime: AwgWarpNativeRuntime = NoOpAwgWarpRuntime,
 ) : LocalProxyFrontend {
     private var state = LocalProxyFrontendState(
         type = LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
@@ -37,12 +43,27 @@ internal class MtProtoLocalProxyFrontend(
                 message = "MTProto proxy config is missing.",
             )
 
+        val awgConfig = AwgWarpRuntimeConfig.fromRuntimeTokens(config.runtimeConfig)
+        if (awgConfig.enabled && awgConfig.configPath.isBlank()) {
+            return fail(
+                errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
+                message = "AWG/WARP route is enabled but no config has been imported.",
+            )
+        }
+        if (awgRuntime.configure(awgConfig) != 0) {
+            return fail(
+                errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
+                message = "AWG/WARP route configuration was rejected by native runtime.",
+            )
+        }
+
         val mapping = MtProtoRuntimeConfigMapper.fromProxyConfig(
             config = proxyConfig,
             dcIps = config.runtimeConfig,
             verbose = config.verbose,
         )
         if (!mapping.isSuccess) {
+            awgRuntime.reset()
             val errors = mapping.validationErrors.joinToString(",") { it.name }
             return fail(
                 errorCode = mapping.errorCode ?: MtProtoRuntimeErrorCode.INVALID_CONFIG,
@@ -52,6 +73,7 @@ internal class MtProtoLocalProxyFrontend(
 
         val runtimeConfig = mapping.config!!
         if (!portAvailabilityChecker.isAvailable(runtimeConfig.host, runtimeConfig.port)) {
+            awgRuntime.reset()
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.PORT_BUSY,
                 message = "MTProto local port is busy: host=${runtimeConfig.host} port=${runtimeConfig.port}.",
@@ -63,6 +85,11 @@ internal class MtProtoLocalProxyFrontend(
             type = type,
             status = result.state.toLocalStatus(),
         )
+        if (state.status == LocalProxyFrontendStatus.FAILED ||
+            state.status == LocalProxyFrontendStatus.UNSUPPORTED
+        ) {
+            awgRuntime.reset()
+        }
         return LocalProxyFrontendStartResult(
             state = state,
             message = result.message,
@@ -72,6 +99,7 @@ internal class MtProtoLocalProxyFrontend(
 
     override fun stop(): String? {
         val result = runtimeAdapter.stop()
+        awgRuntime.reset()
         state = LocalProxyFrontendState(
             type = type,
             status = result.state.toLocalStatus(),
