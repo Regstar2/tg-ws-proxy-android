@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"strings"
 	"testing"
@@ -20,10 +22,66 @@ func TestParseAwgWarpDialTarget(t *testing.T) {
 		t.Fatal("expected UDP rejection")
 	}
 	if _, err := parseAwgWarpDialTarget("tcp", "telegram.org:443"); err == nil {
-		t.Fatal("expected hostname rejection for the initial PoC")
+		t.Fatal("expected hostname rejection for inner Telegram target")
 	}
 	if _, err := parseAwgWarpDialTarget("tcp4", "[2001:db8::1]:443"); err == nil {
 		t.Fatal("expected tcp4/IPv6 mismatch rejection")
+	}
+}
+
+func TestResolveAwgWarpEndpointKeepsIPLiteral(t *testing.T) {
+	resolver := &recordingAwgWarpResolver{err: errors.New("resolver must not be called")}
+	endpoint, err := resolveAwgWarpEndpoint(
+		context.Background(),
+		"162.159.192.1:500",
+		resolver,
+	)
+	if err != nil {
+		t.Fatalf("resolve IP-literal endpoint: %v", err)
+	}
+	if endpoint != "162.159.192.1:500" {
+		t.Fatalf("endpoint = %q", endpoint)
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("resolver calls = %d, want 0", resolver.calls)
+	}
+}
+
+func TestResolveAwgWarpEndpointResolvesHostnameAndPrefersIPv4(t *testing.T) {
+	resolver := &recordingAwgWarpResolver{
+		addresses: []netip.Addr{
+			netip.MustParseAddr("2606:4700:d0::a29f:c001"),
+			netip.MustParseAddr("162.159.192.1"),
+		},
+	}
+	endpoint, err := resolveAwgWarpEndpoint(
+		context.Background(),
+		"engage.cloudflareclient.com:500",
+		resolver,
+	)
+	if err != nil {
+		t.Fatalf("resolve hostname endpoint: %v", err)
+	}
+	if endpoint != "162.159.192.1:500" {
+		t.Fatalf("endpoint = %q", endpoint)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+	}
+	if resolver.network != "ip" || resolver.host != "engage.cloudflareclient.com" {
+		t.Fatalf("lookup = network=%q host=%q", resolver.network, resolver.host)
+	}
+}
+
+func TestResolveAwgWarpEndpointPropagatesLookupFailure(t *testing.T) {
+	resolver := &recordingAwgWarpResolver{err: errors.New("dns unavailable")}
+	_, err := resolveAwgWarpEndpoint(
+		context.Background(),
+		"engage.cloudflareclient.com:500",
+		resolver,
+	)
+	if err == nil || !strings.Contains(err.Error(), "dns unavailable") {
+		t.Fatalf("expected lookup failure, got %v", err)
 	}
 }
 
@@ -72,4 +130,26 @@ func TestParseAwgWarpDiagnosticsRejectsMalformedCounters(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected malformed counter error")
 	}
+}
+
+type recordingAwgWarpResolver struct {
+	addresses []netip.Addr
+	err       error
+	calls     int
+	network   string
+	host      string
+}
+
+func (r *recordingAwgWarpResolver) LookupNetIP(
+	_ context.Context,
+	network string,
+	host string,
+) ([]netip.Addr, error) {
+	r.calls++
+	r.network = network
+	r.host = host
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.addresses, nil
 }
