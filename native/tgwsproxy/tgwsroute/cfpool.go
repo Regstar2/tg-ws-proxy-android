@@ -21,7 +21,13 @@ const (
 
 const cachedUpstreamDNSCooldownSeconds = 6 * 60 * 60
 
+type cfDomainHealthKey struct {
+	DC     int
+	Domain string
+}
+
 type CFDomainHealth struct {
+	DC                  int
 	Domain              string
 	Source              CFDomainSource
 	SuccessCount        int
@@ -51,7 +57,7 @@ type CFDomainPool struct {
 	manual         []string
 	cachedUpstream []string
 	builtin        []string
-	health         map[string]*CFDomainHealth
+	health         map[cfDomainHealthKey]*CFDomainHealth
 	dcPreferred    map[int]string
 	cachedCursor   int
 	builtinCursor  int
@@ -65,7 +71,7 @@ func NewCFDomainPool(now func() float64) *CFDomainPool {
 		}
 	}
 	return &CFDomainPool{
-		health:      make(map[string]*CFDomainHealth),
+		health:      make(map[cfDomainHealthKey]*CFDomainHealth),
 		dcPreferred: make(map[int]string),
 		now:         now,
 	}
@@ -75,9 +81,6 @@ func (p *CFDomainPool) SetBuiltinDomains(domains []string) {
 	normalized := NormalizeCFDomains(domains)
 	p.mu.Lock()
 	p.builtin = normalized
-	for _, domain := range normalized {
-		p.ensureHealthLocked(domain, CFDomainSourceBuiltIn)
-	}
 	p.reclassifyRemovedDomainsLocked()
 	p.mu.Unlock()
 }
@@ -86,9 +89,6 @@ func (p *CFDomainPool) SetCachedUpstreamDomains(domains []string) {
 	normalized := NormalizeCachedUpstreamCFDomains(domains)
 	p.mu.Lock()
 	p.cachedUpstream = normalized
-	for _, domain := range normalized {
-		p.ensureHealthLocked(domain, CFDomainSourceCachedUpstream)
-	}
 	p.reclassifyRemovedDomainsLocked()
 	p.mu.Unlock()
 }
@@ -101,9 +101,6 @@ func (p *CFDomainPool) SetManualDomains(domains []string) []string {
 	normalized := NormalizeCFDomains(domains)
 	p.mu.Lock()
 	p.manual = normalized
-	for _, domain := range normalized {
-		p.ensureHealthLocked(domain, CFDomainSourceManual)
-	}
 	p.reclassifyRemovedDomainsLocked()
 	p.mu.Unlock()
 	return normalized
@@ -113,7 +110,7 @@ func (p *CFDomainPool) ClearManualDomain() {
 	p.SetManualDomains(nil)
 }
 
-func (p *CFDomainPool) MarkFailure(domain string, kind CFFailureKind, latencyMs int64) CFDomainHealth {
+func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, latencyMs int64) CFDomainHealth {
 	normalized, ok := NormalizeCFDomain(domain)
 	if !ok {
 		return CFDomainHealth{}
@@ -123,7 +120,7 @@ func (p *CFDomainPool) MarkFailure(domain string, kind CFFailureKind, latencyMs 
 	defer p.mu.Unlock()
 
 	source := p.sourceForLocked(normalized)
-	health := p.ensureHealthLocked(normalized, source)
+	health := p.ensureHealthLocked(dc, normalized, source)
 	now := p.now()
 	health.FailureCount++
 	health.ConsecutiveFailures++
@@ -148,7 +145,7 @@ func (p *CFDomainPool) MarkSuccess(dc int, domain string, latencyMs int64) CFDom
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	health := p.ensureHealthLocked(normalized, p.sourceForLocked(normalized))
+	health := p.ensureHealthLocked(dc, normalized, p.sourceForLocked(normalized))
 	health.SuccessCount++
 	health.ConsecutiveFailures = 0
 	health.LastSuccessAt = p.now()
@@ -169,7 +166,7 @@ func (p *CFDomainPool) ResetCooldowns() {
 	p.mu.Unlock()
 }
 
-func (p *CFDomainPool) IsCoolingDown(domain string) bool {
+func (p *CFDomainPool) IsCoolingDown(dc int, domain string) bool {
 	normalized, ok := NormalizeCFDomain(domain)
 	if !ok {
 		return false
@@ -177,7 +174,7 @@ func (p *CFDomainPool) IsCoolingDown(domain string) bool {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	health, exists := p.health[normalized]
+	health, exists := p.health[cfDomainHealthKey{DC: dc, Domain: normalized}]
 	return exists && p.now() < health.CooldownUntil
 }
 
@@ -198,7 +195,7 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		}
 		seen[domain] = struct{}{}
 
-		health := p.ensureHealthLocked(domain, source)
+		health := p.ensureHealthLocked(dc, domain, source)
 		if now < health.CooldownUntil {
 			selection.SkippedCooldown = append(selection.SkippedCooldown, *health)
 			return
@@ -256,23 +253,26 @@ func (p *CFDomainPool) Snapshot() []CFDomainHealth {
 		if out[i].Source != out[j].Source {
 			return sourcePriority(out[i].Source) < sourcePriority(out[j].Source)
 		}
-		return out[i].Domain < out[j].Domain
+		if out[i].Domain != out[j].Domain {
+			return out[i].Domain < out[j].Domain
+		}
+		return out[i].DC < out[j].DC
 	})
 	return out
 }
 
-func (p *CFDomainPool) ensureHealthLocked(domain string, source CFDomainSource) *CFDomainHealth {
-	if health, ok := p.health[domain]; ok {
-		if sourcePriority(source) < sourcePriority(health.Source) {
-			health.Source = source
-		}
+func (p *CFDomainPool) ensureHealthLocked(dc int, domain string, source CFDomainSource) *CFDomainHealth {
+	key := cfDomainHealthKey{DC: dc, Domain: domain}
+	if health, ok := p.health[key]; ok {
+		health.Source = source
 		return health
 	}
 	health := &CFDomainHealth{
+		DC:     dc,
 		Domain: domain,
 		Source: source,
 	}
-	p.health[domain] = health
+	p.health[key] = health
 	return health
 }
 
@@ -309,16 +309,16 @@ func (p *CFDomainPool) rotatedBuiltinsLocked() []string {
 }
 
 func (p *CFDomainPool) reclassifyRemovedDomainsLocked() {
-	for domain, health := range p.health {
+	for key, health := range p.health {
 		switch {
-		case containsDomain(p.manual, domain):
+		case containsDomain(p.manual, key.Domain):
 			health.Source = CFDomainSourceManual
-		case containsDomain(p.cachedUpstream, domain):
+		case containsDomain(p.cachedUpstream, key.Domain):
 			health.Source = CFDomainSourceCachedUpstream
-		case containsDomain(p.builtin, domain):
+		case containsDomain(p.builtin, key.Domain):
 			health.Source = CFDomainSourceBuiltIn
 		default:
-			delete(p.health, domain)
+			delete(p.health, key)
 		}
 	}
 }

@@ -198,8 +198,8 @@ func TestCFDomainPool_ImmediateCooldownFailures(t *testing.T) {
 		now := 100.0
 		pool := NewCFDomainPool(func() float64 { return now })
 		pool.SetBuiltinDomains([]string{"pool.example"})
-		health := pool.MarkFailure("pool.example", kind, 90)
-		if !pool.IsCoolingDown("pool.example") {
+		health := pool.MarkFailure(2, "pool.example", kind, 90)
+		if !pool.IsCoolingDown(2, "pool.example") {
 			t.Fatalf("%s should mark the domain unhealthy", kind)
 		}
 		if health.CooldownUntil <= now {
@@ -211,17 +211,17 @@ func TestCFDomainPool_ImmediateCooldownFailures(t *testing.T) {
 func TestCFDomainPool_ProgressiveCooldown(t *testing.T) {
 	now := 100.0
 	pool := NewCFDomainPool(func() float64 { return now })
-	first := pool.MarkFailure("pool.example", CFFailureTimeout, 100)
+	first := pool.MarkFailure(2, "pool.example", CFFailureTimeout, 100)
 	if first.CooldownUntil-now != 30 {
 		t.Fatalf("first timeout cooldown = %.0f, want 30", first.CooldownUntil-now)
 	}
 	now = first.CooldownUntil + 1
-	second := pool.MarkFailure("pool.example", CFFailureTimeout, 100)
+	second := pool.MarkFailure(2, "pool.example", CFFailureTimeout, 100)
 	if second.CooldownUntil-now != 120 {
 		t.Fatalf("second timeout cooldown = %.0f, want 120", second.CooldownUntil-now)
 	}
 	now = second.CooldownUntil + 1
-	third := pool.MarkFailure("pool.example", CFFailureTimeout, 100)
+	third := pool.MarkFailure(2, "pool.example", CFFailureTimeout, 100)
 	if third.CooldownUntil-now != 300 {
 		t.Fatalf("third timeout cooldown = %.0f, want 300", third.CooldownUntil-now)
 	}
@@ -233,7 +233,7 @@ func TestCFDomainPool_ManualCooldownFallsBackToPool(t *testing.T) {
 	pool.SetManualDomain("manual.example")
 	pool.SetBuiltinDomains([]string{"pool-a.example", "pool-b.example"})
 
-	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
+	pool.MarkFailure(2, "manual.example", CFFailureRateLimit, 90)
 	assertCandidateSet(t, pool.SelectionForDC(2).Candidates, []string{"pool-a.example", "pool-b.example"})
 
 	now += 301
@@ -274,7 +274,7 @@ func TestCFDomainPool_ManualCooldownFallsBackToNextManualDomain(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return 100 })
 	pool.SetManualDomains([]string{"manual-a.example", "manual-b.example"})
 	pool.SetCachedUpstreamDomains([]string{"cached.example"})
-	pool.MarkFailure("manual-a.example", CFFailureRateLimit, 90)
+	pool.MarkFailure(2, "manual-a.example", CFFailureRateLimit, 90)
 
 	assertCandidates(
 		t,
@@ -290,7 +290,7 @@ func TestCFDomainPool_ManualCooldownFallsBackToCachedUpstream(t *testing.T) {
 	pool.SetCachedUpstreamDomains([]string{"cached.example"})
 	pool.SetBuiltinDomains([]string{"builtin.example"})
 
-	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
+	pool.MarkFailure(2, "manual.example", CFFailureRateLimit, 90)
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"cached.example", "builtin.example"})
 }
 
@@ -298,7 +298,7 @@ func TestCFDomainPool_CachedCooldownFallsBackToBuiltIn(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return 100 })
 	pool.SetCachedUpstreamDomains([]string{"cached.example"})
 	pool.SetBuiltinDomains([]string{"builtin.example"})
-	pool.MarkFailure("cached.example", CFFailureForbidden, 90)
+	pool.MarkFailure(2, "cached.example", CFFailureForbidden, 90)
 
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"builtin.example"})
 }
@@ -308,8 +308,8 @@ func TestCFDomainPool_AllDomainsUnhealthy(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return now })
 	pool.SetManualDomain("manual.example")
 	pool.SetBuiltinDomains([]string{"pool.example"})
-	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
-	pool.MarkFailure("pool.example", CFFailureForbidden, 90)
+	pool.MarkFailure(2, "manual.example", CFFailureRateLimit, 90)
+	pool.MarkFailure(2, "pool.example", CFFailureForbidden, 90)
 
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, nil)
 }
@@ -319,9 +319,9 @@ func TestCFDomainPool_AllSourcesCooldownUnavailable(t *testing.T) {
 	pool.SetManualDomain("manual.example")
 	pool.SetCachedUpstreamDomains([]string{"cached.example"})
 	pool.SetBuiltinDomains([]string{"builtin.example"})
-	pool.MarkFailure("manual.example", CFFailureRateLimit, 90)
-	pool.MarkFailure("cached.example", CFFailureForbidden, 90)
-	pool.MarkFailure("builtin.example", CFFailureServer, 90)
+	pool.MarkFailure(2, "manual.example", CFFailureRateLimit, 90)
+	pool.MarkFailure(2, "cached.example", CFFailureForbidden, 90)
+	pool.MarkFailure(2, "builtin.example", CFFailureServer, 90)
 
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, nil)
 }
@@ -406,7 +406,7 @@ func TestCFDomainPool_BuiltIn429MovesToNextDomain(t *testing.T) {
 	now := 100.0
 	pool := NewCFDomainPool(func() float64 { return now })
 	pool.SetBuiltinDomains([]string{"pool-a.example", "pool-b.example"})
-	pool.MarkFailure("pool-a.example", CFFailureRateLimit, 100)
+	pool.MarkFailure(2, "pool-a.example", CFFailureRateLimit, 100)
 	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"pool-b.example"})
 }
 
@@ -415,21 +415,78 @@ func TestCFDomainPool_CachedDNSFailureGetsLongCooldown(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return now })
 	pool.SetCachedUpstreamDomains([]string{"cached.example"})
 
-	health := pool.MarkFailure("cached.example", CFFailureDNS, 0)
+	health := pool.MarkFailure(2, "cached.example", CFFailureDNS, 0)
 	if got := health.CooldownUntil - now; got != cachedUpstreamDNSCooldownSeconds {
 		t.Fatalf("cached DNS cooldown = %.0f, want %.0f", got, float64(cachedUpstreamDNSCooldownSeconds))
 	}
 }
 
+func TestCFDomainPool_DC1SuccessAndDC2FailureStayIndependent(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetBuiltinDomains([]string{"shared.example", "other.example"})
+
+	pool.MarkSuccess(1, "shared.example", 40)
+	pool.MarkFailure(2, "shared.example", CFFailureRateLimit, 90)
+
+	if pool.IsCoolingDown(1, "shared.example") {
+		t.Fatal("DC1 success must not inherit DC2 cooldown")
+	}
+	if !pool.IsCoolingDown(2, "shared.example") {
+		t.Fatal("DC2 failure should cool down only the DC2 endpoint")
+	}
+
+	dc1 := pool.SelectionForDC(1).Candidates
+	if len(dc1) == 0 || dc1[0].Domain != "shared.example" {
+		t.Fatalf("DC1 preferred domain = %v, want shared.example first", dc1)
+	}
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"other.example"})
+
+	snapshot := pool.Snapshot()
+	var dc1Health, dc2Health *CFDomainHealth
+	for i := range snapshot {
+		entry := &snapshot[i]
+		if entry.Domain != "shared.example" {
+			continue
+		}
+		switch entry.DC {
+		case 1:
+			dc1Health = entry
+		case 2:
+			dc2Health = entry
+		}
+	}
+	if dc1Health == nil || dc2Health == nil {
+		t.Fatalf("snapshot should expose DC-specific health, got %v", snapshot)
+	}
+	if dc1Health.SuccessCount != 1 || dc1Health.FailureCount != 0 || dc1Health.ConsecutiveFailures != 0 {
+		t.Fatalf("unexpected DC1 health: %+v", *dc1Health)
+	}
+	if dc2Health.SuccessCount != 0 || dc2Health.FailureCount != 1 || dc2Health.ConsecutiveFailures != 1 {
+		t.Fatalf("unexpected DC2 health: %+v", *dc2Health)
+	}
+}
+
+func TestCFDomainPool_DC2CooldownDoesNotExcludeDC1Candidate(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetManualDomain("manual.example")
+	pool.SetCachedUpstreamDomains([]string{"cached.example"})
+	pool.SetBuiltinDomains([]string{"builtin.example"})
+
+	pool.MarkFailure(2, "manual.example", CFFailureForbidden, 90)
+
+	assertCandidates(t, pool.SelectionForDC(2).Candidates, []string{"cached.example", "builtin.example"})
+	assertCandidates(t, pool.SelectionForDC(1).Candidates, []string{"manual.example", "cached.example", "builtin.example"})
+}
+
 func TestCFDomainPool_ResetCooldowns(t *testing.T) {
 	pool := NewCFDomainPool(func() float64 { return 100 })
 	pool.SetManualDomain("manual.example")
-	pool.MarkFailure("manual.example", CFFailureForbidden, 100)
-	if !pool.IsCoolingDown("manual.example") {
+	pool.MarkFailure(2, "manual.example", CFFailureForbidden, 100)
+	if !pool.IsCoolingDown(2, "manual.example") {
 		t.Fatal("manual domain should be cooling down before reset")
 	}
 	pool.ResetCooldowns()
-	if pool.IsCoolingDown("manual.example") {
+	if pool.IsCoolingDown(2, "manual.example") {
 		t.Fatal("manual domain cooldown should be cleared")
 	}
 }

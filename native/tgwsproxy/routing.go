@@ -707,7 +707,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 			logInfo.Printf("[%s] DC%d%s CF proxy selected domain=%s", label, dc, mTag, baseDomain)
 			return true, reason
 		}
-		health := cfPool.MarkFailure(baseDomain, failureKind, latencyMs)
+		health := cfPool.MarkFailure(wsDC, baseDomain, failureKind, latencyMs)
 		logWarn.Printf("[%s] DC%d%s CF domain failed domain=%s reason=%s", label, dc, mTag, baseDomain, failureKind)
 		logInfo.Printf("[%s] DC%d%s CF domain cooldown domain=%s reason=%s until=%s",
 			label, dc, mTag, baseDomain, failureKind, formatCooldownUntil(health.CooldownUntil))

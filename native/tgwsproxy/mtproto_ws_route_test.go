@@ -159,7 +159,7 @@ func TestMtProtoCFProxyConnectorFastSkipsCachedAfterDNSFailure(t *testing.T) {
 			t.Fatalf("attempts=%v want %v", attempts, wantAttempts)
 		}
 	}
-	if !cfPool.IsCoolingDown("cached-a.example") {
+	if !cfPool.IsCoolingDown(2, "cached-a.example") {
 		t.Fatal("cached domain should be cooling down after DNS failure")
 	}
 }

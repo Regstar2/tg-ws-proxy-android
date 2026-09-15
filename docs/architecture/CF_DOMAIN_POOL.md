@@ -20,16 +20,22 @@ The selector uses:
 
 The resulting fallback order is `Manual -> Cached upstream -> Built-in`.
 
-Every selected domain keeps the existing health model:
+Source ownership and priority remain attached to the base domain. Runtime health is endpoint-specific and is keyed by `(wsDC, baseDomain)`, matching the actual `kws<wsDC>.<baseDomain>` endpoint.
 
+Every selected endpoint keeps its own health model:
+
+- DC;
 - source;
 - success and failure counters;
+- consecutive failure count;
 - last success and failure timestamps;
 - last failure reason;
 - cooldown deadline;
 - last latency.
 
-If the manual domain receives `429`, `403`, `5xx`, or repeated transport failures, it can cool down and yield to cached upstream domains. If cached upstream domains are unavailable, built-in domains remain the emergency fallback.
+A failure or cooldown for one DC does not penalize the same base domain on another DC. `dcPreferred` remains per-DC, and snapshots include the DC so diagnostics can distinguish health for endpoints that share one base domain.
+
+If the manual domain receives `429`, `403`, `5xx`, or repeated transport failures, it can cool down for the affected DC and yield to cached upstream domains. If cached upstream domains are unavailable, built-in domains remain the emergency fallback.
 
 ## Update policy
 
