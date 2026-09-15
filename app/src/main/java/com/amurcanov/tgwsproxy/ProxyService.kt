@@ -216,7 +216,23 @@ class ProxyService : Service() {
         config: LocalProxyFrontendConfig,
     ) {
         val wasRunning = _isRunning.value
-        val result = frontend.start(config)
+        if (!wasRunning) {
+            ProxyRuntimeState.update {
+                it.copy(serviceStatus = ProxyServiceStatus.STARTING)
+            }
+            startForegroundWithNotification()
+        }
+
+        val result = runCatching { frontend.start(config) }.getOrElse { error ->
+            LocalProxyFrontendStartResult(
+                state = LocalProxyFrontendState(
+                    type = frontend.type,
+                    status = LocalProxyFrontendStatus.FAILED,
+                ),
+                message = "Proxy frontend start failed unexpectedly (${error.javaClass.simpleName}).",
+                errorCode = "UNEXPECTED_EXCEPTION",
+            )
+        }
         logFrontendStartResult(result)
         if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
             handleFrontendStartFailure(frontend, result, wasRunning)
@@ -232,10 +248,6 @@ class ProxyService : Service() {
             config.poolSize,
             LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
         )
-        ProxyRuntimeState.update {
-            it.copy(serviceStatus = ProxyServiceStatus.STARTING)
-        }
-        startForegroundWithNotification()
         acquireWakeLock()
         speedSampler.reset()
         currentFrontend = frontend
@@ -283,6 +295,15 @@ class ProxyService : Service() {
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun stopForegroundServiceNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
         }
     }
 
@@ -344,6 +365,7 @@ class ProxyService : Service() {
             ProxyRuntimeState.update {
                 it.copy(serviceStatus = ProxyServiceStatus.ERROR)
             }
+            stopForegroundServiceNotification()
             stopSelf()
         } else {
             updateNotification()
@@ -448,12 +470,7 @@ class ProxyService : Service() {
         releaseWakeLock()
         _isRunning.value = false
         ProxyRuntimeState.reset()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForegroundServiceNotification()
         stopSelf()
     }
 

@@ -28,6 +28,7 @@ object ConnectionRuntimeConfig {
         adaptiveRouteStats: String = "",
         autoStrategy: AutoStrategy = AutoStrategy.BALANCED,
         routePolicy: NetworkRoutePolicy? = null,
+        awgWarpConfigPath: String = "",
         workerFailover: WorkerFailoverPayload? = null,
         workerDestinationMode: WorkerDestinationMode = WorkerDestinationMode.PRESERVE_ORIGINAL_DST,
         flowsealMediaFixEnabled: Boolean = false,
@@ -72,9 +73,18 @@ object ConnectionRuntimeConfig {
                 add("@route_direct_ws=${if (RouteKind.DIRECT_WS in policy.enabledRoutes) 1 else 0}")
                 add("@route_worker_ws=${if (RouteKind.WORKER_WS in policy.enabledRoutes) 1 else 0}")
                 add("@route_cf_proxy_ws=${if (RouteKind.CF_PROXY_WS in policy.enabledRoutes) 1 else 0}")
+                add("@route_awg_warp=${if (RouteKind.AWG_WARP in policy.enabledRoutes) 1 else 0}")
                 add("@route_tcp_fallback=${if (RouteKind.TCP_FALLBACK in policy.enabledRoutes) 1 else 0}")
                 add("@preferred_route=${policy.preferredRoute?.prefValue.orEmpty()}")
                 add("@route_fallback=${if (policy.allowFallback) 1 else 0}")
+            }
+            val normalizedAwgPath = awgWarpConfigPath.trim()
+            if (normalizedAwgPath.isNotBlank() &&
+                ',' !in normalizedAwgPath &&
+                '\n' !in normalizedAwgPath &&
+                '\r' !in normalizedAwgPath
+            ) {
+                add("@awg_warp_config_path=$normalizedAwgPath")
             }
             val manualDomains = CfManualDomainList.normalize(
                 if (manualCfDomains.isNotEmpty()) manualCfDomains else listOf(cfDomain)

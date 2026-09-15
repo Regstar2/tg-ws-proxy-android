@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="route_policy_awg_warp">AmneziaWG / WARP</string>
+    <string name="route_policy_awg_warp_hint">Пользовательский AWG/WARP-туннель для MTProto. Требуется импортированный файл .conf.</string>
+    <string name="awg_warp_config_title">Конфигурация AWG/WARP</string>
+    <string name="awg_warp_config_ready">Конфигурация импортирована</string>
+    <string name="awg_warp_config_missing">Конфигурация не импортирована</string>
+    <string name="awg_warp_config_import">Импортировать .conf</string>
+    <string name="awg_warp_config_remove">Удалить конфигурацию</string>
+    <string name="awg_warp_config_import_failed">Не удалось импортировать конфигурацию AWG/WARP</string>
+    <string name="awg_warp_config_mtproto_only">Текущий маршрут AWG/WARP используется только MTProto-фронтендом.</string>
+</resources>

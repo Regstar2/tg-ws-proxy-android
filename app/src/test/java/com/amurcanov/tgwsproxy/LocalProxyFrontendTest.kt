@@ -97,11 +97,57 @@ class LocalProxyFrontendTest {
         assertEquals(0, adapter.startCalls)
     }
 
-    private fun mtProtoStartConfig(config: MtProtoProxyConfig): LocalProxyFrontendConfig {
+    @Test
+    fun mtprotoExperimentalFrontend_awgNativeExceptionIsContained() {
+        val adapter = RecordingMtProtoRuntimeAdapter()
+        val awgRuntime = ThrowingAwgRuntime()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = adapter,
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+            awgRuntime = awgRuntime,
+        )
+
+        val result = frontend.start(
+            mtProtoStartConfig(
+                config = MtProtoProxyConfig.default { fixedSecret },
+                runtimeConfig = "@route_awg_warp=true,@preferred_route=awg_warp,@route_fallback=false,@awg_warp_config_path=/private/active.conf",
+            ),
+        )
+
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.INVALID_CONFIG.name, result.errorCode)
+        assertTrue(result.message.contains("IllegalStateException"))
+        assertEquals(0, adapter.startCalls)
+        assertEquals(1, awgRuntime.resetCalls)
+    }
+
+    @Test
+    fun mtprotoExperimentalFrontend_runtimeStartExceptionIsContainedAndAwgReset() {
+        val awgRuntime = RecordingAwgRuntime()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = ThrowingMtProtoRuntimeAdapter(),
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+            awgRuntime = awgRuntime,
+        )
+
+        val result = frontend.start(
+            mtProtoStartConfig(MtProtoProxyConfig.default { fixedSecret }),
+        )
+
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.START_FAILED.name, result.errorCode)
+        assertTrue(result.message.contains("IllegalStateException"))
+        assertEquals(1, awgRuntime.resetCalls)
+    }
+
+    private fun mtProtoStartConfig(
+        config: MtProtoProxyConfig,
+        runtimeConfig: String = "",
+    ): LocalProxyFrontendConfig {
         return LocalProxyFrontendConfig(
             host = config.host,
             port = config.port,
-            runtimeConfig = "",
+            runtimeConfig = runtimeConfig,
             poolSize = 4,
             verbose = 1,
             mtProtoConfig = config,
@@ -131,6 +177,40 @@ class LocalProxyFrontendTest {
         }
 
         override fun getState(): MtProtoRuntimeState = MtProtoRuntimeState.STOPPED
+    }
+
+    private class ThrowingMtProtoRuntimeAdapter : MtProtoRuntimeAdapter {
+        override fun start(config: MtProtoRuntimeConfig): MtProtoRuntimeStartResult {
+            throw IllegalStateException("native start failure")
+        }
+
+        override fun stop(): MtProtoRuntimeStopResult = MtProtoRuntimeStopResult(MtProtoRuntimeState.STOPPED)
+
+        override fun getState(): MtProtoRuntimeState = MtProtoRuntimeState.STOPPED
+    }
+
+    private class RecordingAwgRuntime : AwgWarpNativeRuntime {
+        var resetCalls = 0
+
+        override fun configure(config: AwgWarpRuntimeConfig): Int = 0
+
+        override fun reset(): Int {
+            resetCalls += 1
+            return 0
+        }
+    }
+
+    private class ThrowingAwgRuntime : AwgWarpNativeRuntime {
+        var resetCalls = 0
+
+        override fun configure(config: AwgWarpRuntimeConfig): Int {
+            throw IllegalStateException("native AWG failure")
+        }
+
+        override fun reset(): Int {
+            resetCalls += 1
+            return 0
+        }
     }
 
     private class RecordingSocks5NativeProxy : Socks5NativeProxy {

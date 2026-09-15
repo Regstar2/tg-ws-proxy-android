@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="route_policy_awg_warp">AmneziaWG / WARP</string>
+    <string name="route_policy_awg_warp_hint">Userspace AWG/WARP tunnel for MTProto. Requires an imported .conf file.</string>
+    <string name="awg_warp_config_title">AWG/WARP configuration</string>
+    <string name="awg_warp_config_ready">Configuration imported</string>
+    <string name="awg_warp_config_missing">No configuration imported</string>
+    <string name="awg_warp_config_import">Import .conf</string>
+    <string name="awg_warp_config_remove">Remove configuration</string>
+    <string name="awg_warp_config_import_failed">Could not import AWG/WARP configuration</string>
+    <string name="awg_warp_config_mtproto_only">The current AWG/WARP route is used by the MTProto frontend only.</string>
+</resources>
