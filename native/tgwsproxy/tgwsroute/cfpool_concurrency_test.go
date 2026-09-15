@@ -103,20 +103,26 @@ func TestCFDomainPool_SelectionSkipsInFlightAndKeepsAlternative(t *testing.T) {
 	}
 }
 
-func TestCFDomainPool_ReservationReleasedBySuccessFailureAndExplicitRelease(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		pool := NewCFDomainPool(func() float64 { return 100 })
-		pool.SetBuiltinDomains([]string{"success.example"})
-		if !pool.TryReserve(2, "success.example") {
-			t.Fatal("expected initial reservation")
-		}
-		pool.MarkSuccess(2, "success.example", 20)
-		if !pool.TryReserve(2, "success.example") {
-			t.Fatal("success should release reservation")
-		}
-		pool.ReleaseReservation(2, "success.example")
-	})
+func TestCFDomainPool_StaleSuccessDoesNotReleaseNewReservation(t *testing.T) {
+	pool := NewCFDomainPool(func() float64 { return 100 })
+	pool.SetBuiltinDomains([]string{"success.example"})
 
+	if !pool.TryReserve(2, "success.example") {
+		t.Fatal("expected first reservation")
+	}
+	pool.ReleaseReservation(2, "success.example")
+
+	if !pool.TryReserve(2, "success.example") {
+		t.Fatal("expected second reservation after first connection became established")
+	}
+	pool.MarkSuccess(2, "success.example", 20)
+	if pool.TryReserve(2, "success.example") {
+		t.Fatal("stale success must not release another dial's reservation")
+	}
+	pool.ReleaseReservation(2, "success.example")
+}
+
+func TestCFDomainPool_ReservationReleasedByFailureAndExplicitRelease(t *testing.T) {
 	t.Run("failure", func(t *testing.T) {
 		now := 100.0
 		pool := NewCFDomainPool(func() float64 { return now })
