@@ -21,6 +21,8 @@ interface ProxyLibrary : Library {
     fun StartMtProtoProxy(host: String, port: Int, secret: String, runtimeConfig: String, verbose: Int): Int
     fun StopMtProtoProxy(): Int
     fun GetMtProtoProxyStatus(): Pointer?
+    fun ConfigureAWGWarp(configPath: String, enabled: Int, preferred: Int, allowFallback: Int): Int
+    fun ResetAWGWarp(): Int
     fun ResetAdaptiveRouteStats(all: Int)
     fun ResetAdaptiveNetworkRouteStats(profileId: String)
     fun FreeString(p: Pointer)
@@ -76,6 +78,22 @@ object NativeProxy {
         val res = ptr.getString(0)
         ProxyLibrary.INSTANCE.FreeString(ptr)
         return res
+    }
+    fun configureAwgWarp(
+        configPath: String,
+        enabled: Boolean,
+        preferred: Boolean,
+        allowFallback: Boolean,
+    ): Int {
+        return ProxyLibrary.INSTANCE.ConfigureAWGWarp(
+            configPath,
+            if (enabled) 1 else 0,
+            if (preferred) 1 else 0,
+            if (allowFallback) 1 else 0,
+        )
+    }
+    fun resetAwgWarp(): Int {
+        return ProxyLibrary.INSTANCE.ResetAWGWarp()
     }
     fun getAdaptiveRouteStats(): String? {
         val ptr = ProxyLibrary.INSTANCE.GetAdaptiveRouteStats() ?: return null
