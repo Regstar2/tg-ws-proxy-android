@@ -27,17 +27,26 @@ type cfDomainHealthKey struct {
 }
 
 type CFDomainHealth struct {
-	DC                  int
-	Domain              string
-	Source              CFDomainSource
-	SuccessCount        int
-	FailureCount        int
+	DC     int
+	Domain string
+	Source CFDomainSource
+
+	// SuccessCount is the number of successful CF route completions recorded for this endpoint.
+	SuccessCount int
+	// FailureCount counts failure bursts that actually applied cooldown; duplicate callbacks
+	// arriving while that cooldown is active do not increment it.
+	FailureCount int
+	// ConsecutiveFailures counts sequential, cooldown-applying failure bursts since the last success.
 	ConsecutiveFailures int
 	LastSuccessAt       float64
-	LastFailureAt       float64
-	LastFailureReason   CFFailureKind
-	CooldownUntil       float64
-	LastLatencyMs       int64
+	// LastFailureAt and LastFailureReason describe the latest counted failure burst, not a
+	// duplicate callback coalesced into an already-active cooldown.
+	LastFailureAt     float64
+	LastFailureReason CFFailureKind
+	// CooldownUntil belongs to the latest counted failure burst and is never extended solely
+	// by duplicate callbacks that arrive before it expires.
+	CooldownUntil float64
+	LastLatencyMs int64
 }
 
 type CFDomainCandidate struct {
@@ -145,6 +154,11 @@ func (p *CFDomainPool) ReleaseReservation(dc int, domain string) {
 	p.mu.Unlock()
 }
 
+// MarkFailure records one penalty-bearing failure burst. Once a failure has established
+// cooldown, additional callbacks for the same endpoint are coalesced until that cooldown
+// expires. TryReserve prevents a legitimate retry from starting during that interval, so
+// those callbacks can only belong to attempts that were already in progress when the
+// first failure was recorded. A retry after cooldown expiry is counted normally.
 func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, latencyMs int64) CFDomainHealth {
 	normalized, ok := NormalizeCFDomain(domain)
 	if !ok {
@@ -158,6 +172,11 @@ func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, la
 	source := p.sourceForLocked(normalized)
 	health := p.ensureHealthLocked(dc, normalized, source)
 	now := p.now()
+	if now < health.CooldownUntil {
+		delete(p.inFlight, key)
+		return *health
+	}
+
 	health.FailureCount++
 	health.ConsecutiveFailures++
 	health.LastFailureAt = now
