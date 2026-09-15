@@ -48,8 +48,9 @@ type CFDomainCandidate struct {
 }
 
 type CFDomainSelection struct {
-	Candidates      []CFDomainCandidate
-	SkippedCooldown []CFDomainHealth
+	Candidates       []CFDomainCandidate
+	SkippedCooldown  []CFDomainHealth
+	SkippedInFlight  []CFDomainHealth
 }
 
 type CFDomainPool struct {
@@ -58,6 +59,7 @@ type CFDomainPool struct {
 	cachedUpstream []string
 	builtin        []string
 	health         map[cfDomainHealthKey]*CFDomainHealth
+	inFlight       map[cfDomainHealthKey]struct{}
 	dcPreferred    map[int]string
 	cachedCursor   int
 	builtinCursor  int
@@ -72,6 +74,7 @@ func NewCFDomainPool(now func() float64) *CFDomainPool {
 	}
 	return &CFDomainPool{
 		health:      make(map[cfDomainHealthKey]*CFDomainHealth),
+		inFlight:    make(map[cfDomainHealthKey]struct{}),
 		dcPreferred: make(map[int]string),
 		now:         now,
 	}
@@ -110,6 +113,38 @@ func (p *CFDomainPool) ClearManualDomain() {
 	p.SetManualDomains(nil)
 }
 
+func (p *CFDomainPool) TryReserve(dc int, domain string) bool {
+	normalized, ok := NormalizeCFDomain(domain)
+	if !ok {
+		return false
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	key := cfDomainHealthKey{DC: dc, Domain: normalized}
+	health := p.ensureHealthLocked(dc, normalized, p.sourceForLocked(normalized))
+	if p.now() < health.CooldownUntil {
+		return false
+	}
+	if _, exists := p.inFlight[key]; exists {
+		return false
+	}
+	p.inFlight[key] = struct{}{}
+	return true
+}
+
+func (p *CFDomainPool) ReleaseReservation(dc int, domain string) {
+	normalized, ok := NormalizeCFDomain(domain)
+	if !ok {
+		return
+	}
+
+	p.mu.Lock()
+	delete(p.inFlight, cfDomainHealthKey{DC: dc, Domain: normalized})
+	p.mu.Unlock()
+}
+
 func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, latencyMs int64) CFDomainHealth {
 	normalized, ok := NormalizeCFDomain(domain)
 	if !ok {
@@ -119,6 +154,7 @@ func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, la
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	key := cfDomainHealthKey{DC: dc, Domain: normalized}
 	source := p.sourceForLocked(normalized)
 	health := p.ensureHealthLocked(dc, normalized, source)
 	now := p.now()
@@ -133,6 +169,7 @@ func (p *CFDomainPool) MarkFailure(dc int, domain string, kind CFFailureKind, la
 	if source == CFDomainSourceCachedUpstream && IsCFDNSFailure(kind) {
 		health.CooldownUntil = now + cachedUpstreamDNSCooldownSeconds
 	}
+	delete(p.inFlight, key)
 	return *health
 }
 
@@ -145,6 +182,7 @@ func (p *CFDomainPool) MarkSuccess(dc int, domain string, latencyMs int64) CFDom
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	key := cfDomainHealthKey{DC: dc, Domain: normalized}
 	health := p.ensureHealthLocked(dc, normalized, p.sourceForLocked(normalized))
 	health.SuccessCount++
 	health.ConsecutiveFailures = 0
@@ -154,6 +192,7 @@ func (p *CFDomainPool) MarkSuccess(dc int, domain string, latencyMs int64) CFDom
 		health.LastLatencyMs = latencyMs
 	}
 	p.dcPreferred[dc] = normalized
+	delete(p.inFlight, key)
 	return *health
 }
 
@@ -195,9 +234,14 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		}
 		seen[domain] = struct{}{}
 
+		key := cfDomainHealthKey{DC: dc, Domain: domain}
 		health := p.ensureHealthLocked(dc, domain, source)
 		if now < health.CooldownUntil {
 			selection.SkippedCooldown = append(selection.SkippedCooldown, *health)
+			return
+		}
+		if _, exists := p.inFlight[key]; exists {
+			selection.SkippedInFlight = append(selection.SkippedInFlight, *health)
 			return
 		}
 		selection.Candidates = append(selection.Candidates, CFDomainCandidate{
@@ -319,7 +363,14 @@ func (p *CFDomainPool) reclassifyRemovedDomainsLocked() {
 			health.Source = CFDomainSourceBuiltIn
 		default:
 			delete(p.health, key)
+			delete(p.inFlight, key)
 		}
+	}
+	for key := range p.inFlight {
+		if containsDomain(p.manual, key.Domain) || containsDomain(p.cachedUpstream, key.Domain) || containsDomain(p.builtin, key.Domain) {
+			continue
+		}
+		delete(p.inFlight, key)
 	}
 }
 
