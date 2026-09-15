@@ -22,6 +22,7 @@ type mtProtoDialContext func(context.Context, string, string) (net.Conn, error)
 type mtProtoDirectConnector struct {
 	resolveTarget mtProtoTargetResolver
 	dialContext   mtProtoDialContext
+	now           func() time.Time
 }
 
 func newMtProtoDirectConnector() *mtProtoDirectConnector {
@@ -32,6 +33,7 @@ func newMtProtoDirectConnector() *mtProtoDirectConnector {
 	return &mtProtoDirectConnector{
 		resolveTarget: mtProtoTargetForDC,
 		dialContext:   dialer.DialContext,
+		now:           time.Now,
 	}
 }
 
@@ -81,10 +83,51 @@ func (c *mtProtoDirectConnector) Connect(
 	}
 
 	address := net.JoinHostPort(host, strconv.Itoa(port))
+	now := c.currentTime()
+	if health, coolingDown := activeDirectTCPCooldown(request.DCID, host, port, now); coolingDown {
+		remaining := health.CooldownUntil.Sub(now)
+		if remaining < 0 {
+			remaining = 0
+		}
+		if logInfo != nil {
+			logInfo.Printf(
+				"direct_tcp_cooldown dc=%d ip=%s port=%d remaining_ms=%d reason=%s consecutive_failures=%d detail=cooldown",
+				request.DCID,
+				host,
+				port,
+				remaining.Milliseconds(),
+				health.Reason,
+				health.ConsecutiveFailures,
+			)
+		}
+		result.Reason = "direct_tcp_ip_cooldown"
+		result.Err = fmt.Errorf(
+			"direct TCP target %s is on cooldown after %s",
+			address,
+			health.Reason,
+		)
+		return nil, result
+	}
+
 	logMtProtoRouteAttempt(request, routeTCPFallback, "target=%s", address)
 
 	conn, err := c.dialContext(ctx, "tcp", address)
 	if err != nil {
+		if failureReason, shouldCooldown := classifyDirectTCPFailure(err); shouldCooldown {
+			failureTime := c.currentTime()
+			health := markDirectTCPFailure(request.DCID, host, port, failureReason, failureTime)
+			if logInfo != nil {
+				logInfo.Printf(
+					"direct_tcp_failure dc=%d ip=%s port=%d reason=%s consecutive_failures=%d cooldown_ms=%d detail=circuit_open",
+					request.DCID,
+					host,
+					port,
+					failureReason,
+					health.ConsecutiveFailures,
+					health.CooldownUntil.Sub(failureTime).Milliseconds(),
+				)
+			}
+		}
 		result.Reason = "direct_tcp_connect_failed"
 		result.Err = fmt.Errorf("connect %s: %w", address, err)
 		return nil, result
@@ -96,9 +139,17 @@ func (c *mtProtoDirectConnector) Connect(
 		return nil, result
 	}
 
+	markDirectTCPSuccess(request.DCID, host, port)
 	result.ActualBackend = mtProtoDirectBackend
 	result.Reason = "connected"
 	return conn, result
+}
+
+func (c *mtProtoDirectConnector) currentTime() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 func writeFullConn(conn net.Conn, data []byte) error {
