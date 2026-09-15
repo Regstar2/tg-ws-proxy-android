@@ -18,6 +18,12 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 )
 
+const awgWarpEndpointResolveTimeout = 5 * time.Second
+
+type awgWarpEndpointResolver interface {
+	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
+}
+
 type awgWarpDialer struct {
 	device *device.Device
 	stack  *netstack.Net
@@ -55,6 +61,14 @@ func newAwgWarpDialer(cfg awgWarpConfig) (*awgWarpDialer, error) {
 		return nil, err
 	}
 
+	resolveCtx, cancelResolve := context.WithTimeout(context.Background(), awgWarpEndpointResolveTimeout)
+	resolvedEndpoint, err := resolveAwgWarpEndpoint(resolveCtx, cfg.peer.endpoint, net.DefaultResolver)
+	cancelResolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolve AWG/WARP endpoint: %w", err)
+	}
+	cfg.peer.endpoint = resolvedEndpoint
+
 	tunDevice, stack, err := netstack.CreateNetTUN(cfg.addresses, nil, cfg.mtu)
 	if err != nil {
 		return nil, fmt.Errorf("create AWG/WARP userspace netstack: %w", err)
@@ -78,6 +92,62 @@ func newAwgWarpDialer(cfg awgWarpConfig) (*awgWarpDialer, error) {
 		stack:  stack,
 		config: cfg,
 	}, nil
+}
+
+func resolveAwgWarpEndpoint(
+	ctx context.Context,
+	endpoint string,
+	resolver awgWarpEndpointResolver,
+) (string, error) {
+	if ctx == nil {
+		return "", errors.New("AWG/WARP endpoint resolution requires a non-nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(endpoint))
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "", errors.New("AWG/WARP endpoint must be host:port or [ipv6]:port")
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 {
+		return "", errors.New("AWG/WARP endpoint port must be in range 1..65535")
+	}
+
+	if literal, err := netip.ParseAddr(host); err == nil {
+		return netip.AddrPortFrom(literal, uint16(port)).String(), nil
+	}
+	if resolver == nil {
+		return "", errors.New("AWG/WARP endpoint resolver is unavailable")
+	}
+
+	addresses, err := resolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return "", fmt.Errorf("lookup endpoint host %q: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return "", fmt.Errorf("lookup endpoint host %q returned no addresses", host)
+	}
+
+	var selected netip.Addr
+	for _, address := range addresses {
+		address = address.Unmap()
+		if !address.IsValid() {
+			continue
+		}
+		if !selected.IsValid() {
+			selected = address
+		}
+		if address.Is4() {
+			selected = address
+			break
+		}
+	}
+	if !selected.IsValid() {
+		return "", fmt.Errorf("lookup endpoint host %q returned no usable IP addresses", host)
+	}
+	return netip.AddrPortFrom(selected, uint16(port)).String(), nil
 }
 
 func (d *awgWarpDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
