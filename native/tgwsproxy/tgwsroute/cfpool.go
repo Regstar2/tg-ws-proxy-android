@@ -19,7 +19,12 @@ const (
 	CFFailureWebSocket CFFailureKind = "websocket"
 )
 
-const cachedUpstreamDNSCooldownSeconds = 6 * 60 * 60
+const (
+	cachedUpstreamDNSCooldownSeconds = 6 * 60 * 60
+	cachedUpstreamSourceScoreBonus   = 4
+	cfDomainExplorationInterval      = 5
+	cfDomainExplorationMaxScoreGap   = 40
+)
 
 type cfDomainHealthKey struct {
 	DC     int
@@ -70,6 +75,7 @@ type CFDomainPool struct {
 	health         map[cfDomainHealthKey]*CFDomainHealth
 	inFlight       map[cfDomainHealthKey]struct{}
 	dcPreferred    map[int]string
+	selectionCount map[int]uint64
 	cachedCursor   int
 	builtinCursor  int
 	now            func() float64
@@ -82,10 +88,11 @@ func NewCFDomainPool(now func() float64) *CFDomainPool {
 		}
 	}
 	return &CFDomainPool{
-		health:      make(map[cfDomainHealthKey]*CFDomainHealth),
-		inFlight:    make(map[cfDomainHealthKey]struct{}),
-		dcPreferred: make(map[int]string),
-		now:         now,
+		health:         make(map[cfDomainHealthKey]*CFDomainHealth),
+		inFlight:       make(map[cfDomainHealthKey]struct{}),
+		dcPreferred:    make(map[int]string),
+		selectionCount: make(map[int]uint64),
+		now:            now,
 	}
 }
 
@@ -264,7 +271,7 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		selection.Candidates = append(selection.Candidates, CFDomainCandidate{
 			Domain: domain,
 			Source: source,
-			Score:  scoreHealth(*health),
+			Score:  scoreHealth(*health, now),
 			Health: *health,
 		})
 	}
@@ -293,11 +300,22 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 	sort.SliceStable(selection.Candidates, func(i, j int) bool {
 		left := selection.Candidates[i]
 		right := selection.Candidates[j]
-		if left.Source != right.Source {
-			return sourcePriority(left.Source) < sourcePriority(right.Source)
+		if left.Source == CFDomainSourceManual || right.Source == CFDomainSourceManual {
+			if left.Source == right.Source {
+				return false
+			}
+			return left.Source == CFDomainSourceManual
 		}
-		return left.Score > right.Score
+		if left.Score != right.Score {
+			return left.Score > right.Score
+		}
+		return sourcePriority(left.Source) < sourcePriority(right.Source)
 	})
+
+	p.selectionCount[dc]++
+	if p.selectionCount[dc]%cfDomainExplorationInterval == 0 {
+		promoteExplorationCandidate(selection.Candidates)
+	}
 
 	return selection
 }
@@ -418,18 +436,92 @@ func IsCFDNSFailure(kind CFFailureKind) bool {
 	return kind == CFFailureDNS
 }
 
-func scoreHealth(health CFDomainHealth) int {
+func scoreHealth(health CFDomainHealth, now float64) int {
 	score := 100
-	score += health.SuccessCount * 6
-	score -= health.FailureCount * 4
-	score -= health.ConsecutiveFailures * 15
+	score += minInt(health.SuccessCount, 3) * 2
+	score -= decayedFailurePenalty(health, now)
 	if health.LastLatencyMs > 0 {
-		score -= int(health.LastLatencyMs / 250)
+		score -= minInt(int(health.LastLatencyMs/250), 12)
+	}
+	if health.LastSuccessAt > 0 && health.LastSuccessAt >= health.LastFailureAt {
+		score += recentSuccessBonus(now - health.LastSuccessAt)
+	}
+	if health.Source == CFDomainSourceCachedUpstream {
+		score += cachedUpstreamSourceScoreBonus
 	}
 	if health.Source == CFDomainSourceManual {
 		score += 1000
 	}
 	return score
+}
+
+func recentSuccessBonus(ageSeconds float64) int {
+	switch {
+	case ageSeconds < 0:
+		return 0
+	case ageSeconds <= 5*60:
+		return 30
+	case ageSeconds <= 30*60:
+		return 15
+	case ageSeconds <= 2*60*60:
+		return 5
+	default:
+		return 0
+	}
+}
+
+func decayedFailurePenalty(health CFDomainHealth, now float64) int {
+	if health.LastFailureAt <= 0 {
+		return 0
+	}
+	ageSeconds := now - health.LastFailureAt
+	if ageSeconds < 0 {
+		return 0
+	}
+
+	penalty := minInt(health.FailureCount, 5)*4 + minInt(health.ConsecutiveFailures, 5)*12
+	switch {
+	case ageSeconds <= 10*60:
+		return penalty
+	case ageSeconds <= 60*60:
+		return penalty / 2
+	case ageSeconds <= 6*60*60:
+		return penalty / 4
+	default:
+		return 0
+	}
+}
+
+func promoteExplorationCandidate(candidates []CFDomainCandidate) {
+	firstNonManual := 0
+	for firstNonManual < len(candidates) && candidates[firstNonManual].Source == CFDomainSourceManual {
+		firstNonManual++
+	}
+	if len(candidates)-firstNonManual < 2 {
+		return
+	}
+
+	bestScore := candidates[firstNonManual].Score
+	explorationIndex := -1
+	oldestObservation := 0.0
+	for i := firstNonManual + 1; i < len(candidates); i++ {
+		candidate := candidates[i]
+		if bestScore-candidate.Score > cfDomainExplorationMaxScoreGap {
+			continue
+		}
+		observation := maxFloat(candidate.Health.LastSuccessAt, candidate.Health.LastFailureAt)
+		if explorationIndex == -1 || observation < oldestObservation {
+			explorationIndex = i
+			oldestObservation = observation
+		}
+	}
+	if explorationIndex == -1 {
+		return
+	}
+
+	exploration := candidates[explorationIndex]
+	copy(candidates[firstNonManual+1:explorationIndex+1], candidates[firstNonManual:explorationIndex])
+	candidates[firstNonManual] = exploration
 }
 
 func sourcePriority(source CFDomainSource) int {
@@ -450,6 +542,13 @@ func containsDomain(domains []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func maxFloat(a, b float64) float64 {
