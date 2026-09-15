@@ -65,6 +65,17 @@ object EffectiveRouteConnectionDiagnostics {
                         )
                     }
                 }
+                RouteKind.AWG_WARP -> RouteLevelProbeResult(
+                    route = route,
+                    status = RouteProbeStatus.SKIPPED,
+                    skipReason = RouteProbeSkipReason.NONE,
+                    successCount = 0,
+                    totalCount = 0,
+                    bestLatencyMs = null,
+                    averageLatencyMs = null,
+                    failedStages = listOf("native_runtime_only"),
+                    details = emptyList(),
+                )
                 RouteKind.TCP_FALLBACK -> RouteProbeResultMapper.fromConnectionReport(
                     route,
                     ConnectionDiagnostics.probeTcpFallback(),
