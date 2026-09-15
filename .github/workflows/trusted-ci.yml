@@ -31,6 +31,17 @@ jobs:
         with:
           go-version-file: native/tgwsproxy/go.mod
           cache-dependency-path: native/tgwsproxy/go.sum
+      - name: Diagnose Go module tidy
+        working-directory: native/tgwsproxy
+        run: |
+          go mod tidy
+          echo '--- go.mod after tidy ---'
+          cat go.mod
+          echo '--- go.sum after tidy ---'
+          cat go.sum
+          echo '--- git diff ---'
+          git diff -- go.mod go.sum
+          exit 1
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
