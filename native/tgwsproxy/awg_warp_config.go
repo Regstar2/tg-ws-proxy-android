@@ -296,11 +296,21 @@ func decodeWireGuardKey(value string) (string, error) {
 func parseAwgWarpAddresses(value string) ([]netip.Addr, error) {
 	var addresses []netip.Addr
 	for _, item := range strings.Split(value, ",") {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(item))
-		if err != nil {
-			return nil, fmt.Errorf("invalid Address %q", strings.TrimSpace(item))
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return nil, errors.New("Address entry must not be empty")
 		}
-		addresses = append(addresses, prefix.Addr())
+
+		if addr, err := netip.ParseAddr(item); err == nil {
+			addresses = append(addresses, addr.Unmap())
+			continue
+		}
+
+		prefix, err := netip.ParsePrefix(item)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Address %q", item)
+		}
+		addresses = append(addresses, prefix.Addr().Unmap())
 	}
 	return addresses, nil
 }
