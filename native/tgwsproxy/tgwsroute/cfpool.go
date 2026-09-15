@@ -48,9 +48,9 @@ type CFDomainCandidate struct {
 }
 
 type CFDomainSelection struct {
-	Candidates       []CFDomainCandidate
-	SkippedCooldown  []CFDomainHealth
-	SkippedInFlight  []CFDomainHealth
+	Candidates      []CFDomainCandidate
+	SkippedCooldown []CFDomainHealth
+	SkippedInFlight []CFDomainHealth
 }
 
 type CFDomainPool struct {
@@ -182,7 +182,6 @@ func (p *CFDomainPool) MarkSuccess(dc int, domain string, latencyMs int64) CFDom
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	key := cfDomainHealthKey{DC: dc, Domain: normalized}
 	health := p.ensureHealthLocked(dc, normalized, p.sourceForLocked(normalized))
 	health.SuccessCount++
 	health.ConsecutiveFailures = 0
@@ -192,7 +191,6 @@ func (p *CFDomainPool) MarkSuccess(dc int, domain string, latencyMs int64) CFDom
 		health.LastLatencyMs = latencyMs
 	}
 	p.dcPreferred[dc] = normalized
-	delete(p.inFlight, key)
 	return *health
 }
 
