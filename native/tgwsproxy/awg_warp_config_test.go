@@ -55,6 +55,25 @@ func TestParseAwgWarpConfig(t *testing.T) {
 	}
 }
 
+func TestParseAwgWarpConfigAcceptsBareInterfaceAddresses(t *testing.T) {
+	cfgText := strings.Replace(
+		awgWarpTestConfig,
+		"Address = 172.16.0.2/32, 2606:4700:110:8765::2/128",
+		"Address = 172.16.0.2, 2606:4700:110:8765::2",
+		1,
+	)
+	cfg, err := parseAwgWarpConfig(cfgText)
+	if err != nil {
+		t.Fatalf("parse config with bare addresses: %v", err)
+	}
+	if got := cfg.addresses[0].String(); got != "172.16.0.2" {
+		t.Fatalf("IPv4 address = %q", got)
+	}
+	if got := cfg.addresses[1].String(); got != "2606:4700:110:8765::2" {
+		t.Fatalf("IPv6 address = %q", got)
+	}
+}
+
 func TestParseAwgWarpConfigUsesConservativeDefaultMTU(t *testing.T) {
 	cfgText := strings.Replace(awgWarpTestConfig, "MTU = 1280\n", "", 1)
 	cfg, err := parseAwgWarpConfig(cfgText)
