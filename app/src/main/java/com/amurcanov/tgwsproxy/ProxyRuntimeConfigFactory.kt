@@ -58,6 +58,7 @@ class ProxyRuntimeConfigFactory(
             adaptiveRouteStats = adaptiveRouteStatsRepository.loadEncodedStats(),
             autoStrategy = runtimePolicy.autoStrategy,
             routePolicy = runtimePolicy,
+            awgWarpConfigPath = AwgWarpConfigStore.configPath(context).orEmpty(),
         )
         return ProxyRuntimeStartConfig(
             port = port,
