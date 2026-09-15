@@ -678,14 +678,18 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		logDebug.Printf("[%s] DC%d%s CF domain skipped domain=%s reason=cooldown until=%s",
 			label, dc, mTag, skipped.Domain, formatCooldownUntil(skipped.CooldownUntil))
 	}
+	for _, skipped := range selection.SkippedInFlight {
+		logDebug.Printf("[%s] DC%d%s CF domain skipped domain=%s reason=in_flight",
+			label, dc, mTag, skipped.Domain)
+	}
 	if len(selection.Candidates) == 0 {
 		stats.cfPoolMisses.Add(1)
 		logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
 		return false, "cfproxy_unavailable"
 	}
-	stats.cfPoolHits.Add(1)
 
 	skipCachedUpstream := false
+	attempted := false
 	for _, candidate := range selection.Candidates {
 		if skipCachedUpstream && candidate.Source == tgwsroute.CFDomainSourceCachedUpstream {
 			logDebug.Printf("[%s] DC%d%s CF cached upstream skipped domain=%s reason=previous_dns_failure",
@@ -693,13 +697,48 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 			continue
 		}
 		baseDomain := candidate.Domain
+		if !cfPool.TryReserve(wsDC, baseDomain) {
+			logDebug.Printf("[%s] DC%d%s CF domain skipped domain=%s reason=reservation_conflict",
+				label, dc, mTag, baseDomain)
+			continue
+		}
+		if !attempted {
+			stats.cfPoolHits.Add(1)
+		}
+		attempted = true
+
 		host := cfProxyHost(wsDC, baseDomain)
 		url := fmt.Sprintf("wss://%s/apiws", host)
 		logInfo.Printf("[%s] DC%d%s CF domain selector source=%s domain=%s score=%d",
 			label, dc, mTag, candidate.Source, baseDomain, candidate.Score)
 		logDebug.Printf("[%s] DC%d%s -> CF proxy %s (pool domain=%s)", label, dc, mTag, url, baseDomain)
 
-		ok, reason, failureKind, latencyMs := cfProxyDialHost(ctx, client, init, label, dc, isMedia, splitter, host, baseDomain)
+		var (
+			ok          bool
+			reason      string
+			failureKind tgwsroute.CFFailureKind
+			latencyMs   int64
+			health      tgwsroute.CFDomainHealth
+		)
+		reservationReleased := false
+		releaseReservation := func() {
+			if reservationReleased {
+				return
+			}
+			cfPool.ReleaseReservation(wsDC, baseDomain)
+			reservationReleased = true
+		}
+		func() {
+			defer releaseReservation()
+			ok, reason, failureKind, latencyMs = cfProxyDialHost(
+				ctx, client, init, label, dc, isMedia, splitter, host, baseDomain, releaseReservation,
+			)
+			if !ok {
+				health = cfPool.MarkFailure(wsDC, baseDomain, failureKind, latencyMs)
+				reservationReleased = true
+			}
+		}()
+
 		if ok {
 			cfPool.MarkSuccess(wsDC, baseDomain, latencyMs)
 			noteRouteConnectSucceeded(routeCFProxyWS)
@@ -707,7 +746,6 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 			logInfo.Printf("[%s] DC%d%s CF proxy selected domain=%s", label, dc, mTag, baseDomain)
 			return true, reason
 		}
-		health := cfPool.MarkFailure(wsDC, baseDomain, failureKind, latencyMs)
 		logWarn.Printf("[%s] DC%d%s CF domain failed domain=%s reason=%s", label, dc, mTag, baseDomain, failureKind)
 		logInfo.Printf("[%s] DC%d%s CF domain cooldown domain=%s reason=%s until=%s",
 			label, dc, mTag, baseDomain, failureKind, formatCooldownUntil(health.CooldownUntil))
@@ -719,13 +757,18 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		}
 	}
 
+	if !attempted {
+		stats.cfPoolMisses.Add(1)
+		logWarn.Printf("[%s] DC%d%s CF pool unavailable mode=%s reason=no_available_reservation", label, dc, mTag, settings.Mode)
+		return false, "cfproxy_unavailable"
+	}
 	logWarn.Printf("[%s] DC%d%s CF pool exhausted mode=%s", label, dc, mTag, settings.Mode)
 	stats.cfPoolRefillErrors.Add(1)
 	noteRouteConnectFailed(routeCFProxyWS, "cfproxy_all_domains_failed")
 	return false, "cfproxy_all_domains_failed"
 }
 
-func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter, host, baseDomain string) (bool, string, tgwsroute.CFFailureKind, int64) {
+func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter, host, baseDomain string, onConnected func()) (bool, string, tgwsroute.CFFailureKind, int64) {
 	mTag := mediaTag(isMedia)
 	started := time.Now()
 
@@ -775,6 +818,9 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 	if err := ws.Send(init); err != nil {
 		ws.Close()
 		return false, fmt.Sprintf("first_client_to_ws_write_failed: %v", err), tgwsroute.CFFailureWebSocket, elapsedMillis(started)
+	}
+	if onConnected != nil {
+		onConnected()
 	}
 
 	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter, bridgeWSMeta{route: routeCFProxyWS})
