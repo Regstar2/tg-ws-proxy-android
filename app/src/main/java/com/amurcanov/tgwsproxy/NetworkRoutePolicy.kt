@@ -4,6 +4,7 @@ enum class RouteKind(val prefValue: String) {
     DIRECT_WS("direct_ws"),
     WORKER_WS("worker_ws"),
     CF_PROXY_WS("cf_proxy_ws"),
+    AWG_WARP("awg_warp"),
     TCP_FALLBACK("tcp_fallback");
 
     companion object {
