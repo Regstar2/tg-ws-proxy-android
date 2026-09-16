@@ -162,6 +162,35 @@ class AwgWarpProfileRepository(
         )
     }
 
+    fun updateImportedProfileConfig(profileId: String, configText: String): Result<AwgWarpProfileMetadata> = runCatching {
+        validateContentSize(configText)
+        AwgWarpConfigParser.parse(configText).getOrThrow()
+
+        val directory = profileDirectory(profileId)
+        val current = loadMetadata(directory) ?: error("profile_not_found")
+        require(current.source == AwgWarpProfileSource.IMPORTED) { "profile_not_editable" }
+        val target = profileConfigFile(profileId)
+        if (!target.isFile) error("profile_not_found")
+
+        val staging = createStagingConfig(configText).getOrThrow()
+        try {
+            if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
+                error("profile_config_invalid")
+            }
+        } finally {
+            removeStagingConfig(staging)
+        }
+
+        atomicWrite(target, configText.toByteArray(Charsets.UTF_8))
+        val updated = current.copy(
+            health = AwgWarpProfileHealth.NOT_CHECKED,
+            lastCheckedAtMs = null,
+            lastErrorCode = null,
+        )
+        writeMetadata(directory, updated)
+        updated
+    }
+
     fun selectProfile(profileId: String): Result<Unit> = runCatching {
         val config = profileConfigFile(profileId)
         if (!config.isFile) error("profile_not_found")
