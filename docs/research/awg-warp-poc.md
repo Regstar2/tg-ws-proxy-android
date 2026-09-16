@@ -125,6 +125,8 @@ The MTProto AWG connector logs these fields after a successful connection and ag
 AWG/WARP diagnostics event=connected|closed signed_dc=... dc=... media=... endpoint=... last_handshake=... tunnel_tx_bytes=... tunnel_rx_bytes=... app_up_bytes=... app_down_bytes=... inner_target=...
 ```
 
+Per-session diagnostic lines bind `inner_target` to the connector's own target rather than the dialer's shared last-target snapshot, so concurrent DC connections cannot overwrite each other's reported target.
+
 No private/public keys or imported config path are logged.
 
 ## Build and checks
@@ -156,32 +158,33 @@ A real Android smoke test with AWG/WARP set as preferred and route fallback disa
 - MTProto frontend reported `selected_backend=awg_warp`;
 - successful sessions reported `actual_backend=awg_warp`;
 - successful sessions reported `fallback_used=false`;
-- Telegram normal DC sessions passed application data in both directions;
-- Telegram media sessions also connected through `awg_warp` and passed application data in both directions;
-- one observed session transferred `6546` application bytes upstream and `281597` bytes downstream with `error=none`;
+- AWG handshake completed successfully; observed `last_handshake=2026-09-16T08:30:56.395333289Z`;
+- tunnel counters were non-zero and increased during use, for example from `tx=1494/rx=368` to `tx=611462/rx=266677`;
+- application counters were non-zero in both directions and increased during use, for example to `app_up_bytes=1013527` and `app_down_bytes=219977`;
+- Telegram DC targets included `149.154.175.50:443` (DC1) and `149.154.167.51:443` (DC2);
+- individual MTProto sessions closed cleanly with `error=none` and bidirectional payload, including `up_bytes=868 down_bytes=7484` on one observed DC1 session;
+- previous smoke testing also demonstrated bidirectional media traffic through `awg_warp`, including a session with `up_bytes=6546 down_bytes=281597 error=none`;
 - the previous foreground-service crash no longer reproduced;
 - no Android `VpnService`, root access, or system TUN interface was required.
 
-This proves that useful Telegram MTProto traffic can traverse the userspace AWG/WARP path without silent direct fallback.
+This proves that useful Telegram MTProto traffic can traverse the userspace AWG/WARP path without silent direct fallback and that the AWG handshake/tunnel counters advance on the real device.
 
-The original smoke build did not yet emit the AWG device handshake timestamp and tunnel-level TX/RX counters into logcat. The connector now emits those safe fields. One follow-up device smoke is required to capture that final evidence explicitly.
+One instrumentation issue was revealed by concurrent DC dials: the original per-session log read a shared `LastInnerTarget`, so two simultaneous diagnostics could display each other's target even though the route request itself used the correct DC target. The connector now captures and logs its own immutable target for each session; this is a diagnostics-only correction and does not change routing.
 
 ## Device acceptance checklist
 
 The implementation is accepted after a real Android run with a known-good local config demonstrates all of the following without logging secrets:
 
-1. AWG handshake timestamp becomes non-zero/recent.
-2. Tunnel TX and RX counters both increase.
-3. The inner target is the intended Telegram DC IP and port.
-4. A valid Telegram/MTProto exchange passes application bytes in both directions.
-5. No `VpnService` permission/dialog and no system TUN interface are involved.
-6. Starting, stopping, and starting the transport again works in one app process.
-7. With fallback disabled, successful sessions show `actual_backend=awg_warp` and `fallback_used=false`.
-
-Items 4, 5, and 7 are already demonstrated by the 2026-09-16 smoke. Items 1–3 are instrumented for the next smoke; restart lifecycle should be included in the same final acceptance run.
+1. AWG handshake timestamp becomes non-zero/recent. **Verified.**
+2. Tunnel TX and RX counters both increase. **Verified.**
+3. The inner target is the intended Telegram DC IP and port. **Transport target verified; per-session diagnostic race fixed on current head.**
+4. A valid Telegram/MTProto exchange passes application bytes in both directions. **Verified.**
+5. No `VpnService` permission/dialog and no system TUN interface are involved. **Verified.**
+6. Starting, stopping, and starting the transport again works in one app process. **Final explicit lifecycle smoke still to capture.**
+7. With fallback disabled, successful sessions show `actual_backend=awg_warp` and `fallback_used=false`. **Verified.**
 
 ## Current conclusion
 
-**REAL TRANSPORT PATH PROVEN; FINAL ACCEPTANCE EVIDENCE PENDING.**
+**GO FOR USERSPACE AWG/WARP TRANSPORT; FINAL LIFECYCLE SMOKE PENDING.**
 
-The real-device test demonstrates bidirectional Telegram and media traffic over the userspace `awg_warp` route without `VpnService`, root, system TUN, or silent fallback. The remaining acceptance step is to capture the newly exposed AWG handshake/tunnel counters and perform the start-stop-start lifecycle check on device.
+The real-device tests prove the core hypothesis: Telegram traffic can traverse a reusable userspace AmneziaWG/WARP transport on Android without `VpnService`, root, a system TUN interface, or silent direct fallback. Handshake, tunnel TX/RX, Telegram inner destinations, and bidirectional MTProto application traffic are all demonstrated. The only remaining issue-level acceptance item is an explicit proxy start → stop → start lifecycle check on the current head after the per-session diagnostics fix.
