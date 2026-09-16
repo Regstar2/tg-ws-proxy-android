@@ -39,6 +39,13 @@ func applyAdaptiveProfile(settings runtimeSettings) {
 }
 
 func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool, dc int, isMedia bool) []routeKind {
+	if exclusiveAWGWarpRouteEnabled() {
+		if logDebug != nil {
+			logDebug.Printf("Auto route scoring skipped reason=exclusive_awg_warp dc=%d media=%t", dc, isMedia)
+		}
+		return nil
+	}
+
 	base := filterRoutesByPolicy(settings, tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect), "adaptive_base")
 	base = filterWorkerRouteCooldown(base, dc, isMedia)
 	if mode != modeAuto && mode != modeDirectWithFallback {
