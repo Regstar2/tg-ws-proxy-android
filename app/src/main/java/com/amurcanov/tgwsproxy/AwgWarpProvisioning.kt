@@ -55,9 +55,11 @@ class ConsumerWarpProfileProvisioner(
         // This profile follows the current direct WireGuard registration shape used by warpscout:
         // POST only the public key, then enable WARP on the returned registration.
         private const val API_BASE_URL = "https://api.cloudflareclient.com"
+        private const val API_HOST = "api.cloudflareclient.com"
         private const val API_VERSION = "v0a4005"
         private const val REGISTER_PATH = "/$API_VERSION/reg"
-        private const val API_REACH_TIMEOUT_MS = 3_000L
+        private const val API_REACH_CALL_TIMEOUT_MS = 12_000L
+        private const val API_REACH_CONNECT_TIMEOUT_MS = 3_000L
         private const val CONNECT_TIMEOUT_MS = 10_000L
         private const val READ_TIMEOUT_MS = 15_000L
         private const val WRITE_TIMEOUT_MS = 10_000L
@@ -66,6 +68,9 @@ class ConsumerWarpProfileProvisioner(
         private const val USER_AGENT = "okhttp/3.12.1"
         private const val CLIENT_VERSION = "a-6.11-2223"
     }
+
+    @Volatile
+    private var preferredApiAddress: InetAddress? = null
 
     private val httpEvents = object : EventListener() {
         override fun dnsStart(call: Call, domainName: String) {
@@ -99,6 +104,42 @@ class ConsumerWarpProfileProvisioner(
             )
         }
 
+        override fun connectEnd(
+            call: Call,
+            inetSocketAddress: InetSocketAddress,
+            proxy: Proxy,
+            protocol: Protocol?,
+        ) {
+            if (call.request().url.host == API_HOST) {
+                preferredApiAddress = inetSocketAddress.address
+            }
+            diagnostic(
+                "WARP HTTP connect end",
+                mapOf(
+                    "op" to operation(call),
+                    "family" to if (inetSocketAddress.address is java.net.Inet6Address) "ipv6" else "ipv4",
+                    "pinned" to (call.request().url.host == API_HOST).toString(),
+                ),
+            )
+        }
+
+        override fun connectFailed(
+            call: Call,
+            inetSocketAddress: InetSocketAddress,
+            proxy: Proxy,
+            protocol: Protocol?,
+            ioe: IOException,
+        ) {
+            diagnostic(
+                "WARP HTTP connect failed",
+                mapOf(
+                    "op" to operation(call),
+                    "family" to if (inetSocketAddress.address is java.net.Inet6Address) "ipv6" else "ipv4",
+                    "cause" to safeCauseName(ioe),
+                ),
+            )
+        }
+
         override fun requestBodyEnd(call: Call, byteCount: Long) {
             diagnostic(
                 "WARP HTTP request sent",
@@ -119,21 +160,28 @@ class ConsumerWarpProfileProvisioner(
     }
 
     // Some Android/Wi-Fi combinations advertise IPv6 DNS answers while the actual IPv6 path is
-    // black-holed. A short bootstrap probe can then expire before OkHttp gets a chance to try IPv4.
-    // Preserve system DNS and IPv6 fallback, but put IPv4 answers first for this Cloudflare API only.
+    // black-holed. Preserve system DNS, prefer IPv4 initially, and pin the address that actually
+    // completed a bootstrap connection so the side-effecting registration POST does not retry.
     private val ipv4FirstDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
             val addresses = Dns.SYSTEM.lookup(hostname)
+            val preferred = preferredApiAddress.takeIf { hostname == API_HOST }
             val ipv4Count = addresses.count { it is Inet4Address }
             diagnostic(
                 "WARP HTTP dns preference",
                 mapOf(
                     "ipv4" to ipv4Count.toString(),
                     "ipv6" to (addresses.size - ipv4Count).toString(),
-                    "preferred" to if (ipv4Count > 0) "ipv4" else "system",
+                    "preferred" to if (preferred != null) "pinned" else if (ipv4Count > 0) "ipv4" else "system",
                 ),
             )
-            return addresses.sortedBy { address -> if (address is Inet4Address) 0 else 1 }
+            return addresses.sortedBy { address ->
+                when {
+                    preferred != null && address == preferred -> 0
+                    address is Inet4Address -> 1
+                    else -> 2
+                }
+            }
         }
     }
 
@@ -146,16 +194,19 @@ class ConsumerWarpProfileProvisioner(
             .connectionSpecs(listOf(ConnectionSpec.MODERN_TLS))
             .protocols(listOf(Protocol.HTTP_1_1))
             .eventListener(httpEvents)
+            // Registration is side-effecting. Do not let OkHttp replay it after an ambiguous failure.
             .retryOnConnectionFailure(false)
             .build()
     }
 
     private val reachabilityClient: OkHttpClient by lazy {
         registrationClient.newBuilder()
-            .callTimeout(API_REACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .connectTimeout(API_REACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .readTimeout(API_REACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .writeTimeout(API_REACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .callTimeout(API_REACH_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .connectTimeout(API_REACH_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(API_REACH_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(API_REACH_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            // GET / is side-effect free, so it may safely fail over across the DNS route set.
+            .retryOnConnectionFailure(true)
             .build()
     }
 
@@ -204,13 +255,16 @@ class ConsumerWarpProfileProvisioner(
                 reachabilityClient.newCall(request).execute().use { response ->
                     diagnostic(
                         "WARP API reachability response",
-                        mapOf("status" to response.code.toString()),
+                        mapOf(
+                            "status" to response.code.toString(),
+                            "preferred_address" to if (preferredApiAddress != null) "pinned" else "none",
+                        ),
                     )
                 }
             }
         } catch (e: IOException) {
-            // This is only a fast hint. A 3-second probe can expire on one address before OkHttp
-            // tries another resolved address, so the real registration request gets its full timeout.
+            // This is only a hint. The real registration request remains single-shot to avoid
+            // duplicate registrations if an I/O failure happens after the request has been sent.
             diagnostic(
                 "WARP API reachability probe failed",
                 mapOf("cause" to safeCauseName(e), "continuing" to "true"),
