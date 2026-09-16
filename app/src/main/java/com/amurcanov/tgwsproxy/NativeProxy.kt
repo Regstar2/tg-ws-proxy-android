@@ -3,6 +3,7 @@ package com.amurcanov.tgwsproxy
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
+import org.json.JSONObject
 
 interface ProxyLibrary : Library {
     companion object {
@@ -23,10 +24,27 @@ interface ProxyLibrary : Library {
     fun GetMtProtoProxyStatus(): Pointer?
     fun ConfigureAWGWarp(configPath: String, enabled: Int, preferred: Int, allowFallback: Int): Int
     fun ResetAWGWarp(): Int
+    fun GenerateWireGuardKeyPair(): Pointer?
+    fun ValidateAWGWarpConfig(configPath: String): Int
+    fun ProbeAWGWarpConfig(configPath: String, target: String, timeoutMillis: Long): Pointer?
     fun ResetAdaptiveRouteStats(all: Int)
     fun ResetAdaptiveNetworkRouteStats(profileId: String)
     fun FreeString(p: Pointer)
 }
+
+data class WireGuardKeyPair(
+    val privateKey: String,
+    val publicKey: String,
+)
+
+data class AwgWarpProbeResult(
+    val ok: Boolean,
+    val code: String,
+    val endpoint: String?,
+    val lastHandshakeUnix: Long,
+    val tunnelTxBytes: Long,
+    val tunnelRxBytes: Long,
+)
 
 object NativeProxy {
     fun startProxy(host: String, port: Int, dcIps: String, verbose: Int): Int {
@@ -95,6 +113,62 @@ object NativeProxy {
     fun resetAwgWarp(): Int {
         return ProxyLibrary.INSTANCE.ResetAWGWarp()
     }
+
+    fun generateWireGuardKeyPair(): Result<WireGuardKeyPair> = runCatching {
+        val ptr = ProxyLibrary.INSTANCE.GenerateWireGuardKeyPair()
+            ?: error("native key generation returned no result")
+        val payload = try {
+            ptr.getString(0)
+        } finally {
+            ProxyLibrary.INSTANCE.FreeString(ptr)
+        }
+        val json = JSONObject(payload)
+        if (!json.optBoolean("ok", false)) {
+            error(json.optString("code", "key_generation_failed"))
+        }
+        val privateKey = json.getString("private_key")
+        val publicKey = json.getString("public_key")
+        require(privateKey.isNotBlank() && publicKey.isNotBlank()) {
+            "native key generation returned an incomplete key pair"
+        }
+        WireGuardKeyPair(privateKey = privateKey, publicKey = publicKey)
+    }
+
+    fun validateAwgWarpConfig(configPath: String): Boolean {
+        if (configPath.isBlank()) return false
+        return ProxyLibrary.INSTANCE.ValidateAWGWarpConfig(configPath) == 0
+    }
+
+    fun probeAwgWarpConfig(
+        configPath: String,
+        target: String,
+        timeoutMillis: Long = 12_000L,
+    ): AwgWarpProbeResult {
+        if (configPath.isBlank()) {
+            return AwgWarpProbeResult(false, "config_path_empty", null, 0L, 0L, 0L)
+        }
+        val ptr = ProxyLibrary.INSTANCE.ProbeAWGWarpConfig(configPath, target, timeoutMillis)
+            ?: return AwgWarpProbeResult(false, "native_probe_empty", null, 0L, 0L, 0L)
+        val payload = try {
+            ptr.getString(0)
+        } finally {
+            ProxyLibrary.INSTANCE.FreeString(ptr)
+        }
+        return runCatching {
+            val json = JSONObject(payload)
+            AwgWarpProbeResult(
+                ok = json.optBoolean("ok", false),
+                code = json.optString("code", "unknown"),
+                endpoint = json.optString("endpoint").takeIf { it.isNotBlank() },
+                lastHandshakeUnix = json.optLong("last_handshake_unix", 0L),
+                tunnelTxBytes = json.optLong("tunnel_tx_bytes", 0L),
+                tunnelRxBytes = json.optLong("tunnel_rx_bytes", 0L),
+            )
+        }.getOrElse {
+            AwgWarpProbeResult(false, "native_probe_parse_failed", null, 0L, 0L, 0L)
+        }
+    }
+
     fun getAdaptiveRouteStats(): String? {
         val ptr = ProxyLibrary.INSTANCE.GetAdaptiveRouteStats() ?: return null
         val res = ptr.getString(0)
