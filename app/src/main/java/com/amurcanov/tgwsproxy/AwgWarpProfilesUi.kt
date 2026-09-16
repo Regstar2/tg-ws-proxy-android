@@ -543,6 +543,14 @@ fun AwgWarpProfileDetailsPage(
                     }
                     Text(stringResource(R.string.awg_warp_check_profile))
                 }
+                if (profile.metadata.source == AwgWarpProfileSource.IMPORTED) {
+                    AwgWarpImportedConfigEditor(
+                        profileId = profileId,
+                        isProxyRunning = isProxyRunning,
+                        onSaved = { refresh() },
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
         }
 
