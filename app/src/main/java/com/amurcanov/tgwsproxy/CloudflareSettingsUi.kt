@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -63,6 +64,9 @@ enum class CloudflareSettingsPage {
     WORKER_POOL,
     PROXY_DOMAINS,
     DOMAIN_LIST,
+    AWG_WARP_PROFILES,
+    AWG_WARP_CREATE,
+    AWG_WARP_PROFILE_DETAILS,
 }
 
 private enum class CfDomainListFilter {
@@ -152,6 +156,7 @@ fun CloudflareSettingsScreen(
     val lastUpdateLabel = remember(upstreamState.lastSuccessfulUpdateAtMs) {
         formatCfTimestamp(context, upstreamState.lastSuccessfulUpdateAtMs)
     }
+    var selectedAwgProfileId by rememberSaveable { mutableStateOf<String?>(null) }
 
     when (page) {
         CloudflareSettingsPage.OVERVIEW -> {
@@ -171,6 +176,7 @@ fun CloudflareSettingsScreen(
                 isDiagRunning = isDiagRunning,
                 onOpenWorkerPool = { onPageChange(CloudflareSettingsPage.WORKER_POOL) },
                 onOpenProxyDomains = { onPageChange(CloudflareSettingsPage.PROXY_DOMAINS) },
+                onOpenAwgWarp = { onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILES) },
                 onTestCfDomains = onTestCfDomains,
                 onOpenWorkerHelp = onOpenWorkerHelp,
                 overviewFooter = overviewFooter,
@@ -259,6 +265,58 @@ fun CloudflareSettingsScreen(
                 CfDomainListScreen(rows = cfDomainRows)
             }
         }
+        CloudflareSettingsPage.AWG_WARP_PROFILES -> {
+            CloudflareSubpageScaffold(
+                titleRes = R.string.awg_warp_profiles_title,
+                onBack = { onPageChange(CloudflareSettingsPage.OVERVIEW) },
+                modifier = modifier,
+            ) {
+                AwgWarpProfilesPage(
+                    isProxyRunning = isProxyRunning,
+                    onCreate = { onPageChange(CloudflareSettingsPage.AWG_WARP_CREATE) },
+                    onOpenDetails = { profileId ->
+                        selectedAwgProfileId = profileId
+                        onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILE_DETAILS)
+                    },
+                )
+            }
+        }
+        CloudflareSettingsPage.AWG_WARP_CREATE -> {
+            CloudflareSubpageScaffold(
+                titleRes = R.string.awg_warp_create_profile,
+                onBack = { onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILES) },
+                modifier = modifier,
+            ) {
+                AwgWarpCreateProfilePage(
+                    isProxyRunning = isProxyRunning,
+                    onCreated = { profileId ->
+                        selectedAwgProfileId = profileId
+                        onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILE_DETAILS)
+                    },
+                )
+            }
+        }
+        CloudflareSettingsPage.AWG_WARP_PROFILE_DETAILS -> {
+            CloudflareSubpageScaffold(
+                titleRes = R.string.awg_warp_profiles_title,
+                onBack = { onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILES) },
+                modifier = modifier,
+            ) {
+                val profileId = selectedAwgProfileId
+                if (profileId == null) {
+                    onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILES)
+                } else {
+                    AwgWarpProfileDetailsPage(
+                        profileId = profileId,
+                        isProxyRunning = isProxyRunning,
+                        onDeleted = {
+                            selectedAwgProfileId = null
+                            onPageChange(CloudflareSettingsPage.AWG_WARP_PROFILES)
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -307,6 +365,7 @@ private fun CloudflareOverviewScreen(
     isDiagRunning: Boolean,
     onOpenWorkerPool: () -> Unit,
     onOpenProxyDomains: () -> Unit,
+    onOpenAwgWarp: () -> Unit,
     onTestCfDomains: () -> Unit,
     onOpenWorkerHelp: () -> Unit,
     overviewFooter: @Composable () -> Unit,
@@ -395,6 +454,8 @@ private fun CloudflareOverviewScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(10.dp))
+        AwgWarpOverviewCard(onOpen = onOpenAwgWarp)
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
