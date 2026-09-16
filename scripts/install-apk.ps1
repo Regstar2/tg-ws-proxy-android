@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$configLower = $Configuration.ToLowerInvariant()
 
 function Resolve-AndroidSdkRoot {
     if ($env:ANDROID_SDK_ROOT -and (Test-Path $env:ANDROID_SDK_ROOT)) {
@@ -26,17 +27,15 @@ if (-not (Test-Path $adb)) {
     throw "adb not found: $adb. Install Android SDK Platform-Tools."
 }
 
-$apk = if ($Configuration -eq "Release") {
-    Join-Path $repoRoot "app\build\outputs\apk\release\app-release.apk"
-} else {
-    Join-Path $repoRoot "app\build\outputs\apk\debug\app-debug.apk"
-}
+# Install only the artifact copied by build-apk.ps1 after a successful Gradle build.
+# app\build\outputs may contain stale files left by an interrupted or failed build.
+$apk = Join-Path $repoRoot ("artifacts\apk\{0}\tgwsproxy-{0}.apk" -f $configLower)
 
 if (-not (Test-Path $apk)) {
-    Write-Host "APK missing, building Debug..."
+    Write-Host "Validated $Configuration APK missing, building..."
     & (Join-Path $PSScriptRoot "build-apk.ps1") -Configuration $Configuration -SkipNative:$false
     if (-not (Test-Path $apk)) {
-        throw "APK still missing after build: $apk"
+        throw "APK still missing after successful build: $apk"
     }
 }
 

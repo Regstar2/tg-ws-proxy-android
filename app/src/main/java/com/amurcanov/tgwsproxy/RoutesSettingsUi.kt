@@ -1,5 +1,7 @@
 package com.amurcanov.tgwsproxy
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -454,9 +456,19 @@ fun RouteProfileEditor(
     onResetPolicy: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val normalizedPolicy = NetworkRoutePolicyEditor.normalize(policy.copy(networkType = profileType))
     val controlsEnabled = !isProxyRunning
     val routeOrder = remember { NetworkRoutePolicyEditor.routeOrder }
+    var awgConfigReady by remember { mutableStateOf(AwgWarpConfigStore.hasConfig(context)) }
+    var awgImportFailed by remember { mutableStateOf(false) }
+    val awgConfigPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val result = AwgWarpConfigStore.importConfig(context, uri)
+            awgConfigReady = result.isSuccess
+            awgImportFailed = result.isFailure
+        }
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (isProxyRunning) {
@@ -511,6 +523,66 @@ fun RouteProfileEditor(
                 },
             )
         }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.awg_warp_config_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(
+                        if (awgConfigReady) R.string.awg_warp_config_ready else R.string.awg_warp_config_missing,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (awgImportFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (awgImportFailed) {
+                    Text(
+                        stringResource(R.string.awg_warp_config_import_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Text(
+                    stringResource(R.string.awg_warp_config_mtproto_only),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = { awgConfigPicker.launch(arrayOf("*/*")) },
+                    enabled = controlsEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.awg_warp_config_import))
+                }
+                if (awgConfigReady) {
+                    TextButton(
+                        onClick = {
+                            awgConfigReady = !AwgWarpConfigStore.remove(context)
+                            awgImportFailed = false
+                        },
+                        enabled = controlsEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.awg_warp_config_remove))
+                    }
+                }
+            }
+        }
+
         RouteDropdown(
             label = stringResource(R.string.route_policy_preferred_route),
             value = normalizedPolicy.preferredRoute?.let { stringResource(it.labelRes()) }.orEmpty(),
@@ -718,6 +790,7 @@ private fun RouteKind.labelRes(): Int = when (this) {
     RouteKind.DIRECT_WS -> R.string.route_policy_direct_ws
     RouteKind.WORKER_WS -> R.string.route_policy_worker_ws
     RouteKind.CF_PROXY_WS -> R.string.route_policy_cf_proxy_ws
+    RouteKind.AWG_WARP -> R.string.route_policy_awg_warp
     RouteKind.TCP_FALLBACK -> R.string.route_policy_tcp_fallback
 }
 
@@ -725,6 +798,7 @@ private fun RouteKind.hintRes(): Int = when (this) {
     RouteKind.DIRECT_WS -> R.string.route_policy_direct_ws_hint
     RouteKind.WORKER_WS -> R.string.route_policy_worker_ws_hint
     RouteKind.CF_PROXY_WS -> R.string.route_policy_cf_proxy_ws_hint
+    RouteKind.AWG_WARP -> R.string.route_policy_awg_warp_hint
     RouteKind.TCP_FALLBACK -> R.string.route_policy_tcp_fallback_hint
 }
 

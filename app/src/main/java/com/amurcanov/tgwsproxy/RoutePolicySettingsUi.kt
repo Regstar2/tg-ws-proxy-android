@@ -350,6 +350,7 @@ private fun RouteKind.labelRes(): Int = when (this) {
     RouteKind.DIRECT_WS -> R.string.route_policy_direct_ws
     RouteKind.WORKER_WS -> R.string.route_policy_worker_ws
     RouteKind.CF_PROXY_WS -> R.string.route_policy_cf_proxy_ws
+    RouteKind.AWG_WARP -> R.string.route_policy_awg_warp
     RouteKind.TCP_FALLBACK -> R.string.route_policy_tcp_fallback
 }
 
@@ -357,6 +358,7 @@ private fun RouteKind.hintRes(): Int = when (this) {
     RouteKind.DIRECT_WS -> R.string.route_policy_direct_ws_hint
     RouteKind.WORKER_WS -> R.string.route_policy_worker_ws_hint
     RouteKind.CF_PROXY_WS -> R.string.route_policy_cf_proxy_ws_hint
+    RouteKind.AWG_WARP -> R.string.route_policy_awg_warp_hint
     RouteKind.TCP_FALLBACK -> R.string.route_policy_tcp_fallback_hint
 }
 

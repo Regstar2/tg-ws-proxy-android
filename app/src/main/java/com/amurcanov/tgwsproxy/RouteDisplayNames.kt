@@ -10,6 +10,7 @@ object RouteDisplayNames {
             "direct_ws", "direct" -> R.string.route_display_direct_ws
             "cf_worker_ws", "worker_ws", "worker" -> R.string.route_display_worker
             "cf_proxy_ws", "cf" -> R.string.route_display_cf_proxy
+            "awg_warp", "awg", "warp" -> R.string.route_policy_awg_warp
             "tcp_fallback", "tcp" -> R.string.route_display_tcp_fallback
             else -> R.string.route_display_unknown
         }

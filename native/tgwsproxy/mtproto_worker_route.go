@@ -30,6 +30,7 @@ type mtProtoRouteConnector struct {
 	directWS mtproxyfrontend.OutboundConnector
 	worker   mtproxyfrontend.OutboundConnector
 	cfProxy  mtproxyfrontend.OutboundConnector
+	awg      mtproxyfrontend.OutboundConnector
 	tcp      mtproxyfrontend.OutboundConnector
 }
 
@@ -38,6 +39,7 @@ func newMtProtoRouteConnector() *mtProtoRouteConnector {
 		directWS: newMtProtoDirectWSConnector(),
 		worker:   newMtProtoWorkerConnector(),
 		cfProxy:  newMtProtoCFProxyConnector(),
+		awg:      newMtProtoAWGWarpConnector(),
 		tcp:      newMtProtoDirectConnector(),
 	}
 }
@@ -139,6 +141,8 @@ func (c *mtProtoRouteConnector) connectorForRoute(route routeKind) mtproxyfronte
 		return c.worker
 	case routeCFProxyWS:
 		return c.cfProxy
+	case routeAWGWarp:
+		return c.awg
 	case routeTCPFallback:
 		return c.tcp
 	default:
@@ -147,7 +151,7 @@ func (c *mtProtoRouteConnector) connectorForRoute(route routeKind) mtproxyfronte
 }
 
 func mtProtoRoutesForCapability(settings runtimeSettings) []routeKind {
-	return routesForMode(settings.Mode, settings, false)
+	return withAWGWarpRoute(routesForMode(settings.Mode, settings, false))
 }
 
 func mtProtoRoutesForRequest(settings runtimeSettings, request mtproxyfrontend.OutboundRequest) []routeKind {
@@ -155,15 +159,15 @@ func mtProtoRoutesForRequest(settings runtimeSettings, request mtproxyfrontend.O
 		return mtProtoTestDCRoutes(settings)
 	}
 	if settings.Mode == modeAuto {
-		return adaptiveRoutesForMode(settings.Mode, settings, false, request.DCID, request.IsMedia)
+		return withAWGWarpRoute(adaptiveRoutesForMode(settings.Mode, settings, false, request.DCID, request.IsMedia))
 	}
-	return routesForMode(settings.Mode, settings, false)
+	return withAWGWarpRoute(routesForMode(settings.Mode, settings, false))
 }
 
 func mtProtoTestDCRoutes(settings runtimeSettings) []routeKind {
 	routes := []routeKind{routeDirectWS, routeTCPFallback}
 	if !settings.PolicyPresent {
-		return routes
+		return withAWGWarpRoute(routes)
 	}
 	filtered := make([]routeKind, 0, len(routes))
 	for _, route := range routes {
@@ -178,7 +182,7 @@ func mtProtoTestDCRoutes(settings runtimeSettings) []routeKind {
 			}
 		}
 	}
-	return filtered
+	return withAWGWarpRoute(filtered)
 }
 
 func mtProtoBackendForRoute(route routeKind) string {
@@ -189,6 +193,8 @@ func mtProtoBackendForRoute(route routeKind) string {
 		return mtProtoWorkerBackend
 	case routeCFProxyWS:
 		return mtProtoCFProxyBackend
+	case routeAWGWarp:
+		return mtProtoAWGWarpBackend
 	case routeTCPFallback:
 		return mtProtoDirectBackend
 	default:

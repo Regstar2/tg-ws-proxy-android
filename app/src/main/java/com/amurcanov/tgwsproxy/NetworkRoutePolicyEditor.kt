@@ -5,6 +5,7 @@ object NetworkRoutePolicyEditor {
         RouteKind.DIRECT_WS,
         RouteKind.WORKER_WS,
         RouteKind.CF_PROXY_WS,
+        RouteKind.AWG_WARP,
         RouteKind.TCP_FALLBACK,
     )
 

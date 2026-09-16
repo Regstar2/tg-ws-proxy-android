@@ -60,6 +60,8 @@ internal interface LocalProxyFrontend {
 internal fun localProxyFrontendFor(type: LocalProxyFrontendType): LocalProxyFrontend {
     return when (type) {
         LocalProxyFrontendType.SOCKS5 -> Socks5LocalProxyFrontend()
-        LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> MtProtoLocalProxyFrontend()
+        LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> MtProtoLocalProxyFrontend(
+            awgRuntime = NativeAwgWarpRuntime,
+        )
     }
 }
