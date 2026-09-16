@@ -123,22 +123,34 @@ func GenerateWireGuardKeyPair() *C.char {
 }
 
 //export ValidateAWGWarpConfig
-func ValidateAWGWarpConfig(configPath *C.char) C.int {
+func ValidateAWGWarpConfig(configPath *C.char) (status C.int) {
+	status = 1
+	defer func() {
+		if recover() != nil {
+			status = 1
+		}
+	}()
 	if configPath == nil {
-		return 1
+		return status
 	}
 	path := strings.TrimSpace(C.GoString(configPath))
 	if path == "" {
-		return 1
+		return status
 	}
 	if _, err := loadAwgWarpConfigFile(path); err != nil {
-		return 1
+		return status
 	}
 	return 0
 }
 
 //export ProbeAWGWarpConfig
-func ProbeAWGWarpConfig(configPath *C.char, target *C.char, timeoutMillis C.longlong) *C.char {
+func ProbeAWGWarpConfig(configPath *C.char, target *C.char, timeoutMillis C.longlong) (result *C.char) {
+	defer func() {
+		if recover() != nil {
+			result = cJSON(awgWarpProbeResult{Code: "native_probe_panic"})
+		}
+	}()
+
 	path := ""
 	if configPath != nil {
 		path = strings.TrimSpace(C.GoString(configPath))
