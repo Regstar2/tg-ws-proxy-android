@@ -91,6 +91,7 @@ fun AwgWarpOverviewCard(
     }
 }
 
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun AwgWarpProfilesPage(
     isProxyRunning: Boolean,
@@ -132,12 +133,6 @@ fun AwgWarpProfilesPage(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            stringResource(R.string.awg_warp_profiles_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
         if (isProxyRunning) {
             Text(
                 stringResource(R.string.awg_warp_action_locked),
@@ -175,15 +170,6 @@ fun AwgWarpProfilesPage(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            onClick = onCreate,
-            enabled = !isProxyRunning && !importBusy,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.awg_warp_create_profile))
-        }
-        Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
             onClick = { importLauncher.launch(arrayOf("*/*")) },
             enabled = !isProxyRunning && !importBusy,
@@ -494,7 +480,15 @@ fun AwgWarpProfileDetailsPage(
                         modifier = Modifier.weight(1f),
                     )
                     if (profile.selected) {
-                        AssistChip(onClick = {}, label = { Text(stringResource(R.string.awg_warp_selected_badge)) })
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    stringResource(R.string.awg_warp_selected_badge),
+                                    maxLines = 1,
+                                )
+                            },
+                        )
                     }
                 }
                 AwgMetricLine(stringResource(R.string.awg_warp_source), awgSourceLabel(profile.metadata.source))
@@ -524,6 +518,7 @@ fun AwgWarpProfileDetailsPage(
                     Text(
                         if (profile.selected) stringResource(R.string.awg_warp_selected_badge)
                         else stringResource(R.string.awg_warp_use_profile),
+                        maxLines = 1,
                     )
                 }
                 OutlinedButton(
@@ -647,15 +642,29 @@ private fun AwgProfileRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         profile.metadata.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
                     if (profile.selected) {
-                        Spacer(modifier = Modifier.size(6.dp))
-                        AssistChip(onClick = {}, label = { Text(stringResource(R.string.awg_warp_selected_badge)) })
+                        Spacer(modifier = Modifier.size(8.dp))
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    stringResource(R.string.awg_warp_selected_badge),
+                                    maxLines = 1,
+                                )
+                            },
+                        )
                     }
                 }
                 Text(
