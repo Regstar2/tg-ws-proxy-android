@@ -171,7 +171,7 @@ class ConsumerWarpProfileProvisioner(
             "WARP registration started",
             mapOf("api_version" to API_VERSION, "client_version" to CLIENT_VERSION),
         )
-        ensureApiReachable()
+        probeApiReachability()
         val response = registerDevice(publicKey = keyPair.publicKey)
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.FETCHING_PARAMETERS)
@@ -192,7 +192,7 @@ class ConsumerWarpProfileProvisioner(
         throw WarpProvisioningException("provisioning_failed", throwable)
     }
 
-    private suspend fun ensureApiReachable() {
+    private suspend fun probeApiReachability() {
         try {
             withContext(Dispatchers.IO) {
                 val request = Request.Builder()
@@ -209,11 +209,12 @@ class ConsumerWarpProfileProvisioner(
                 }
             }
         } catch (e: IOException) {
+            // This is only a fast hint. A 3-second probe can expire on one address before OkHttp
+            // tries another resolved address, so the real registration request gets its full timeout.
             diagnostic(
-                "WARP API unreachable",
-                mapOf("cause" to safeCauseName(e)),
+                "WARP API reachability probe failed",
+                mapOf("cause" to safeCauseName(e), "continuing" to "true"),
             )
-            throw WarpProvisioningException("registration_api_unreachable", e)
         }
     }
 
