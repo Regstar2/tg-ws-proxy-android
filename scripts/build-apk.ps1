@@ -48,17 +48,23 @@ function Resolve-AndroidSdkRoot {
 }
 
 function Remove-SyncConflictBuildArtifacts {
-    $buildDir = Join-Path $repoRoot "app\build"
-    if (-not (Test-Path $buildDir)) {
-        return
-    }
+    $artifactDirs = @(
+        (Join-Path $repoRoot "app\build"),
+        (Join-Path $repoRoot "app\src\main\jniLibs")
+    )
 
-    $conflicts = Get-ChildItem -Path $buildDir -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "*.sync-conflict-*" }
+    foreach ($artifactDir in $artifactDirs) {
+        if (-not (Test-Path $artifactDir)) {
+            continue
+        }
 
-    foreach ($conflict in $conflicts) {
-        Write-Host "Removing stale sync-conflict build artifact:" $conflict.FullName
-        Remove-Item -LiteralPath $conflict.FullName -Force
+        $conflicts = Get-ChildItem -Path $artifactDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*.sync-conflict-*" }
+
+        foreach ($conflict in $conflicts) {
+            Write-Host "Removing stale sync-conflict build artifact:" $conflict.FullName
+            Remove-Item -LiteralPath $conflict.FullName -Force
+        }
     }
 }
 
