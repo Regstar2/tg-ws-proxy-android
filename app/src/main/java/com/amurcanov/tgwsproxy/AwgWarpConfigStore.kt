@@ -57,7 +57,7 @@ class AwgWarpProfileRepository(
     fun selectedProfileId(): String? {
         if (!selectedFile.isFile) return null
         val id = runCatching { selectedFile.readText(Charsets.UTF_8).trim() }.getOrNull().orEmpty()
-        if (id.isBlank()) return null
+        if (!isValidProfileId(id)) return null
         return id.takeIf { profileConfigFile(it).isFile }
     }
 
@@ -228,7 +228,7 @@ class AwgWarpProfileRepository(
             file.inputStream().buffered().use(properties::load)
             val id = properties.getProperty("id")?.trim().orEmpty()
             val name = properties.getProperty("name")?.trim().orEmpty()
-            if (id.isBlank() || name.isBlank() || directory.name != id) return@runCatching null
+            if (!isValidProfileId(id) || name.isBlank() || directory.name != id) return@runCatching null
             AwgWarpProfileMetadata(
                 id = id,
                 name = name,
@@ -267,8 +267,12 @@ class AwgWarpProfileRepository(
         return runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
     }
 
+    private fun isValidProfileId(profileId: String): Boolean {
+        return runCatching { UUID.fromString(profileId) }.isSuccess
+    }
+
     private fun profileDirectory(profileId: String): File {
-        require(profileId.matches(Regex("[0-9a-fA-F-]{36}"))) { "invalid_profile_id" }
+        require(isValidProfileId(profileId)) { "invalid_profile_id" }
         return File(profilesRoot, profileId)
     }
 
@@ -285,7 +289,7 @@ class AwgWarpProfileRepository(
     }
 
     private fun normalizeName(name: String): String {
-        val normalized = name.trim().replace(Regex("[\\r\\n\\t]+"), " ").take(MAX_PROFILE_NAME_LENGTH)
+        val normalized = name.trim().replace(Regex("[\r\n\t]+"), " ").take(MAX_PROFILE_NAME_LENGTH)
         return normalized.ifBlank { context.getString(R.string.awg_warp_default_profile_name) }
     }
 
