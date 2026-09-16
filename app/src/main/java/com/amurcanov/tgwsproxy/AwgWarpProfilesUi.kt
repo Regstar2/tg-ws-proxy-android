@@ -760,12 +760,12 @@ private fun awgStageLabel(stage: WarpProvisioningStage): String = when (stage) {
 }
 
 private fun supportSafeError(throwable: Throwable?): String {
-    var current = throwable
-    repeat(8) {
-        if (current == null) return@repeat
-        if (current is WarpProvisioningException) return current.code
-        current = current.cause
-    }
+    val provisioning = generateSequence(throwable) { it.cause }
+        .take(8)
+        .filterIsInstance<WarpProvisioningException>()
+        .firstOrNull()
+    if (provisioning != null) return provisioning.code
+
     val safeMessage = throwable?.message?.takeIf { it.matches(Regex("[a-zA-Z0-9_.-]{1,80}")) }
     if (safeMessage != null) return safeMessage
     val safeClass = throwable?.javaClass?.simpleName?.takeIf { it.matches(Regex("[a-zA-Z0-9_.-]{1,80}")) }
