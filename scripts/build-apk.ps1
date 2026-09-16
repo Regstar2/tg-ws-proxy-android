@@ -18,6 +18,12 @@ $configLower = $Configuration.ToLowerInvariant()
 $apkOutDir = Join-Path $artifactRoot $configLower
 $gradleWrapper = Join-Path $repoRoot "gradlew.bat"
 $localProperties = Join-Path $repoRoot "local.properties"
+$sourceApk = if ($Configuration -eq "Release") {
+    Join-Path $repoRoot "app\build\outputs\apk\release\app-release.apk"
+} else {
+    Join-Path $repoRoot "app\build\outputs\apk\debug\app-debug.apk"
+}
+$destApk = Join-Path $apkOutDir ("tgwsproxy-" + $configLower + ".apk")
 
 function Resolve-JavaHome {
     if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
@@ -39,6 +45,30 @@ function Resolve-AndroidSdkRoot {
         return "C:\Android\SDK"
     }
     throw "ANDROID_SDK_ROOT is not configured and C:\\Android\\SDK was not found"
+}
+
+function Remove-SyncConflictBuildArtifacts {
+    $buildDir = Join-Path $repoRoot "app\build"
+    if (-not (Test-Path $buildDir)) {
+        return
+    }
+
+    $conflicts = Get-ChildItem -Path $buildDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "*.sync-conflict-*" }
+
+    foreach ($conflict in $conflicts) {
+        Write-Host "Removing stale sync-conflict build artifact:" $conflict.FullName
+        Remove-Item -LiteralPath $conflict.FullName -Force
+    }
+}
+
+Remove-SyncConflictBuildArtifacts
+
+# A failed build must not leave an older APK looking like a fresh result.
+foreach ($staleApk in @($sourceApk, $destApk)) {
+    if (Test-Path $staleApk) {
+        Remove-Item -LiteralPath $staleApk -Force
+    }
 }
 
 if (-not $SkipNative) {
@@ -69,18 +99,11 @@ if ($gradleExit -ne 0) {
     throw "Gradle task $task failed with exit code $gradleExit"
 }
 
-$sourceApk = if ($Configuration -eq "Release") {
-    Join-Path $repoRoot "app\build\outputs\apk\release\app-release.apk"
-} else {
-    Join-Path $repoRoot "app\build\outputs\apk\debug\app-debug.apk"
-}
-
 if (-not (Test-Path $sourceApk)) {
     throw "APK not found: $sourceApk"
 }
 
 New-Item -ItemType Directory -Force -Path $apkOutDir | Out-Null
-$destApk = Join-Path $apkOutDir ("tgwsproxy-" + $configLower + ".apk")
 Copy-Item -Force $sourceApk $destApk
 
 Write-Host "APK copied to:" $destApk
