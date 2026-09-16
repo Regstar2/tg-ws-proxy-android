@@ -8,12 +8,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionSpec
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.TlsVersion
 import org.json.JSONObject
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
 interface WarpProfileProvisioner {
@@ -37,18 +41,35 @@ class WarpProvisioningException(
 
 class ConsumerWarpProfileProvisioner(
     private val onStage: (WarpProvisioningStage) -> Unit = {},
+    private val onDiagnostic: (String, Map<String, String>) -> Unit = { _, _ -> },
 ) : WarpProfileProvisioner {
     companion object {
         // Consumer registration is intentionally isolated here because it is not a stable public API.
         private const val API_BASE_URL = "https://api.cloudflareclient.com"
         private const val API_VERSION = "v0a1922"
         private const val REGISTER_PATH = "/$API_VERSION/reg"
-        private const val CONNECT_TIMEOUT_MS = 10_000
-        private const val READ_TIMEOUT_MS = 15_000
+        private const val CONNECT_TIMEOUT_MS = 10_000L
+        private const val READ_TIMEOUT_MS = 15_000L
+        private const val WRITE_TIMEOUT_MS = 10_000L
         private const val MAX_RESPONSE_BYTES = 256 * 1024
         private const val MAX_ATTEMPTS = 3
         private const val USER_AGENT = "okhttp/3.12.1"
         private const val CLIENT_VERSION = "a-6.3-1922"
+    }
+
+    private val registrationClient: OkHttpClient by lazy {
+        val tls12Only = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+            .tlsVersions(TlsVersion.TLS_1_2)
+            .build()
+        OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .connectionSpecs(listOf(tls12Only))
+            // wgcf intentionally avoids HTTP/2 for this legacy consumer endpoint.
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .retryOnConnectionFailure(false)
+            .build()
     }
 
     override suspend fun provision(request: WarpProvisionRequest): Result<WarpProvisionedProfile> = runCatching {
@@ -59,6 +80,7 @@ class ConsumerWarpProfileProvisioner(
         }
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.REGISTERING_WARP)
+        diagnostic("WARP registration started")
         val response = registerDevice(
             publicKey = keyPair.publicKey,
             deviceModel = request.deviceModel,
@@ -68,7 +90,17 @@ class ConsumerWarpProfileProvisioner(
         normalizeRegistration(response, keyPair)
     }.recoverCatching { throwable ->
         if (throwable is CancellationException) throw throwable
-        if (throwable is WarpProvisioningException) throw throwable
+        if (throwable is WarpProvisioningException) {
+            diagnostic(
+                "WARP provisioning failed",
+                mapOf("code" to throwable.code, "cause" to safeCauseName(throwable.cause)),
+            )
+            throw throwable
+        }
+        diagnostic(
+            "WARP provisioning failed",
+            mapOf("code" to "provisioning_failed", "cause" to safeCauseName(throwable)),
+        )
         throw WarpProvisioningException("provisioning_failed", throwable)
     }
 
@@ -76,17 +108,28 @@ class ConsumerWarpProfileProvisioner(
         var lastCode = "registration_failed"
         repeat(MAX_ATTEMPTS) { index ->
             coroutineContext.ensureActive()
+            val attempt = index + 1
             try {
+                diagnostic("WARP registration attempt", mapOf("attempt" to attempt.toString()))
                 return withContext(Dispatchers.IO) {
                     performRegistration(publicKey, deviceModel)
                 }
             } catch (e: WarpProvisioningException) {
                 lastCode = e.code
+                diagnostic(
+                    "WARP registration attempt failed",
+                    mapOf("attempt" to attempt.toString(), "code" to e.code),
+                )
                 val retryable = e.code == "registration_rate_limited" || e.code == "registration_server_error"
                 if (!retryable || index == MAX_ATTEMPTS - 1) throw e
             } catch (e: IOException) {
-                lastCode = "registration_network_error"
-                if (index == MAX_ATTEMPTS - 1) throw WarpProvisioningException(lastCode, e)
+                // The request may already have reached the server. Retrying an ambiguous I/O failure can
+                // create duplicate consumer registrations, so fail deterministically and let the user retry.
+                diagnostic(
+                    "WARP registration network failure",
+                    mapOf("attempt" to attempt.toString(), "cause" to safeCauseName(e)),
+                )
+                throw WarpProvisioningException("registration_network_error", e)
             }
             delay(500L shl index)
         }
@@ -104,31 +147,27 @@ class ConsumerWarpProfileProvisioner(
             .put("type", "Android")
             .toString()
 
-        val connection = (URL(API_BASE_URL + REGISTER_PATH).openConnection() as HttpsURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            doOutput = true
-            instanceFollowRedirects = false
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("CF-Client-Version", CLIENT_VERSION)
-            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("Accept", "application/json")
-            sslSocketFactory = SSLContext.getInstance("TLSv1.2").apply {
-                init(null, null, null)
-            }.socketFactory
-        }
-        try {
-            connection.outputStream.use { output ->
-                output.write(body.toByteArray(Charsets.UTF_8))
-                output.flush()
-            }
-            val status = connection.responseCode
+        val request = Request.Builder()
+            .url(API_BASE_URL + REGISTER_PATH)
+            .header("User-Agent", USER_AGENT)
+            .header("CF-Client-Version", CLIENT_VERSION)
+            .header("Accept", "application/json")
+            .post(body.toRequestBody("application/json; charset=UTF-8".toMediaType()))
+            .build()
+
+        registrationClient.newCall(request).execute().use { response ->
+            val status = response.code
+            diagnostic("WARP registration response", mapOf("status" to status.toString()))
             if (status == 429) throw WarpProvisioningException("registration_rate_limited")
             if (status in 500..599) throw WarpProvisioningException("registration_server_error")
             if (status !in 200..299) throw WarpProvisioningException("registration_http_$status")
 
-            val bytes = connection.inputStream.use { input ->
+            val responseBody = response.body ?: throw WarpProvisioningException("registration_empty_response")
+            val declaredLength = responseBody.contentLength()
+            if (declaredLength > MAX_RESPONSE_BYTES) {
+                throw WarpProvisioningException("registration_response_too_large")
+            }
+            val bytes = responseBody.byteStream().use { input ->
                 val output = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                 var total = 0
@@ -144,8 +183,6 @@ class ConsumerWarpProfileProvisioner(
             if (bytes.isEmpty()) throw WarpProvisioningException("registration_empty_response")
             return runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }
                 .getOrElse { throw WarpProvisioningException("registration_response_invalid") }
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -174,6 +211,7 @@ class ConsumerWarpProfileProvisioner(
         if (peerPublicKey.isBlank()) throw WarpProvisioningException("registration_peer_key_empty")
         if (endpoint.isBlank()) throw WarpProvisioningException("registration_endpoint_empty")
 
+        diagnostic("WARP registration normalized")
         return WarpProvisionedProfile(
             privateKey = keyPair.privateKey,
             publicKey = keyPair.publicKey,
@@ -183,6 +221,12 @@ class ConsumerWarpProfileProvisioner(
             endpoint = endpoint,
         )
     }
+
+    private fun diagnostic(message: String, details: Map<String, String> = emptyMap()) {
+        runCatching { onDiagnostic(message, details) }
+    }
+
+    private fun safeCauseName(throwable: Throwable?): String = throwable?.javaClass?.simpleName ?: "none"
 }
 
 data class AwgWarpProfileCheckResult(
@@ -217,7 +261,12 @@ class AwgWarpProfileManager(
         name: String,
         onStage: (WarpProvisioningStage) -> Unit,
     ): Result<AwgWarpProfileMetadata> = runCatching {
-        val provider = ConsumerWarpProfileProvisioner(onStage)
+        val provider = ConsumerWarpProfileProvisioner(
+            onStage = onStage,
+            onDiagnostic = { message, details ->
+                AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
+            },
+        )
         val provisioned = provider.provision(
             WarpProvisionRequest(
                 profileName = name,
