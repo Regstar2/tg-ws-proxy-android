@@ -77,28 +77,34 @@ func (c *mtProtoAWGWarpConnector) Connect(
 
 	result.ActualBackend = mtProtoAWGWarpBackend
 	result.Reason = "connected"
-	logMtProtoAWGWarpDiagnostics("connected", request)
+	logMtProtoAWGWarpDiagnostics("connected", request, address)
 	return &mtProtoAWGWarpDiagnosticsConn{
-		Conn:    conn,
-		request: request,
+		Conn:        conn,
+		request:     request,
+		innerTarget: address,
 	}, result
 }
 
 type mtProtoAWGWarpDiagnosticsConn struct {
 	net.Conn
-	request mtproxyfrontend.OutboundRequest
-	once    sync.Once
+	request     mtproxyfrontend.OutboundRequest
+	innerTarget string
+	once        sync.Once
 }
 
 func (c *mtProtoAWGWarpDiagnosticsConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(func() {
-		logMtProtoAWGWarpDiagnostics("closed", c.request)
+		logMtProtoAWGWarpDiagnostics("closed", c.request, c.innerTarget)
 	})
 	return err
 }
 
-func logMtProtoAWGWarpDiagnostics(event string, request mtproxyfrontend.OutboundRequest) {
+func logMtProtoAWGWarpDiagnostics(
+	event string,
+	request mtproxyfrontend.OutboundRequest,
+	innerTarget string,
+) {
 	diagnostics, err := globalAWGWarpRouteRuntime.Diagnostics()
 	if err != nil {
 		if logDebug != nil {
@@ -118,7 +124,6 @@ func logMtProtoAWGWarpDiagnostics(event string, request mtproxyfrontend.Outbound
 	if !diagnostics.LastHandshakeAt.IsZero() {
 		handshake = diagnostics.LastHandshakeAt.UTC().Format(time.RFC3339Nano)
 	}
-	innerTarget := diagnostics.LastInnerTarget
 	if innerTarget == "" {
 		innerTarget = "none"
 	}
