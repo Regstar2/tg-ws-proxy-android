@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="awg_warp_edit_config">Edit .conf</string>
+    <string name="awg_warp_edit_config_title">Edit imported .conf</string>
+    <string name="awg_warp_edit_config_hint">Edit the saved WireGuard/AmneziaWG configuration directly. The text contains the private key; do not share screenshots or logs containing it.</string>
+    <string name="awg_warp_edit_config_save">Save</string>
+    <string name="awg_warp_edit_config_saved">Configuration saved. Profile status was reset to Not checked.</string>
+    <string name="awg_warp_edit_config_failed">Could not save configuration: %1$s</string>
+</resources>
