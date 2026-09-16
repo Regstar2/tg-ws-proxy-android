@@ -49,6 +49,7 @@ class WarpProvisioningException(
 class ConsumerWarpProfileProvisioner(
     private val onStage: (WarpProvisioningStage) -> Unit = {},
     private val onDiagnostic: (String, Map<String, String>) -> Unit = { _, _ -> },
+    private val relayBaseUrlProvider: () -> String? = { null },
 ) : WarpProfileProvisioner {
     companion object {
         // Consumer registration is intentionally isolated here because it is not a stable public API.
@@ -71,6 +72,9 @@ class ConsumerWarpProfileProvisioner(
 
     @Volatile
     private var preferredApiAddress: InetAddress? = null
+
+    @Volatile
+    private var directRegistrationBodySent = false
 
     private val httpEvents = object : EventListener() {
         override fun dnsStart(call: Call, domainName: String) {
@@ -141,9 +145,13 @@ class ConsumerWarpProfileProvisioner(
         }
 
         override fun requestBodyEnd(call: Call, byteCount: Long) {
+            val op = operation(call)
+            if (op == "registration" && call.request().url.host == API_HOST) {
+                directRegistrationBodySent = true
+            }
             diagnostic(
                 "WARP HTTP request sent",
-                mapOf("op" to operation(call), "bytes" to byteCount.toString()),
+                mapOf("op" to op, "bytes" to byteCount.toString()),
             )
         }
 
@@ -222,8 +230,12 @@ class ConsumerWarpProfileProvisioner(
             "WARP registration started",
             mapOf("api_version" to API_VERSION, "client_version" to CLIENT_VERSION),
         )
-        probeApiReachability()
-        val response = registerDevice(publicKey = keyPair.publicKey)
+        val response = if (probeApiReachability()) {
+            diagnostic("WARP registration transport", mapOf("mode" to "direct"))
+            registerDevice(publicKey = keyPair.publicKey)
+        } else {
+            registerDeviceViaRelay(publicKey = keyPair.publicKey)
+        }
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.FETCHING_PARAMETERS)
         normalizeRegistration(response, keyPair)
@@ -243,8 +255,8 @@ class ConsumerWarpProfileProvisioner(
         throw WarpProvisioningException("provisioning_failed", throwable)
     }
 
-    private suspend fun probeApiReachability() {
-        try {
+    private suspend fun probeApiReachability(): Boolean {
+        return try {
             withContext(Dispatchers.IO) {
                 val request = Request.Builder()
                     .url("$API_BASE_URL/")
@@ -260,15 +272,15 @@ class ConsumerWarpProfileProvisioner(
                             "preferred_address" to if (preferredApiAddress != null) "pinned" else "none",
                         ),
                     )
+                    true
                 }
             }
         } catch (e: IOException) {
-            // This is only a hint. The real registration request remains single-shot to avoid
-            // duplicate registrations if an I/O failure happens after the request has been sent.
             diagnostic(
                 "WARP API reachability probe failed",
-                mapOf("cause" to safeCauseName(e), "continuing" to "true"),
+                mapOf("cause" to safeCauseName(e), "fallback" to "relay"),
             )
+            false
         }
     }
 
@@ -278,6 +290,7 @@ class ConsumerWarpProfileProvisioner(
         repeat(MAX_ATTEMPTS) { index ->
             coroutineContext.ensureActive()
             val attempt = index + 1
+            directRegistrationBodySent = false
             try {
                 diagnostic("WARP registration attempt", mapOf("attempt" to attempt.toString()))
                 return withContext(Dispatchers.IO) {
@@ -298,13 +311,35 @@ class ConsumerWarpProfileProvisioner(
             } catch (e: IOException) {
                 diagnostic(
                     "WARP registration network failure",
-                    mapOf("attempt" to attempt.toString(), "cause" to safeCauseName(e)),
+                    mapOf(
+                        "attempt" to attempt.toString(),
+                        "cause" to safeCauseName(e),
+                        "request_sent" to directRegistrationBodySent.toString(),
+                    ),
                 )
+                if (!directRegistrationBodySent) {
+                    return registerDeviceViaRelay(publicKey)
+                }
                 throw WarpProvisioningException("registration_network_error", e)
             }
             delay(500L shl index)
         }
         throw WarpProvisioningException(lastCode)
+    }
+
+    private suspend fun registerDeviceViaRelay(publicKey: String): JSONObject {
+        val relayBaseUrl = runCatching { relayBaseUrlProvider() }
+            .getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: throw WarpProvisioningException("registration_api_unreachable_no_relay")
+
+        return withContext(Dispatchers.IO) {
+            WarpRegistrationRelayClient(
+                relayBaseUrl = relayBaseUrl,
+                onDiagnostic = onDiagnostic,
+            ).register(publicKey)
+        }
     }
 
     private fun performRegistration(publicKey: String): JSONObject {
@@ -478,6 +513,9 @@ class AwgWarpProfileManager(
             onStage = onStage,
             onDiagnostic = { message, details ->
                 AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
+            },
+            relayBaseUrlProvider = {
+                WarpRegistrationRelayResolver.resolveBaseUrl(appContext)
             },
         )
         val provisioned = provider.provision(
