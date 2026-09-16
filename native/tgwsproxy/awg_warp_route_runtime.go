@@ -122,6 +122,14 @@ func (r *awgWarpRouteRuntime) Diagnostics() (awgWarpDiagnostics, error) {
 	return dialer.Diagnostics()
 }
 
+func awgWarpOwnsRouteSelection(policy awgWarpRoutePolicy) bool {
+	return policy.Enabled && policy.Preferred && !policy.AllowFallback
+}
+
+func exclusiveAWGWarpRouteEnabled() bool {
+	return awgWarpOwnsRouteSelection(globalAWGWarpRouteRuntime.Policy())
+}
+
 func withAWGWarpRoute(routes []routeKind) []routeKind {
 	policy := globalAWGWarpRouteRuntime.Policy()
 	if !policy.Enabled {
