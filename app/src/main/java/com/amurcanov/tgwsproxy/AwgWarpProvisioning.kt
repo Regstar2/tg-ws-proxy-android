@@ -121,18 +121,20 @@ class ConsumerWarpProfileProvisioner(
     // Some Android/Wi-Fi combinations advertise IPv6 DNS answers while the actual IPv6 path is
     // black-holed. A short bootstrap probe can then expire before OkHttp gets a chance to try IPv4.
     // Preserve system DNS and IPv6 fallback, but put IPv4 answers first for this Cloudflare API only.
-    private val ipv4FirstDns = Dns { hostname ->
-        val addresses = Dns.SYSTEM.lookup(hostname)
-        val ipv4Count = addresses.count { it is Inet4Address }
-        diagnostic(
-            "WARP HTTP dns preference",
-            mapOf(
-                "ipv4" to ipv4Count.toString(),
-                "ipv6" to (addresses.size - ipv4Count).toString(),
-                "preferred" to if (ipv4Count > 0) "ipv4" else "system",
-            ),
-        )
-        addresses.sortedBy { address -> if (address is Inet4Address) 0 else 1 }
+    private val ipv4FirstDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            val addresses = Dns.SYSTEM.lookup(hostname)
+            val ipv4Count = addresses.count { it is Inet4Address }
+            diagnostic(
+                "WARP HTTP dns preference",
+                mapOf(
+                    "ipv4" to ipv4Count.toString(),
+                    "ipv6" to (addresses.size - ipv4Count).toString(),
+                    "preferred" to if (ipv4Count > 0) "ipv4" else "system",
+                ),
+            )
+            return addresses.sortedBy { address -> if (address is Inet4Address) 0 else 1 }
+        }
     }
 
     private val registrationClient: OkHttpClient by lazy {
