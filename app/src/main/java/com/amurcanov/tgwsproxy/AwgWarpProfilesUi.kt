@@ -270,7 +270,7 @@ fun AwgWarpCreateProfilePage(
 
     Column(modifier = modifier.fillMaxWidth()) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -760,8 +760,14 @@ private fun awgStageLabel(stage: WarpProvisioningStage): String = when (stage) {
 }
 
 private fun supportSafeError(throwable: Throwable?): String {
-    val provisioning = throwable as? WarpProvisioningException
-    return provisioning?.code
-        ?: throwable?.message?.takeIf { it.matches(Regex("[a-zA-Z0-9_.-]{1,80}")) }
-        ?: "unknown_error"
+    var current = throwable
+    repeat(8) {
+        if (current == null) return@repeat
+        if (current is WarpProvisioningException) return current.code
+        current = current.cause
+    }
+    val safeMessage = throwable?.message?.takeIf { it.matches(Regex("[a-zA-Z0-9_.-]{1,80}")) }
+    if (safeMessage != null) return safeMessage
+    val safeClass = throwable?.javaClass?.simpleName?.takeIf { it.matches(Regex("[a-zA-Z0-9_.-]{1,80}")) }
+    return safeClass?.let { "unexpected_$it" } ?: "unknown_error"
 }
