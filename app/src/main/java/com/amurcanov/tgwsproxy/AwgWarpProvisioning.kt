@@ -17,6 +17,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.TlsVersion
 import org.json.JSONObject
 import java.io.IOException
+import java.security.SecureRandom
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 
@@ -45,28 +49,39 @@ class ConsumerWarpProfileProvisioner(
 ) : WarpProfileProvisioner {
     companion object {
         // Consumer registration is intentionally isolated here because it is not a stable public API.
+        // v0a2158 / a-6.10-2158 matches the newer Android consumer registration shape used by
+        // currently maintained community clients. The older v0a1922 profile can stall without a
+        // response on some networks even after the TLS connection and POST have completed.
         private const val API_BASE_URL = "https://api.cloudflareclient.com"
-        private const val API_VERSION = "v0a1922"
+        private const val API_VERSION = "v0a2158"
         private const val REGISTER_PATH = "/$API_VERSION/reg"
         private const val CONNECT_TIMEOUT_MS = 10_000L
-        private const val READ_TIMEOUT_MS = 15_000L
+        private const val READ_TIMEOUT_MS = 20_000L
         private const val WRITE_TIMEOUT_MS = 10_000L
         private const val MAX_RESPONSE_BYTES = 256 * 1024
         private const val MAX_ATTEMPTS = 3
         private const val USER_AGENT = "okhttp/3.12.1"
-        private const val CLIENT_VERSION = "a-6.3-1922"
+        private const val CLIENT_VERSION = "a-6.10-2158"
+        private const val INSTALL_ID_LENGTH = 22
+        private const val FCM_SUFFIX_LENGTH = 134
+        private const val FCM_PREFIX = "APA91b"
+        private const val RANDOM_ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+        private val tosFormatter: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
     }
 
+    private val secureRandom = SecureRandom()
+
     private val registrationClient: OkHttpClient by lazy {
-        val tls12Only = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
-            .tlsVersions(TlsVersion.TLS_1_2)
+        val modernConsumerTls = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+            .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2)
             .build()
         OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .connectionSpecs(listOf(tls12Only))
-            // wgcf intentionally avoids HTTP/2 for this legacy consumer endpoint.
+            .connectionSpecs(listOf(modernConsumerTls))
             .protocols(listOf(Protocol.HTTP_1_1))
             .retryOnConnectionFailure(false)
             .build()
@@ -80,7 +95,7 @@ class ConsumerWarpProfileProvisioner(
         }
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.REGISTERING_WARP)
-        diagnostic("WARP registration started")
+        diagnostic("WARP registration started", mapOf("api_version" to API_VERSION))
         val response = registerDevice(
             publicKey = keyPair.publicKey,
             deviceModel = request.deviceModel,
@@ -105,14 +120,22 @@ class ConsumerWarpProfileProvisioner(
     }
 
     private suspend fun registerDevice(publicKey: String, deviceModel: String): JSONObject {
+        val installId = randomAlphaNumeric(INSTALL_ID_LENGTH)
+        val fcmToken = "$installId:$FCM_PREFIX${randomAlphaNumeric(FCM_SUFFIX_LENGTH)}"
         var lastCode = "registration_failed"
+
         repeat(MAX_ATTEMPTS) { index ->
             coroutineContext.ensureActive()
             val attempt = index + 1
             try {
                 diagnostic("WARP registration attempt", mapOf("attempt" to attempt.toString()))
                 return withContext(Dispatchers.IO) {
-                    performRegistration(publicKey, deviceModel)
+                    performRegistration(
+                        publicKey = publicKey,
+                        deviceModel = deviceModel,
+                        installId = installId,
+                        fcmToken = fcmToken,
+                    )
                 }
             } catch (e: WarpProvisioningException) {
                 lastCode = e.code
@@ -120,7 +143,9 @@ class ConsumerWarpProfileProvisioner(
                     "WARP registration attempt failed",
                     mapOf("attempt" to attempt.toString(), "code" to e.code),
                 )
-                val retryable = e.code == "registration_rate_limited" || e.code == "registration_server_error"
+                // 429 is a definite pre-registration rejection and is safe to retry. A 5xx response
+                // is not retried because the server may have persisted the registration already.
+                val retryable = e.code == "registration_rate_limited"
                 if (!retryable || index == MAX_ATTEMPTS - 1) throw e
             } catch (e: IOException) {
                 // The request may already have reached the server. Retrying an ambiguous I/O failure can
@@ -136,15 +161,20 @@ class ConsumerWarpProfileProvisioner(
         throw WarpProvisioningException(lastCode)
     }
 
-    private fun performRegistration(publicKey: String, deviceModel: String): JSONObject {
+    private fun performRegistration(
+        publicKey: String,
+        deviceModel: String,
+        installId: String,
+        fcmToken: String,
+    ): JSONObject {
         val body = JSONObject()
-            .put("fcm_token", "")
-            .put("install_id", "")
             .put("key", publicKey)
-            .put("locale", "en_US")
+            .put("install_id", installId)
+            .put("fcm_token", fcmToken)
+            .put("tos", tosFormatter.format(Instant.now()))
             .put("model", deviceModel.take(128))
-            .put("tos", java.time.Instant.now().toString())
-            .put("type", "Android")
+            .put("serial_number", installId)
+            .put("locale", "en_US")
             .toString()
 
         val request = Request.Builder()
@@ -220,6 +250,12 @@ class ConsumerWarpProfileProvisioner(
             peerPublicKey = peerPublicKey,
             endpoint = endpoint,
         )
+    }
+
+    private fun randomAlphaNumeric(length: Int): String = buildString(length) {
+        repeat(length) {
+            append(RANDOM_ALPHANUMERIC[secureRandom.nextInt(RANDOM_ALPHANUMERIC.length)])
+        }
     }
 
     private fun diagnostic(message: String, details: Map<String, String> = emptyMap()) {
