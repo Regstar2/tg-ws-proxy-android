@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
+	"time"
 
 	"tg-ws-proxy/mtproxyfrontend"
 )
@@ -75,5 +77,70 @@ func (c *mtProtoAWGWarpConnector) Connect(
 
 	result.ActualBackend = mtProtoAWGWarpBackend
 	result.Reason = "connected"
-	return conn, result
+	logMtProtoAWGWarpDiagnostics("connected", request)
+	return &mtProtoAWGWarpDiagnosticsConn{
+		Conn:    conn,
+		request: request,
+	}, result
+}
+
+type mtProtoAWGWarpDiagnosticsConn struct {
+	net.Conn
+	request mtproxyfrontend.OutboundRequest
+	once    sync.Once
+}
+
+func (c *mtProtoAWGWarpDiagnosticsConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() {
+		logMtProtoAWGWarpDiagnostics("closed", c.request)
+	})
+	return err
+}
+
+func logMtProtoAWGWarpDiagnostics(event string, request mtproxyfrontend.OutboundRequest) {
+	diagnostics, err := globalAWGWarpRouteRuntime.Diagnostics()
+	if err != nil {
+		if logDebug != nil {
+			logDebug.Printf(
+				"AWG/WARP diagnostics unavailable event=%s signed_dc=%d dc=%d media=%t error=%v",
+				event,
+				request.SignedDC,
+				request.DCID,
+				request.IsMedia,
+				err,
+			)
+		}
+		return
+	}
+
+	handshake := "none"
+	if !diagnostics.LastHandshakeAt.IsZero() {
+		handshake = diagnostics.LastHandshakeAt.UTC().Format(time.RFC3339Nano)
+	}
+	innerTarget := diagnostics.LastInnerTarget
+	if innerTarget == "" {
+		innerTarget = "none"
+	}
+	endpoint := diagnostics.Endpoint
+	if endpoint == "" {
+		endpoint = "none"
+	}
+
+	if logInfo != nil {
+		logInfo.Printf(
+			"AWG/WARP diagnostics event=%s signed_dc=%d dc=%d media=%t endpoint=%s last_handshake=%s tunnel_tx_bytes=%d tunnel_rx_bytes=%d app_up_bytes=%d app_down_bytes=%d inner_target=%s",
+			event,
+			request.SignedDC,
+			request.DCID,
+			request.IsMedia,
+			endpoint,
+			handshake,
+			diagnostics.TunnelTxBytes,
+			diagnostics.TunnelRxBytes,
+			diagnostics.AppBytesUp,
+			diagnostics.AppBytesDown,
+			innerTarget,
+		)
+	}
 }
