@@ -10,6 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.ConnectionSpec
+import okhttp3.Dns
 import okhttp3.EventListener
 import okhttp3.Handshake
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,6 +20,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -116,8 +118,26 @@ class ConsumerWarpProfileProvisioner(
         }
     }
 
+    // Some Android/Wi-Fi combinations advertise IPv6 DNS answers while the actual IPv6 path is
+    // black-holed. A short bootstrap probe can then expire before OkHttp gets a chance to try IPv4.
+    // Preserve system DNS and IPv6 fallback, but put IPv4 answers first for this Cloudflare API only.
+    private val ipv4FirstDns = Dns { hostname ->
+        val addresses = Dns.SYSTEM.lookup(hostname)
+        val ipv4Count = addresses.count { it is Inet4Address }
+        diagnostic(
+            "WARP HTTP dns preference",
+            mapOf(
+                "ipv4" to ipv4Count.toString(),
+                "ipv6" to (addresses.size - ipv4Count).toString(),
+                "preferred" to if (ipv4Count > 0) "ipv4" else "system",
+            ),
+        )
+        addresses.sortedBy { address -> if (address is Inet4Address) 0 else 1 }
+    }
+
     private val registrationClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
             .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
