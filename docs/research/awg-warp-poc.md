@@ -153,7 +153,7 @@ Full repository CI:
 
 ## Real-device evidence — 2026-09-16
 
-A real Android smoke test with AWG/WARP set as preferred and route fallback disabled demonstrated the following:
+Real Android smoke testing with AWG/WARP set as preferred and route fallback disabled demonstrated the following:
 
 - MTProto frontend reported `selected_backend=awg_warp`;
 - successful sessions reported `actual_backend=awg_warp`;
@@ -165,26 +165,27 @@ A real Android smoke test with AWG/WARP set as preferred and route fallback disa
 - individual MTProto sessions closed cleanly with `error=none` and bidirectional payload, including `up_bytes=868 down_bytes=7484` on one observed DC1 session;
 - previous smoke testing also demonstrated bidirectional media traffic through `awg_warp`, including a session with `up_bytes=6546 down_bytes=281597 error=none`;
 - the previous foreground-service crash no longer reproduced;
-- no Android `VpnService`, root access, or system TUN interface was required.
+- no Android `VpnService`, root access, or system TUN interface was required;
+- explicit proxy start → stop → start testing in one app process completed successfully and Telegram traffic resumed through AWG/WARP after restart.
 
-This proves that useful Telegram MTProto traffic can traverse the userspace AWG/WARP path without silent direct fallback and that the AWG handshake/tunnel counters advance on the real device.
+This proves that useful Telegram MTProto traffic can traverse the userspace AWG/WARP path without silent direct fallback, that the AWG handshake/tunnel counters advance on the real device, and that the transport survives an application-level stop/start lifecycle.
 
 One instrumentation issue was revealed by concurrent DC dials: the original per-session log read a shared `LastInnerTarget`, so two simultaneous diagnostics could display each other's target even though the route request itself used the correct DC target. The connector now captures and logs its own immutable target for each session; this is a diagnostics-only correction and does not change routing.
 
 ## Device acceptance checklist
 
-The implementation is accepted after a real Android run with a known-good local config demonstrates all of the following without logging secrets:
+The real-device PoC demonstrated all required transport acceptance items:
 
 1. AWG handshake timestamp becomes non-zero/recent. **Verified.**
 2. Tunnel TX and RX counters both increase. **Verified.**
-3. The inner target is the intended Telegram DC IP and port. **Transport target verified; per-session diagnostic race fixed on current head.**
+3. The inner target is the intended Telegram DC IP and port. **Verified; per-session diagnostics bind the immutable connector target on current head.**
 4. A valid Telegram/MTProto exchange passes application bytes in both directions. **Verified.**
 5. No `VpnService` permission/dialog and no system TUN interface are involved. **Verified.**
-6. Starting, stopping, and starting the transport again works in one app process. **Final explicit lifecycle smoke still to capture.**
+6. Starting, stopping, and starting the transport again works in one app process. **Verified.**
 7. With fallback disabled, successful sessions show `actual_backend=awg_warp` and `fallback_used=false`. **Verified.**
 
 ## Current conclusion
 
-**GO FOR USERSPACE AWG/WARP TRANSPORT; FINAL LIFECYCLE SMOKE PENDING.**
+**GO.**
 
-The real-device tests prove the core hypothesis: Telegram traffic can traverse a reusable userspace AmneziaWG/WARP transport on Android without `VpnService`, root, a system TUN interface, or silent direct fallback. Handshake, tunnel TX/RX, Telegram inner destinations, and bidirectional MTProto application traffic are all demonstrated. The only remaining issue-level acceptance item is an explicit proxy start → stop → start lifecycle check on the current head after the per-session diagnostics fix.
+The real-device tests prove the core hypothesis: Telegram traffic can traverse a reusable userspace AmneziaWG/WARP transport on Android without `VpnService`, root, a system TUN interface, or silent direct fallback. Handshake, tunnel TX/RX, Telegram inner destinations, bidirectional MTProto application traffic, media traffic, and application-level start → stop → start lifecycle are demonstrated. The PoC is complete and suitable for follow-up production hardening and provisioning work.
