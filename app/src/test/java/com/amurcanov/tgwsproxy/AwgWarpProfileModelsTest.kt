@@ -43,6 +43,55 @@ class AwgWarpProfileModelsTest {
     }
 
     @Test
+    fun transportCandidatesAreBoundedDeterministicAndDiverse() {
+        val first = AwgWarpTransportCandidates.forProvisioning("seed-public-key")
+        val second = AwgWarpTransportCandidates.forProvisioning("seed-public-key")
+
+        assertEquals(first, second)
+        assertTrue(first.size in 6..9)
+        assertEquals("warpscout-default", first.first().id)
+        assertTrue(first.any { "I1" !in it.deviceOptions })
+        assertTrue(first.map { it.deviceOptions }.distinct().size > 4)
+
+        first.forEach { candidate ->
+            val jc = candidate.deviceOptions.getValue("Jc").toInt()
+            val jmin = candidate.deviceOptions.getValue("Jmin").toInt()
+            val jmax = candidate.deviceOptions.getValue("Jmax").toInt()
+            assertTrue(jc in 1..128)
+            assertTrue(jmin >= 0)
+            assertTrue(jmax >= jmin)
+            assertTrue(jmax <= 150)
+        }
+    }
+
+    @Test
+    fun transportCandidateSamplingChangesAcrossRegistrations() {
+        val first = AwgWarpTransportCandidates.forProvisioning("registration-a")
+        val second = AwgWarpTransportCandidates.forProvisioning("registration-b")
+
+        assertTrue(first.map { it.deviceOptions } != second.map { it.deviceOptions })
+    }
+
+    @Test
+    fun tunePlanIsBoundedAndStartsWithEndpointDiversity() {
+        val endpoints = AwgWarpEndpointCandidates.forRegistration("engage.cloudflareclient.com:2408")
+        val plan = AwgWarpTuneCandidates.forProvisioning(
+            registrationEndpoint = "engage.cloudflareclient.com:2408",
+            seedMaterial = "seed-public-key",
+        )
+
+        assertTrue(plan.isNotEmpty())
+        assertTrue(plan.size <= AwgWarpTuneCandidates.MAX_ATTEMPTS)
+        assertEquals(endpoints, plan.take(endpoints.size).map { it.endpoint })
+        assertTrue(plan.take(endpoints.size).all { it.transport.id == "warpscout-default" })
+        assertTrue(plan.drop(endpoints.size).any { it.transport.id != "warpscout-default" })
+        assertEquals(
+            plan.size,
+            plan.distinctBy { it.endpoint to it.transport.deviceOptions }.size,
+        )
+    }
+
+    @Test
     fun endpointCandidatesKeepRegistrationEndpointFirstAndStayBounded() {
         val candidates = AwgWarpEndpointCandidates.forRegistration(" 162.159.192.1:2408 ")
 
