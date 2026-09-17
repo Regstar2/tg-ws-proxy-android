@@ -577,12 +577,47 @@ data class AwgWarpProfileCheckResult(
     val probe: AwgWarpProbeResult? = null,
 )
 
+internal fun reusableConsumerWarpRegistration(
+    metadata: AwgWarpProfileMetadata,
+    details: AwgWarpConfigDetails,
+): WarpProvisionedProfile? {
+    if (metadata.source != AwgWarpProfileSource.CONSUMER_WARP) return null
+    val publicKey = metadata.localPublicKey?.trim().orEmpty()
+    if (publicKey.isBlank()) return null
+
+    val ipv4 = details.addresses.firstOrNull { address ->
+        !address.substringBefore('/').contains(':')
+    }.orEmpty()
+    val ipv6 = details.addresses.firstOrNull { address ->
+        address.substringBefore('/').contains(':')
+    }.orEmpty()
+    if (ipv4.isBlank() && ipv6.isBlank()) return null
+
+    return WarpProvisionedProfile(
+        privateKey = details.privateKey,
+        publicKey = publicKey,
+        assignedIpv4 = ipv4,
+        assignedIpv6 = ipv6,
+        peerPublicKey = details.peer.publicKey,
+        endpoint = details.peer.endpoint,
+        allowedIps = details.peer.allowedIps,
+        mtu = details.mtu,
+        persistentKeepalive = details.peer.persistentKeepalive ?: 25,
+        deviceOptions = details.deviceOptions,
+    )
+}
+
 class AwgWarpProfileManager(
     context: Context,
     private val repository: AwgWarpProfileRepository = AwgWarpProfileRepository(context.applicationContext),
 ) {
     companion object {
         private const val TELEGRAM_PROBE_TARGET = "149.154.175.50:443"
+        private val REGISTRATION_REUSE_FAILURES = setOf(
+            "registration_rate_limited",
+            "registration_network_error",
+            "registration_server_error",
+        )
     }
 
     private val appContext = context.applicationContext
@@ -610,12 +645,36 @@ class AwgWarpProfileManager(
                 AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
             },
         )
-        val provisioned = provider.provision(
-            WarpProvisionRequest(
-                profileName = name,
-                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
-            ),
-        ).getOrThrow()
+        val request = WarpProvisionRequest(
+            profileName = name,
+            deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+        )
+        val provisioned = provider.provision(request).fold(
+            onSuccess = { it },
+            onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
+                val code = (throwable as? WarpProvisioningException)?.code
+                val reusable = if (code != null && code in REGISTRATION_REUSE_FAILURES) {
+                    reusableConsumerWarpRegistration()
+                } else {
+                    null
+                }
+                if (reusable == null) throw throwable
+
+                onStage(WarpProvisioningStage.FETCHING_PARAMETERS)
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP stored registration reused for autotune",
+                    mapOf(
+                        "reason" to code,
+                        "selected_source_profile" to reusable.second.toString(),
+                        "endpoint" to reusable.first.endpoint,
+                    ),
+                )
+                reusable.first
+            },
+        )
 
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.BUILDING_PROFILE)
@@ -757,6 +816,24 @@ class AwgWarpProfileManager(
         if (throwable is CancellationException) throw throwable
         if (throwable is WarpProvisioningException) throw throwable
         throw WarpProvisioningException("profile_creation_failed", throwable)
+    }
+
+    private fun reusableConsumerWarpRegistration(): Pair<WarpProvisionedProfile, Boolean>? {
+        val candidates = repository.listProfiles()
+            .asSequence()
+            .filter { summary -> summary.metadata.source == AwgWarpProfileSource.CONSUMER_WARP }
+            .sortedWith(
+                compareByDescending<AwgWarpProfileSummary> { it.selected }
+                    .thenByDescending { it.metadata.createdAtMs },
+            )
+            .toList()
+
+        for (summary in candidates) {
+            val details = repository.loadDetails(summary.metadata.id).getOrNull() ?: continue
+            val registration = reusableConsumerWarpRegistration(summary.metadata, details) ?: continue
+            return registration to summary.selected
+        }
+        return null
     }
 
     suspend fun importProfile(uri: Uri, name: String): Result<AwgWarpProfileMetadata> = runCatching {
