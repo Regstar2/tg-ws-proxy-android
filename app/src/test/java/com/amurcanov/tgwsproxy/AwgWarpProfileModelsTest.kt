@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,20 +25,21 @@ class AwgWarpProfileModelsTest {
         assertEquals(1280, parsed.mtu)
         assertEquals("engage.cloudflareclient.com:2408", parsed.peer.endpoint)
         assertEquals(listOf("0.0.0.0/0", "::/0"), parsed.peer.allowedIps)
-        assertEquals("4", parsed.deviceOptions["Jc"])
-        assertEquals("1", parsed.deviceOptions["H1"])
-        assertEquals("4", parsed.deviceOptions["H4"])
-        assertEquals("0", parsed.deviceOptions["S4"])
+        assertEquals("6", parsed.deviceOptions["Jc"])
+        assertEquals("10", parsed.deviceOptions["Jmin"])
+        assertEquals("50", parsed.deviceOptions["Jmax"])
+        assertTrue(parsed.deviceOptions["I1"].orEmpty().startsWith("<r 2><b 0x"))
+        assertNull(parsed.deviceOptions["H1"])
+        assertNull(parsed.deviceOptions["S1"])
     }
 
     @Test
-    fun compatibilityPresetKeepsWireGuardMessageHeaders() {
-        assertEquals("1", AwgWarpCompatibilityPreset.options["H1"])
-        assertEquals("2", AwgWarpCompatibilityPreset.options["H2"])
-        assertEquals("3", AwgWarpCompatibilityPreset.options["H3"])
-        assertEquals("4", AwgWarpCompatibilityPreset.options["H4"])
-        assertEquals("0", AwgWarpCompatibilityPreset.options["S1"])
-        assertEquals("0", AwgWarpCompatibilityPreset.options["S4"])
+    fun compatibilityPresetMatchesWarpscoutShape() {
+        assertEquals(setOf("Jc", "Jmin", "Jmax", "I1"), AwgWarpCompatibilityPreset.options.keys)
+        assertEquals("6", AwgWarpCompatibilityPreset.options["Jc"])
+        assertEquals("10", AwgWarpCompatibilityPreset.options["Jmin"])
+        assertEquals("50", AwgWarpCompatibilityPreset.options["Jmax"])
+        assertTrue(AwgWarpCompatibilityPreset.options["I1"].orEmpty().contains("69636c6f756403636f6d"))
     }
 
     @Test
