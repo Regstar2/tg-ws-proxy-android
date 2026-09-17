@@ -79,22 +79,19 @@ data class WarpProvisionedProfile(
 
 object AwgWarpCompatibilityPreset {
     /**
-     * WARP is a WireGuard peer. Keep the real WireGuard packet shape intact while
-     * only adding client-side junk packets. AmneziaWG treats omitted/zero values
-     * as standard WireGuard behaviour; H1-H4 explicitly retain WG message types.
+     * Match the conservative WARP/AWG profile shape used by warpscout:
+     * bounded junk packets plus a DNS-shaped initiation packet. Leave H*/S*
+     * omitted so amneziawg-go uses its protocol defaults instead of layering
+     * additional guessed transport parameters onto Consumer WARP.
      */
+    private const val DEFAULT_I1 =
+        "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
+
     val options: Map<String, String> = linkedMapOf(
-        "Jc" to "4",
-        "Jmin" to "40",
-        "Jmax" to "70",
-        "S1" to "0",
-        "S2" to "0",
-        "S3" to "0",
-        "S4" to "0",
-        "H1" to "1",
-        "H2" to "2",
-        "H3" to "3",
-        "H4" to "4",
+        "Jc" to "6",
+        "Jmin" to "10",
+        "Jmax" to "50",
+        "I1" to DEFAULT_I1,
     )
 }
 
