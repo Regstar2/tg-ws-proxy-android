@@ -91,7 +91,6 @@ fun AwgWarpOverviewCard(
     }
 }
 
-@Suppress("UNUSED_PARAMETER")
 @Composable
 fun AwgWarpProfilesPage(
     isProxyRunning: Boolean,
@@ -170,6 +169,15 @@ fun AwgWarpProfilesPage(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = onCreate,
+            enabled = !isProxyRunning,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(stringResource(R.string.awg_warp_create_profile))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
             onClick = { importLauncher.launch(arrayOf("*/*")) },
             enabled = !isProxyRunning && !importBusy,
