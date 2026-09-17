@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
+	"net"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -38,5 +41,45 @@ func TestProbeAwgWarpConfigRejectsEmptyInputs(t *testing.T) {
 	}
 	if got := probeAwgWarpConfig("missing.conf", "", 0); got.Code != "probe_target_empty" {
 		t.Fatalf("empty target code = %q", got.Code)
+	}
+}
+
+func TestProbeAwgWarpDataRoundTripRequiresResponse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := probeAwgWarpDataRoundTrip(ctx, func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			buffer := make([]byte, 512)
+			if _, err := server.Read(buffer); err != nil {
+				return
+			}
+			_, _ = server.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx"))
+		}()
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("data round trip failed: %v", err)
+	}
+}
+
+func TestProbeAwgWarpDataRoundTripRejectsSilentPeer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := probeAwgWarpDataRoundTrip(ctx, func(context.Context, string, string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			buffer := make([]byte, 512)
+			_, _ = server.Read(buffer)
+			<-ctx.Done()
+		}()
+		return client, nil
+	})
+	if err == nil {
+		t.Fatal("silent peer unexpectedly passed bidirectional data probe")
 	}
 }
