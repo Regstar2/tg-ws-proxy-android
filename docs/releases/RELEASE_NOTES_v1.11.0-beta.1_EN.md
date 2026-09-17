@@ -2,6 +2,11 @@
 
 [Русский](RELEASE_NOTES_v1.11.0-beta.1.md) · **English**
 
+## Release metadata
+
+- `versionName 1.11.0-beta.1`
+- `versionCode 53`
+
 ## About this release
 
 `v1.11.0-beta.1` is a public beta of the new userspace AWG/WARP route and the in-app WARP/AWG profile workflow. The beta is intended to exercise the new route on more Android devices and networks before `v1.11.0` stable.
