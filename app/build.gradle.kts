@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val releaseVersionCode = 52
-val releaseVersionName = "1.10.14"
+val releaseVersionCode = 53
+val releaseVersionName = "1.11.0-beta.1"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -117,32 +117,4 @@ android {
             jniLibs.srcDir("src/main/jniLibs")
         }
     }
-}
-
-androidComponents {
-    onVariants(selector().withBuildType("debug")) { variant ->
-        variant.outputs.forEach { output ->
-            // Debug builds intentionally stay one code above the release code so they can be
-            // installed over the most recent release during pre-release Android acceptance.
-            output.versionCode.set(releaseVersionCode + 1)
-        }
-    }
-}
-
-dependencies {
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material")
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.compose.material:material-icons-extended")
-
-    testImplementation("junit:junit:4.13.2")
 }
