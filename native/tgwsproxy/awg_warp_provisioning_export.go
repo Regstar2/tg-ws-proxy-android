@@ -16,7 +16,10 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-const defaultAwgWarpProbeTimeout = 12 * time.Second
+const (
+	defaultAwgWarpProbeTimeout = 12 * time.Second
+	awgWarpProbeReuseDelay     = 3 * time.Second
+)
 
 type wireGuardKeyPair struct {
 	PrivateKey string `json:"private_key"`
@@ -68,10 +71,11 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 	}
 	defer dialer.Close()
 
-	// A profile is useful to Telegram only if one userspace AWG tunnel can create
-	// more than one inner TCP flow. Keep the first flow alive while establishing
-	// the second one so provisioning rejects endpoints that pass a single SYN but
-	// stall every subsequent DialContext call.
+	// Telegram needs one userspace AWG tunnel to remain reusable after the
+	// initial connection burst. Some WARP endpoints accept several immediate
+	// inner TCP flows and then stop completing new connects a few seconds later.
+	// Keep the first flow alive, verify an immediate parallel flow, wait through
+	// that observed failure window, then require a delayed third flow as well.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -86,6 +90,22 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 		return awgWarpProbeResult{Code: "parallel_connect_failed"}
 	}
 	_ = secondConn.Close()
+
+	reuseTimer := time.NewTimer(awgWarpProbeReuseDelay)
+	select {
+	case <-ctx.Done():
+		if !reuseTimer.Stop() {
+			<-reuseTimer.C
+		}
+		return awgWarpProbeResult{Code: "reuse_wait_timeout"}
+	case <-reuseTimer.C:
+	}
+
+	thirdConn, err := dialer.DialContext(ctx, "tcp", target)
+	if err != nil {
+		return awgWarpProbeResult{Code: "delayed_reuse_failed"}
+	}
+	_ = thirdConn.Close()
 
 	diagnostics, err := dialer.Diagnostics()
 	if err != nil {
