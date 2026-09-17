@@ -13,7 +13,7 @@ import (
 	"tg-ws-proxy/mtproxyfrontend"
 )
 
-func TestMtProtoAWGWarpConnectorSerializesDialEstablishment(t *testing.T) {
+func TestMtProtoAWGWarpConnectorAllowsConcurrentDialEstablishment(t *testing.T) {
 	var active atomic.Int32
 	var maxActive atomic.Int32
 
@@ -72,8 +72,8 @@ func TestMtProtoAWGWarpConnectorSerializesDialEstablishment(t *testing.T) {
 			t.Fatalf("unexpected result: backend=%q reason=%q", result.ActualBackend, result.Reason)
 		}
 	}
-	if got := maxActive.Load(); got != 1 {
-		t.Fatalf("concurrent dial attempts = %d, want 1", got)
+	if got := maxActive.Load(); got < 2 {
+		t.Fatalf("concurrent dial attempts = %d, want at least 2", got)
 	}
 }
 
