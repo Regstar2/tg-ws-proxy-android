@@ -80,7 +80,7 @@ data class WarpProvisionedProfile(
 object AwgWarpCompatibilityPreset {
     /**
      * Match the conservative WARP/AWG profile shape used by warpscout:
-     * bounded junk packets plus a DNS-shaped initiation packet. Leave H*/S*
+     * bounded junk packets plus a DNS-shaped initiation packet. Leave H1-H4/S1-S4
      * omitted so amneziawg-go uses its protocol defaults instead of layering
      * additional guessed transport parameters onto Consumer WARP.
      */
