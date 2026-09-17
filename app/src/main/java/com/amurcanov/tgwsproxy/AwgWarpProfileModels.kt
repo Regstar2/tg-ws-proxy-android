@@ -1,6 +1,7 @@
 package com.amurcanov.tgwsproxy
 
 import java.util.Base64
+import java.util.Random
 
 enum class AwgWarpProfileSource(val wireValue: String) {
     CONSUMER_WARP("consumer_warp"),
@@ -79,12 +80,11 @@ data class WarpProvisionedProfile(
 
 object AwgWarpCompatibilityPreset {
     /**
-     * Match the conservative WARP/AWG profile shape used by warpscout:
-     * bounded junk packets plus a DNS-shaped initiation packet. Leave H1-H4/S1-S4
-     * omitted so amneziawg-go uses its protocol defaults instead of layering
-     * additional guessed transport parameters onto Consumer WARP.
+     * Seed the bounded autotuner with the conservative WARP/AWG shape used by
+     * warpscout. The final generated profile is not forced to this preset: the
+     * provisioning search may select another bounded candidate for the network.
      */
-    private const val DEFAULT_I1 =
+    const val DEFAULT_I1 =
         "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
 
     val options: Map<String, String> = linkedMapOf(
@@ -93,6 +93,130 @@ object AwgWarpCompatibilityPreset {
         "Jmax" to "50",
         "I1" to DEFAULT_I1,
     )
+}
+
+data class AwgWarpTransportCandidate(
+    val id: String,
+    val deviceOptions: Map<String, String>,
+)
+
+object AwgWarpTransportCandidates {
+    private const val RANDOM_CANDIDATE_COUNT = 3
+    private const val MAX_CANDIDATES = 9
+
+    /**
+     * Produce a small, reproducible search space. The public key is random per
+     * registration, so each new registration samples a different bounded subset
+     * while repeated evaluation of the same registration stays deterministic.
+     */
+    fun forProvisioning(seedMaterial: String): List<AwgWarpTransportCandidate> {
+        val candidates = mutableListOf(
+            candidate("warpscout-default", 6, 10, 50, includeI1 = true),
+            candidate("warpscout-no-i1", 6, 10, 50, includeI1 = false),
+            candidate("compact", 4, 10, 40, includeI1 = true),
+            candidate("balanced", 5, 20, 70, includeI1 = true),
+            candidate("wide", 6, 30, 110, includeI1 = true),
+            candidate("legacy-junk", 4, 40, 70, includeI1 = false),
+        )
+
+        val random = Random(stableSeed(seedMaterial))
+        repeat(RANDOM_CANDIDATE_COUNT) { index ->
+            val jc = 4 + random.nextInt(3)
+            val jmin = 10 + random.nextInt(41)
+            val span = 20 + random.nextInt(81)
+            val jmax = (jmin + span).coerceAtMost(150)
+            candidates += candidate(
+                id = "sample-${index + 1}",
+                jc = jc,
+                jmin = jmin,
+                jmax = jmax,
+                includeI1 = random.nextBoolean(),
+            )
+        }
+
+        return candidates
+            .distinctBy { candidate -> candidate.deviceOptions.entries.joinToString("|") { "${it.key}=${it.value}" } }
+            .take(MAX_CANDIDATES)
+    }
+
+    private fun candidate(
+        id: String,
+        jc: Int,
+        jmin: Int,
+        jmax: Int,
+        includeI1: Boolean,
+    ): AwgWarpTransportCandidate {
+        require(jc in 1..128)
+        require(jmin >= 0 && jmax >= jmin)
+        return AwgWarpTransportCandidate(
+            id = id,
+            deviceOptions = linkedMapOf<String, String>().apply {
+                put("Jc", jc.toString())
+                put("Jmin", jmin.toString())
+                put("Jmax", jmax.toString())
+                if (includeI1) put("I1", AwgWarpCompatibilityPreset.DEFAULT_I1)
+            },
+        )
+    }
+
+    private fun stableSeed(value: String): Long {
+        var hash = 1_469_598_103_934_665_603L
+        value.forEach { char ->
+            hash = (hash xor char.code.toLong()) * 1_099_511_628_211L
+        }
+        return hash
+    }
+}
+
+data class AwgWarpTuneCandidate(
+    val endpoint: String,
+    val transport: AwgWarpTransportCandidate,
+)
+
+object AwgWarpTuneCandidates {
+    const val MAX_ATTEMPTS = 16
+
+    /**
+     * Wave 1 checks endpoint diversity with the strongest seed. Wave 2 tunes the
+     * transport on the registration endpoint. Wave 3 combines alternate endpoints
+     * with a bounded subset of the remaining transport candidates.
+     */
+    fun forProvisioning(registrationEndpoint: String, seedMaterial: String): List<AwgWarpTuneCandidate> {
+        val endpoints = AwgWarpEndpointCandidates.forRegistration(registrationEndpoint)
+        val transports = AwgWarpTransportCandidates.forProvisioning(seedMaterial)
+        if (endpoints.isEmpty() || transports.isEmpty()) return emptyList()
+
+        val result = mutableListOf<AwgWarpTuneCandidate>()
+        val seen = mutableSetOf<String>()
+        fun add(endpoint: String, transport: AwgWarpTransportCandidate) {
+            if (result.size >= MAX_ATTEMPTS) return
+            val key = "$endpoint|${transport.deviceOptions.entries.joinToString("|") { "${it.key}=${it.value}" }}"
+            if (seen.add(key)) result += AwgWarpTuneCandidate(endpoint, transport)
+        }
+
+        val baseline = transports.first()
+        endpoints.forEach { endpoint -> add(endpoint, baseline) }
+
+        val primaryEndpoint = endpoints.first()
+        transports.drop(1).forEach { transport -> add(primaryEndpoint, transport) }
+
+        val alternates = endpoints.drop(1)
+        var offset = 0
+        while (result.size < MAX_ATTEMPTS && alternates.isNotEmpty() && transports.size > 1) {
+            var added = false
+            alternates.forEachIndexed { endpointIndex, endpoint ->
+                if (result.size >= MAX_ATTEMPTS) return@forEachIndexed
+                val transportIndex = 1 + ((offset + endpointIndex) % (transports.size - 1))
+                val before = result.size
+                add(endpoint, transports[transportIndex])
+                if (result.size > before) added = true
+            }
+            if (!added) break
+            offset++
+        }
+
+        return result
+    }
 }
 
 object AwgWarpEndpointCandidates {
