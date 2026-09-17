@@ -667,7 +667,7 @@ class AwgWarpProfileManager(
                     AppLogCategory.NETWORK,
                     "WARP stored registration reused for autotune",
                     mapOf(
-                        "reason" to code,
+                        "reason" to code.orEmpty(),
                         "selected_source_profile" to reusable.second.toString(),
                         "endpoint" to reusable.first.endpoint,
                     ),
