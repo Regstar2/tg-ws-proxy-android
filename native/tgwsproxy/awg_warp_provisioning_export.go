@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -17,8 +19,11 @@ import (
 )
 
 const (
-	defaultAwgWarpProbeTimeout = 12 * time.Second
+	defaultAwgWarpProbeTimeout = 15 * time.Second
 	awgWarpProbeReuseDelay     = 3 * time.Second
+	awgWarpProbeDataTimeout    = 4 * time.Second
+	awgWarpProbeDataTarget     = "1.1.1.1:80"
+	awgWarpProbeDataRequest    = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n"
 )
 
 type wireGuardKeyPair struct {
@@ -34,6 +39,8 @@ type awgWarpProbeResult struct {
 	TunnelTxBytes     uint64 `json:"tunnel_tx_bytes,omitempty"`
 	TunnelRxBytes     uint64 `json:"tunnel_rx_bytes,omitempty"`
 }
+
+type awgWarpProbeDialContext func(context.Context, string, string) (net.Conn, error)
 
 func generateWireGuardKeyPair() (wireGuardKeyPair, error) {
 	privateKey := make([]byte, curve25519.ScalarSize)
@@ -52,6 +59,42 @@ func generateWireGuardKeyPair() (wireGuardKeyPair, error) {
 		PrivateKey: base64.StdEncoding.EncodeToString(privateKey),
 		PublicKey:  base64.StdEncoding.EncodeToString(publicKey),
 	}, nil
+}
+
+func probeAwgWarpDataRoundTrip(ctx context.Context, dial awgWarpProbeDialContext) error {
+	if ctx == nil {
+		return fmt.Errorf("data probe context is nil")
+	}
+	if dial == nil {
+		return fmt.Errorf("data probe dialer is nil")
+	}
+
+	conn, err := dial(ctx, "tcp", awgWarpProbeDataTarget)
+	if err != nil {
+		return fmt.Errorf("open data probe connection: %w", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(awgWarpProbeDataTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("set data probe deadline: %w", err)
+	}
+	if err := writeFullConn(conn, []byte(awgWarpProbeDataRequest)); err != nil {
+		return fmt.Errorf("write data probe request: %w", err)
+	}
+
+	var response [1]byte
+	n, err := conn.Read(response[:])
+	if n > 0 {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read data probe response: %w", err)
+	}
+	return fmt.Errorf("data probe returned no response bytes")
 }
 
 func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbeResult {
@@ -92,11 +135,9 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 	_ = secondConn.Close()
 
 	reuseTimer := time.NewTimer(awgWarpProbeReuseDelay)
+	defer reuseTimer.Stop()
 	select {
 	case <-ctx.Done():
-		if !reuseTimer.Stop() {
-			<-reuseTimer.C
-		}
 		return awgWarpProbeResult{Code: "reuse_wait_timeout"}
 	case <-reuseTimer.C:
 	}
@@ -106,6 +147,14 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 		return awgWarpProbeResult{Code: "delayed_reuse_failed"}
 	}
 	_ = thirdConn.Close()
+
+	// A TCP connect alone is insufficient. The failing Android profile that led
+	// to this probe could complete SYN/SYN-ACK to Telegram while every real
+	// application response remained at zero bytes. Require a small request and
+	// at least one downstream payload byte through the same userspace tunnel.
+	if err := probeAwgWarpDataRoundTrip(ctx, dialer.DialContext); err != nil {
+		return awgWarpProbeResult{Code: "data_roundtrip_failed"}
+	}
 
 	diagnostics, err := dialer.Diagnostics()
 	if err != nil {
@@ -125,6 +174,10 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 	}
 	if result.TunnelTxBytes == 0 || result.TunnelRxBytes == 0 {
 		result.Code = "no_tunnel_traffic"
+		return result
+	}
+	if diagnostics.AppBytesDown <= 0 {
+		result.Code = "no_application_downstream"
 		return result
 	}
 	result.OK = true
