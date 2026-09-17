@@ -22,8 +22,6 @@ type mtProtoAWGWarpConnector struct {
 	dialContext      mtProtoDialContext
 	connectTimeout   time.Duration
 	relayInitTimeout time.Duration
-	dialGateOnce     sync.Once
-	dialGate         chan struct{}
 }
 
 func newMtProtoAWGWarpConnector() *mtProtoAWGWarpConnector {
@@ -76,21 +74,8 @@ func (c *mtProtoAWGWarpConnector) Connect(
 
 	connectCtx, cancelConnect := context.WithTimeout(ctx, c.effectiveConnectTimeout())
 	defer cancelConnect()
-
-	queueStarted := time.Now()
-	gate := c.serialDialGate()
-	select {
-	case <-gate:
-	case <-connectCtx.Done():
-		result.Reason = "awg_warp_connect_queue_timeout"
-		result.Err = fmt.Errorf("wait for AWG/WARP connect slot to %s: %w", address, connectCtx.Err())
-		return nil, result
-	}
-	queueDuration := time.Since(queueStarted)
-
 	dialStarted := time.Now()
 	conn, err := c.effectiveDialContext()(connectCtx, "tcp", address)
-	gate <- struct{}{}
 	if err != nil {
 		result.Reason = "awg_warp_connect_failed"
 		result.Err = fmt.Errorf("connect AWG/WARP target %s: %w", address, err)
@@ -98,12 +83,11 @@ func (c *mtProtoAWGWarpConnector) Connect(
 	}
 	if logInfo != nil {
 		logInfo.Printf(
-			"AWG/WARP connect stage=tcp_connected signed_dc=%d dc=%d media=%t target=%s queue_ms=%d dial_ms=%d",
+			"AWG/WARP connect stage=tcp_connected signed_dc=%d dc=%d media=%t target=%s dial_ms=%d",
 			request.SignedDC,
 			request.DCID,
 			request.IsMedia,
 			address,
-			queueDuration.Milliseconds(),
 			time.Since(dialStarted).Milliseconds(),
 		)
 	}
@@ -133,14 +117,6 @@ func (c *mtProtoAWGWarpConnector) Connect(
 		request:     request,
 		innerTarget: address,
 	}, result
-}
-
-func (c *mtProtoAWGWarpConnector) serialDialGate() chan struct{} {
-	c.dialGateOnce.Do(func() {
-		c.dialGate = make(chan struct{}, 1)
-		c.dialGate <- struct{}{}
-	})
-	return c.dialGate
 }
 
 func (c *mtProtoAWGWarpConnector) effectiveDialContext() mtProtoDialContext {
