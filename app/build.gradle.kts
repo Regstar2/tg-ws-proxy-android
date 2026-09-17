@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val releaseVersionCode = 52
-val releaseVersionName = "1.10.14"
+val releaseVersionCode = 53
+val releaseVersionName = "1.11.0-beta.1"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
