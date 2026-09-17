@@ -68,13 +68,24 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 	}
 	defer dialer.Close()
 
+	// A profile is useful to Telegram only if one userspace AWG tunnel can create
+	// more than one inner TCP flow. Keep the first flow alive while establishing
+	// the second one so provisioning rejects endpoints that pass a single SYN but
+	// stall every subsequent DialContext call.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	conn, err := dialer.DialContext(ctx, "tcp", target)
-	cancel()
+	defer cancel()
+
+	firstConn, err := dialer.DialContext(ctx, "tcp", target)
 	if err != nil {
 		return awgWarpProbeResult{Code: "connect_failed"}
 	}
-	_ = conn.Close()
+	defer firstConn.Close()
+
+	secondConn, err := dialer.DialContext(ctx, "tcp", target)
+	if err != nil {
+		return awgWarpProbeResult{Code: "parallel_connect_failed"}
+	}
+	_ = secondConn.Close()
 
 	diagnostics, err := dialer.Diagnostics()
 	if err != nil {
