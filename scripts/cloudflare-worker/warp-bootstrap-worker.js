@@ -1,4 +1,6 @@
-import relayWorker from "./chunk-relay-status-worker.js";
+import relayWorker, { ChunkRelaySession } from "./chunk-relay-status-worker.js";
+
+export { ChunkRelaySession };
 
 const BOOTSTRAP_REVISION = "warp-bootstrap-v1";
 const BOOTSTRAP_PREFIX = "/warp-bootstrap";
