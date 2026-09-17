@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -68,7 +67,6 @@ class ConsumerWarpProfileProvisioner(
         private const val READ_TIMEOUT_MS = 15_000L
         private const val WRITE_TIMEOUT_MS = 10_000L
         private const val MAX_RESPONSE_BYTES = 256 * 1024
-        private const val MAX_ATTEMPTS = 3
         private const val USER_AGENT = "okhttp/3.12.1"
         private const val CLIENT_VERSION = "a-6.11-2223"
     }
@@ -308,38 +306,29 @@ class ConsumerWarpProfileProvisioner(
     }
 
     private suspend fun registerDevice(publicKey: String): JSONObject {
-        var lastCode = "registration_failed"
-
-        repeat(MAX_ATTEMPTS) { index ->
-            coroutineContext.ensureActive()
-            val attempt = index + 1
-            try {
-                diagnostic("WARP registration attempt", mapOf("attempt" to attempt.toString()))
-                return withContext(Dispatchers.IO) {
-                    val registration = performRegistration(publicKey)
-                    enableWarp(registration)
-                    registration
-                }
-            } catch (e: WarpProvisioningException) {
-                lastCode = e.code
-                diagnostic(
-                    "WARP registration attempt failed",
-                    mapOf("attempt" to attempt.toString(), "code" to e.code),
-                )
-                // A 429 is a definite pre-registration rejection and is safe to retry. Other errors
-                // may happen after the registration has been persisted, so do not retry automatically.
-                val retryable = e.code == "registration_rate_limited"
-                if (!retryable || index == MAX_ATTEMPTS - 1) throw e
-            } catch (e: IOException) {
-                diagnostic(
-                    "WARP registration network failure",
-                    mapOf("attempt" to attempt.toString(), "cause" to safeCauseName(e)),
-                )
-                throw WarpProvisioningException("registration_network_error", e)
+        coroutineContext.ensureActive()
+        diagnostic("WARP registration attempt", mapOf("attempt" to "1"))
+        return try {
+            withContext(Dispatchers.IO) {
+                val registration = performRegistration(publicKey)
+                enableWarp(registration)
+                registration
             }
-            delay(500L shl index)
+        } catch (e: WarpProvisioningException) {
+            diagnostic(
+                "WARP registration attempt failed",
+                mapOf("attempt" to "1", "code" to e.code),
+            )
+            // Rapid retries after 429 only consume more registration quota. The caller can retry
+            // later, while a successful registration is reused for the entire transport autotune.
+            throw e
+        } catch (e: IOException) {
+            diagnostic(
+                "WARP registration network failure",
+                mapOf("attempt" to "1", "cause" to safeCauseName(e)),
+            )
+            throw WarpProvisioningException("registration_network_error", e)
         }
-        throw WarpProvisioningException(lastCode)
     }
 
     private fun performRegistration(publicKey: String): JSONObject {
@@ -630,26 +619,45 @@ class AwgWarpProfileManager(
 
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.BUILDING_PROFILE)
-        val endpointCandidates = AwgWarpEndpointCandidates.forRegistration(provisioned.endpoint)
-        if (endpointCandidates.isEmpty()) {
-            throw WarpProvisioningException("registration_endpoint_empty")
+        val tuneCandidates = AwgWarpTuneCandidates.forProvisioning(
+            registrationEndpoint = provisioned.endpoint,
+            seedMaterial = provisioned.publicKey,
+        )
+        if (tuneCandidates.isEmpty()) {
+            throw WarpProvisioningException("autotune_candidates_empty")
         }
 
+        AppLogger.i(
+            appContext,
+            AppLogCategory.NETWORK,
+            "WARP autotune started",
+            mapOf("candidates" to tuneCandidates.size.toString()),
+        )
         onStage(WarpProvisioningStage.VALIDATING_CONFIG)
         var checkingStageStarted = false
-        var lastErrorCode = "endpoint_candidates_exhausted"
+        var lastErrorCode = "autotune_candidates_exhausted"
 
-        for ((index, endpoint) in endpointCandidates.withIndex()) {
+        for ((index, tuneCandidate) in tuneCandidates.withIndex()) {
             coroutineContext.ensureActive()
-            val candidateProfile = provisioned.copy(endpoint = endpoint)
+            val endpoint = tuneCandidate.endpoint
+            val transport = tuneCandidate.transport
+            val candidateProfile = provisioned.copy(
+                endpoint = endpoint,
+                deviceOptions = transport.deviceOptions,
+            )
             val configText = AwgWarpProfileSerializer.serialize(candidateProfile)
             val staging = repository.createStagingConfig(configText).getOrThrow()
             try {
                 val candidateDetails = mapOf(
                     "candidate" to (index + 1).toString(),
-                    "total" to endpointCandidates.size.toString(),
+                    "total" to tuneCandidates.size.toString(),
+                    "transport" to transport.id,
                     "endpoint" to endpoint,
                     "registration_endpoint" to (endpoint == provisioned.endpoint).toString(),
+                    "jc" to transport.deviceOptions["Jc"].orEmpty(),
+                    "jmin" to transport.deviceOptions["Jmin"].orEmpty(),
+                    "jmax" to transport.deviceOptions["Jmax"].orEmpty(),
+                    "i1" to if (transport.deviceOptions.containsKey("I1")) "present" else "none",
                 )
 
                 if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
@@ -657,57 +665,93 @@ class AwgWarpProfileManager(
                     AppLogger.i(
                         appContext,
                         AppLogCategory.NETWORK,
-                        "WARP endpoint candidate rejected",
+                        "WARP autotune candidate rejected",
                         candidateDetails + ("code" to lastErrorCode),
                     )
-                } else {
-                    if (!checkingStageStarted) {
-                        onStage(WarpProvisioningStage.CHECKING_CONNECTION)
-                        checkingStageStarted = true
-                    }
-                    AppLogger.i(
-                        appContext,
-                        AppLogCategory.NETWORK,
-                        "WARP endpoint candidate probe started",
-                        candidateDetails,
-                    )
-                    val probe = withContext(Dispatchers.IO) {
-                        NativeProxy.probeAwgWarpConfig(staging.absolutePath, TELEGRAM_PROBE_TARGET)
-                    }
-                    AppLogger.i(
-                        appContext,
-                        AppLogCategory.NETWORK,
-                        "WARP endpoint candidate probe finished",
-                        candidateDetails + mapOf(
-                            "ok" to probe.ok.toString(),
-                            "code" to probe.code,
-                        ),
-                    )
-                    if (probe.ok) {
-                        coroutineContext.ensureActive()
-                        onStage(WarpProvisioningStage.SAVING)
-                        AppLogger.i(
-                            appContext,
-                            AppLogCategory.NETWORK,
-                            "WARP endpoint candidate selected",
-                            candidateDetails,
-                        )
-                        return@runCatching repository.saveProfile(
-                            name = name,
-                            source = AwgWarpProfileSource.CONSUMER_WARP,
-                            configText = configText,
-                            localPublicKey = provisioned.publicKey,
-                            health = AwgWarpProfileHealth.WORKING,
-                            lastCheckedAtMs = System.currentTimeMillis(),
-                        ).getOrThrow()
-                    }
-                    lastErrorCode = probe.code.ifBlank { "endpoint_probe_failed" }
+                    continue
                 }
+
+                if (!checkingStageStarted) {
+                    onStage(WarpProvisioningStage.CHECKING_CONNECTION)
+                    checkingStageStarted = true
+                }
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP autotune candidate probe started",
+                    candidateDetails,
+                )
+                val probe = withContext(Dispatchers.IO) {
+                    NativeProxy.probeAwgWarpConfig(staging.absolutePath, TELEGRAM_PROBE_TARGET)
+                }
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP autotune candidate probe finished",
+                    candidateDetails + mapOf(
+                        "ok" to probe.ok.toString(),
+                        "code" to probe.code,
+                    ),
+                )
+                if (!probe.ok) {
+                    lastErrorCode = probe.code.ifBlank { "autotune_probe_failed" }
+                    continue
+                }
+
+                coroutineContext.ensureActive()
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP autotune candidate confirmation started",
+                    candidateDetails,
+                )
+                val confirmation = withContext(Dispatchers.IO) {
+                    NativeProxy.probeAwgWarpConfig(staging.absolutePath, TELEGRAM_PROBE_TARGET)
+                }
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP autotune candidate confirmation finished",
+                    candidateDetails + mapOf(
+                        "ok" to confirmation.ok.toString(),
+                        "code" to confirmation.code,
+                    ),
+                )
+                if (!confirmation.ok) {
+                    lastErrorCode = confirmation.code.ifBlank { "autotune_confirmation_failed" }
+                    continue
+                }
+
+                coroutineContext.ensureActive()
+                onStage(WarpProvisioningStage.SAVING)
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP autotune candidate selected",
+                    candidateDetails + ("confirmed" to "2/2"),
+                )
+                return@runCatching repository.saveProfile(
+                    name = name,
+                    source = AwgWarpProfileSource.CONSUMER_WARP,
+                    configText = configText,
+                    localPublicKey = provisioned.publicKey,
+                    health = AwgWarpProfileHealth.WORKING,
+                    lastCheckedAtMs = System.currentTimeMillis(),
+                ).getOrThrow()
             } finally {
                 repository.removeStagingConfig(staging)
             }
         }
 
+        AppLogger.i(
+            appContext,
+            AppLogCategory.NETWORK,
+            "WARP autotune exhausted",
+            mapOf(
+                "candidates" to tuneCandidates.size.toString(),
+                "last_code" to lastErrorCode,
+            ),
+        )
         throw WarpProvisioningException(lastErrorCode)
     }.recoverCatching { throwable ->
         if (throwable is CancellationException) throw throwable
