@@ -98,6 +98,28 @@ object AwgWarpCompatibilityPreset {
     )
 }
 
+object AwgWarpEndpointCandidates {
+    /**
+     * Consumer registration returns one usable WARP endpoint, but a single endpoint
+     * can be degraded on a particular network. Keep that provider endpoint first,
+     * then try a very small deterministic set from Cloudflare's public WARP pools.
+     * The list is intentionally bounded: this is provisioning validation, not a
+     * background endpoint scanner.
+     */
+    private val fallbackEndpoints = listOf(
+        "188.114.98.1:7559",
+        "188.114.98.1:2408",
+        "162.159.195.1:2408",
+    )
+
+    fun forRegistration(registrationEndpoint: String): List<String> {
+        return buildList {
+            registrationEndpoint.trim().takeIf(String::isNotBlank)?.let(::add)
+            addAll(fallbackEndpoints)
+        }.distinctBy { it.lowercase() }
+    }
+}
+
 object AwgWarpProfileSerializer {
     fun serialize(profile: WarpProvisionedProfile): String {
         require(profile.assignedIpv4.isNotBlank() || profile.assignedIpv6.isNotBlank()) {
