@@ -4,8 +4,9 @@ import test from "node:test";
 
 const source = (await readFile(new URL("./warp-bootstrap-worker.js", import.meta.url), "utf8"))
   .replace(
-    'import relayWorker from "./chunk-relay-status-worker.js";',
-    'const relayWorker = { fetch: (...args) => globalThis.__warpBootstrapRelayFetch(...args) };',
+    'import relayWorker, { ChunkRelaySession } from "./chunk-relay-status-worker.js";',
+    `const relayWorker = { fetch: (...args) => globalThis.__warpBootstrapRelayFetch(...args) };
+     class ChunkRelaySession {}`,
   );
 const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
 
@@ -18,6 +19,10 @@ function jsonRequest(path, method, body, headers = {}) {
     body: JSON.stringify(body),
   });
 }
+
+test("bootstrap entrypoint exports the configured Durable Object class", () => {
+  assert.equal(typeof mod.ChunkRelaySession, "function");
+});
 
 test("health endpoint is local and does not reach relay", async (t) => {
   const old = globalThis.__warpBootstrapRelayFetch;
