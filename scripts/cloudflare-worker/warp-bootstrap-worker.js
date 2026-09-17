@@ -14,7 +14,7 @@ const MAX_RESPONSE_BYTES = 256 * 1024;
 const UPSTREAM_TIMEOUT_MS = 15_000;
 const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
 const REGISTRATION_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
-const BEARER_TOKEN_PATTERN = /^Bearer [A-Za-z0-9._~+\/-=]{1,2048}$/;
+const MAX_BEARER_TOKEN_LENGTH = 2048;
 
 function bootstrapHeaders(extra = {}) {
   return {
@@ -88,6 +88,20 @@ function upstreamHeaders(authorization = null) {
   });
   if (authorization) headers.set("Authorization", authorization);
   return headers;
+}
+
+function isValidBearerAuthorization(value) {
+  if (typeof value !== "string" || !value.startsWith("Bearer ")) return false;
+  const token = value.slice("Bearer ".length);
+  if (token.length < 1 || token.length > MAX_BEARER_TOKEN_LENGTH) return false;
+
+  // Cloudflare's consumer token is opaque. Do not guess its punctuation alphabet; only
+  // enforce that it is a bounded visible-ASCII header value with no whitespace/control chars.
+  for (let index = 0; index < token.length; index++) {
+    const code = token.charCodeAt(index);
+    if (code < 0x21 || code > 0x7e) return false;
+  }
+  return true;
 }
 
 async function readBoundedUpstreamResponse(response) {
@@ -177,8 +191,10 @@ export async function handleWarpBootstrapRequest(request, url = new URL(request.
       return textResponse(400, "invalid registration id");
     }
     const authorization = request.headers.get("Authorization") || "";
-    if (!BEARER_TOKEN_PATTERN.test(authorization)) {
-      return textResponse(401, "valid bearer token required");
+    if (!isValidBearerAuthorization(authorization)) {
+      return textResponse(401, "valid bearer token required", {
+        "X-Tgws-Warp-Bootstrap-Error": "invalid_bearer",
+      });
     }
     const parsed = await readJsonObject(request);
     if (parsed.error) return parsed.error;
