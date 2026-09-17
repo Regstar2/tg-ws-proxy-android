@@ -41,6 +41,24 @@ class AwgWarpProfileModelsTest {
     }
 
     @Test
+    fun endpointCandidatesKeepRegistrationEndpointFirstAndStayBounded() {
+        val candidates = AwgWarpEndpointCandidates.forRegistration(" 162.159.192.1:2408 ")
+
+        assertEquals("162.159.192.1:2408", candidates.first())
+        assertTrue(candidates.contains("188.114.98.1:7559"))
+        assertTrue(candidates.size <= 4)
+        assertEquals(candidates.size, candidates.distinctBy { it.lowercase() }.size)
+    }
+
+    @Test
+    fun endpointCandidatesDoNotDuplicateRegistrationFallback() {
+        val candidates = AwgWarpEndpointCandidates.forRegistration("188.114.98.1:7559")
+
+        assertEquals("188.114.98.1:7559", candidates.first())
+        assertEquals(1, candidates.count { it.equals("188.114.98.1:7559", ignoreCase = true) })
+    }
+
+    @Test
     fun parserRejectsInvalidPrivateKeyWithoutEchoingIt() {
         val secret = "not-a-real-private-key"
         val text = """
