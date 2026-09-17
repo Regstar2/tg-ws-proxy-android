@@ -2,6 +2,17 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## 1.11.0-beta.1 - 2026-09-17
+- Added the `awg_warp` MTProto backend using an app-local userspace AmneziaWG/WARP stack; it does not use Android `VpnService`, root, or a system TUN interface.
+- Added Settings → Cloudflare → WARP / AmneziaWG profile management with automatic Consumer WARP creation, manual `.conf` import, explicit selection, profile details, validation, and deletion.
+- Consumer WARP keypairs are generated locally; private keys remain in app-private storage and are not sent to the registration service or written to support logs.
+- Automatic provisioning validates the generated config, probes real bidirectional application traffic through the AWG tunnel, and saves a profile only after a candidate succeeds twice (`2/2`).
+- Added bounded AWG transport autotuning across endpoint and `Jc`/`Jmin`/`Jmax`/`I1` variants instead of assuming one fixed obfuscation preset.
+- Added a restricted Cloudflare Worker bootstrap path for Consumer WARP registration when direct Android TLS access to `api.cloudflareclient.com` fails; arbitrary upstream forwarding is not exposed.
+- Registration rate limiting no longer triggers rapid repeated POST attempts; provisioning can reuse an already saved automatic Consumer WARP registration seed for autotuning when fresh registration is temporarily unavailable.
+- Real-device acceptance on Android 14 verified automatic registration, autotune `2/2`, `actual_backend=awg_warp`, `fallback_used=false`, bidirectional MTProto traffic, and media traffic.
+- Known limitation: Consumer WARP registration depends on an external, stability-sensitive API. A fresh install may require the Worker bootstrap when direct registration is unavailable; using an existing AWG/WARP tunnel for a new independent registration is tracked separately in #86.
+
 ## 1.10.14 - 2026-09-14
 - MTProto Worker traffic now uses a fresh-HTTPS chunk relay instead of one long-lived `workers.dev` WebSocket while preserving the Telegram TCP session inside Cloudflare Durable Objects.
 - Verified upload profile: 12 KiB chunks, sliding window 3, ordered sequence acknowledgements, bounded retries, primary/global request limits and HOL hedging for the oldest unacknowledged upload.
