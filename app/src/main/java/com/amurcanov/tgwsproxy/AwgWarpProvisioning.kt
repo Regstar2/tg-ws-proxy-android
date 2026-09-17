@@ -630,35 +630,85 @@ class AwgWarpProfileManager(
 
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.BUILDING_PROFILE)
-        val configText = AwgWarpProfileSerializer.serialize(provisioned)
-        val staging = repository.createStagingConfig(configText).getOrThrow()
-        try {
-            coroutineContext.ensureActive()
-            onStage(WarpProvisioningStage.VALIDATING_CONFIG)
-            if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
-                throw WarpProvisioningException("native_config_validation_failed")
-            }
-
-            coroutineContext.ensureActive()
-            onStage(WarpProvisioningStage.CHECKING_CONNECTION)
-            val probe = withContext(Dispatchers.IO) {
-                NativeProxy.probeAwgWarpConfig(staging.absolutePath, TELEGRAM_PROBE_TARGET)
-            }
-            if (!probe.ok) throw WarpProvisioningException(probe.code)
-
-            coroutineContext.ensureActive()
-            onStage(WarpProvisioningStage.SAVING)
-            repository.saveProfile(
-                name = name,
-                source = AwgWarpProfileSource.CONSUMER_WARP,
-                configText = configText,
-                localPublicKey = provisioned.publicKey,
-                health = AwgWarpProfileHealth.WORKING,
-                lastCheckedAtMs = System.currentTimeMillis(),
-            ).getOrThrow()
-        } finally {
-            repository.removeStagingConfig(staging)
+        val endpointCandidates = AwgWarpEndpointCandidates.forRegistration(provisioned.endpoint)
+        if (endpointCandidates.isEmpty()) {
+            throw WarpProvisioningException("registration_endpoint_empty")
         }
+
+        onStage(WarpProvisioningStage.VALIDATING_CONFIG)
+        var checkingStageStarted = false
+        var lastErrorCode = "endpoint_candidates_exhausted"
+
+        for ((index, endpoint) in endpointCandidates.withIndex()) {
+            coroutineContext.ensureActive()
+            val candidateProfile = provisioned.copy(endpoint = endpoint)
+            val configText = AwgWarpProfileSerializer.serialize(candidateProfile)
+            val staging = repository.createStagingConfig(configText).getOrThrow()
+            try {
+                val candidateDetails = mapOf(
+                    "candidate" to (index + 1).toString(),
+                    "total" to endpointCandidates.size.toString(),
+                    "endpoint" to endpoint,
+                    "registration_endpoint" to (endpoint == provisioned.endpoint).toString(),
+                )
+
+                if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
+                    lastErrorCode = "native_config_validation_failed"
+                    AppLogger.i(
+                        appContext,
+                        AppLogCategory.NETWORK,
+                        "WARP endpoint candidate rejected",
+                        candidateDetails + ("code" to lastErrorCode),
+                    )
+                } else {
+                    if (!checkingStageStarted) {
+                        onStage(WarpProvisioningStage.CHECKING_CONNECTION)
+                        checkingStageStarted = true
+                    }
+                    AppLogger.i(
+                        appContext,
+                        AppLogCategory.NETWORK,
+                        "WARP endpoint candidate probe started",
+                        candidateDetails,
+                    )
+                    val probe = withContext(Dispatchers.IO) {
+                        NativeProxy.probeAwgWarpConfig(staging.absolutePath, TELEGRAM_PROBE_TARGET)
+                    }
+                    AppLogger.i(
+                        appContext,
+                        AppLogCategory.NETWORK,
+                        "WARP endpoint candidate probe finished",
+                        candidateDetails + mapOf(
+                            "ok" to probe.ok.toString(),
+                            "code" to probe.code,
+                        ),
+                    )
+                    if (probe.ok) {
+                        coroutineContext.ensureActive()
+                        onStage(WarpProvisioningStage.SAVING)
+                        AppLogger.i(
+                            appContext,
+                            AppLogCategory.NETWORK,
+                            "WARP endpoint candidate selected",
+                            candidateDetails,
+                        )
+                        return@runCatching repository.saveProfile(
+                            name = name,
+                            source = AwgWarpProfileSource.CONSUMER_WARP,
+                            configText = configText,
+                            localPublicKey = provisioned.publicKey,
+                            health = AwgWarpProfileHealth.WORKING,
+                            lastCheckedAtMs = System.currentTimeMillis(),
+                        ).getOrThrow()
+                    }
+                    lastErrorCode = probe.code.ifBlank { "endpoint_probe_failed" }
+                }
+            } finally {
+                repository.removeStagingConfig(staging)
+            }
+        }
+
+        throw WarpProvisioningException(lastErrorCode)
     }.recoverCatching { throwable ->
         if (throwable is CancellationException) throw throwable
         if (throwable is WarpProvisioningException) throw throwable
