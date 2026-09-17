@@ -8,7 +8,8 @@
 
 Используйте:
 
-- `scripts/cloudflare-worker/chunk-relay-status-worker.js` — актуальный Worker entry point;
+- `scripts/cloudflare-worker/warp-bootstrap-worker.js` — актуальный Worker entry point; он добавляет ограниченный WARP provisioning bootstrap и передаёт весь остальной трафик в chunk-relay Worker;
+- `scripts/cloudflare-worker/chunk-relay-status-worker.js` — существующая реализация MTProto chunk relay;
 - `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
 
 Не используйте старую Worker-конфигурацию как замену новой схеме chunk relay для MTProto Worker v1.10.14.
@@ -17,7 +18,7 @@
 
 В v1.10.14 Android-клиент больше не держит один долгоживущий WebSocket как основной канал передачи MTProto-трафика через Worker.
 
-Схема выглядит так:
+Схема MTProto выглядит так:
 
 ```text
 Telegram Android / TgWsProxy
@@ -25,7 +26,11 @@ Telegram Android / TgWsProxy
         | короткие HTTPS-запросы
         | upload chunks + ACK / downstream long polling
         v
-Cloudflare Worker
+warp-bootstrap-worker.js
+        |
+        | остальные маршруты без изменения
+        v
+chunk-relay-status-worker.js
         |
         | CHUNK_RELAY
         v
@@ -59,6 +64,28 @@ Telegram DC
 
 Подробности внутренней архитектуры: [`docs/architecture/chunk-relay-hub.md`](architecture/chunk-relay-hub.md).
 
+## WARP provisioning bootstrap
+
+`warp-bootstrap-worker.js` добавляет узкий HTTPS fallback для Consumer WARP provisioning. Он нужен для сетей, где прямой TLS к `api.cloudflareclient.com` не завершается, хотя обычные Cloudflare Worker-домены доступны.
+
+Bootstrap не является универсальным HTTP/TCP proxy. Разрешены только следующие маршруты:
+
+```text
+GET   /warp-bootstrap/health
+POST  /warp-bootstrap/v0a4005/reg
+PATCH /warp-bootstrap/v0a4005/reg/<registration-id>
+```
+
+Worker всегда обращается только к фиксированному upstream `https://api.cloudflareclient.com`. Registration request пересобирается только из `key`, activation request — только из `warp_enabled=true`; произвольный URL, host, query и пользовательские заголовки не проксируются. Размер request/response ограничен, ответы помечаются `Cache-Control: no-store`, чувствительные тела запросов и ответов не логируются.
+
+Curve25519/WireGuard private key должен генерироваться и храниться на Android-устройстве. Через Worker передаётся public key и, на этапе activation, registration bearer token, поэтому bootstrap следует рассматривать как доверенный компонент конкретного deployment.
+
+Revision bootstrap-контракта:
+
+```text
+X-Tgws-Warp-Bootstrap-Revision: warp-bootstrap-v1
+```
+
 ## Развёртывание одного Worker
 
 Требуется Cloudflare Workers с поддержкой Durable Objects и установленный Wrangler.
@@ -75,7 +102,7 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 ```jsonc
 {
   "name": "tgproxy",
-  "main": "chunk-relay-status-worker.js",
+  "main": "warp-bootstrap-worker.js",
   "durable_objects": {
     "bindings": [
       {
@@ -88,6 +115,21 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 ```
 
 После deploy используйте выданный Cloudflare Worker-домен в настройках Worker-пула TgWsProxy.
+
+Проверьте, что новый wrapper действительно опубликован:
+
+```powershell
+$Worker = "https://tgproxy.<account>.workers.dev"
+Invoke-RestMethod "$Worker/warp-bootstrap/health"
+```
+
+Ожидаемый ответ:
+
+```json
+{"revision":"warp-bootstrap-v1"}
+```
+
+Этот health-check подтверждает только публикацию bootstrap wrapper. Реальный `fetch()` к Consumer WARP API должен быть отдельно подтверждён provisioning smoke-test; unit-тесты не заменяют сетевую проверку Cloudflare deployment.
 
 ## Рекомендуется несколько Worker
 
@@ -103,9 +145,15 @@ tgproxy-secondary.<account>.workers.dev
 tgproxy-backup.<account>.workers.dev
 ```
 
-Все Worker должны использовать актуальный код v1.10.14+ и новую chunk-relay/Durable Object конфигурацию.
+Wrangler поддерживает переопределение имени через `--name`, поэтому один и тот же config можно развернуть несколько раз:
 
-Для отдельных deployment задайте разные Worker names. Это можно сделать отдельными копиями `wrangler.chunk-relay.jsonc` с разным полем `name` либо эквивалентной настройкой Wrangler.
+```powershell
+npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name tgproxy-primary
+npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name tgproxy-secondary
+npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name tgproxy-backup
+```
+
+Все Worker должны использовать актуальный код v1.10.14+ и новую chunk-relay/Durable Object конфигурацию.
 
 После развёртывания добавьте все домены в Worker-пул TgWsProxy и используйте стратегию распределения, поддерживающую несколько Worker.
 
@@ -129,18 +177,22 @@ tgproxy-backup.<account>.workers.dev
 
 После обновления Worker рекомендуется проверить:
 
-1. подключение Telegram через Worker-маршрут;
-2. отправку и получение сообщений;
-3. загрузку и скачивание медиа;
-4. reconnect после разрыва соединения;
-5. создание нескольких MTProto-сессий;
-6. работу пула из нескольких Worker;
-7. отсутствие возврата на старый WebSocket Worker transport.
+1. `GET /warp-bootstrap/health` и revision `warp-bootstrap-v1`;
+2. подключение Telegram через Worker-маршрут;
+3. отправку и получение сообщений;
+4. загрузку и скачивание медиа;
+5. reconnect после разрыва соединения;
+6. создание нескольких MTProto-сессий;
+7. работу пула из нескольких Worker;
+8. отсутствие возврата на старый WebSocket Worker transport;
+9. отдельный Consumer WARP provisioning smoke-test через bootstrap после подключения Android fallback.
 
 В диагностике v1.10.14 должны быть видны признаки chunk-relay/RelayHub пути, а Worker должен отвечать актуальными revision headers.
 
 ## Ограничения
 
 Новая схема приоритетно решает проблему стабильности долгоживущего Worker-соединения. Worker-транспорт остаётся медленнее прямого подключения и зависит от ограничений Cloudflare Workers/Durable Objects.
+
+WARP bootstrap использует Worker-side `fetch()` к `api.cloudflareclient.com`: это поддерживаемый механизм исходящих HTTP(S)-запросов Workers, но фактическая доступность Consumer WARP registration API из конкретного deployment должна быть подтверждена реальным smoke-test.
 
 Поэтому Worker остаётся дополнительным маршрутом обхода, а использование нескольких Worker повышает отказоустойчивость, но не отменяет квоты Cloudflare и не гарантирует скорость прямого соединения.

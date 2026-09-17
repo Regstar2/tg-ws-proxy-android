@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="awg_warp_edit_config">Редактировать .conf</string>
+    <string name="awg_warp_edit_config_title">Редактировать импортированный .conf</string>
+    <string name="awg_warp_edit_config_hint">Изменяйте сохранённую конфигурацию WireGuard/AmneziaWG напрямую. Текст содержит приватный ключ — не публикуйте скриншоты и логи с ним.</string>
+    <string name="awg_warp_edit_config_save">Сохранить</string>
+    <string name="awg_warp_edit_config_saved">Конфигурация сохранена. Статус профиля сброшен в «Не проверен».</string>
+    <string name="awg_warp_edit_config_failed">Не удалось сохранить конфигурацию: %1$s</string>
+</resources>

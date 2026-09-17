@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy
 
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.util.IdentityHashMap
 
 internal interface LocalPortAvailabilityChecker {
     fun isAvailable(host: String, port: Int): Boolean
@@ -52,7 +53,7 @@ internal class MtProtoLocalProxyFrontend(
         }
         val awgConfigure = runCatching { awgRuntime.configure(awgConfig) }
         if (awgConfigure.isFailure) {
-            safeResetAwgRuntime()
+            resetAwgRuntimeAfterFailedConfigure()
             val errorType = awgConfigure.exceptionOrNull()?.javaClass?.simpleName.orEmpty()
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
@@ -64,12 +65,13 @@ internal class MtProtoLocalProxyFrontend(
             )
         }
         if (awgConfigure.getOrThrow() != 0) {
-            safeResetAwgRuntime()
+            resetAwgRuntimeAfterFailedConfigure()
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
                 message = "AWG/WARP route configuration was rejected by native runtime.",
             )
         }
+        claimAwgRuntimeOwnership()
 
         val mapping = MtProtoRuntimeConfigMapper.fromProxyConfig(
             config = proxyConfig,
@@ -137,7 +139,30 @@ internal class MtProtoLocalProxyFrontend(
 
     override fun getState(): LocalProxyFrontendState = state
 
+    private fun claimAwgRuntimeOwnership() {
+        synchronized(awgRuntimeOwnerLock) {
+            awgRuntimeOwners[awgRuntime] = this
+        }
+    }
+
     private fun safeResetAwgRuntime() {
+        val ownsRuntime = synchronized(awgRuntimeOwnerLock) {
+            if (awgRuntimeOwners[awgRuntime] !== this) {
+                false
+            } else {
+                awgRuntimeOwners.remove(awgRuntime)
+                true
+            }
+        }
+        if (ownsRuntime) {
+            runCatching { awgRuntime.reset() }
+        }
+    }
+
+    private fun resetAwgRuntimeAfterFailedConfigure() {
+        synchronized(awgRuntimeOwnerLock) {
+            awgRuntimeOwners.remove(awgRuntime)
+        }
         runCatching { awgRuntime.reset() }
     }
 
@@ -165,5 +190,10 @@ internal class MtProtoLocalProxyFrontend(
             MtProtoRuntimeState.FAILED -> LocalProxyFrontendStatus.FAILED
             MtProtoRuntimeState.UNSUPPORTED -> LocalProxyFrontendStatus.UNSUPPORTED
         }
+    }
+
+    companion object {
+        private val awgRuntimeOwnerLock = Any()
+        private val awgRuntimeOwners = IdentityHashMap<AwgWarpNativeRuntime, MtProtoLocalProxyFrontend>()
     }
 }

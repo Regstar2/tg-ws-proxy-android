@@ -12,14 +12,24 @@ import (
 )
 
 const (
-	mtProtoAWGWarpBackend    = "awg_warp"
-	mtProtoRouteAWGWarpReady = "MTPROTO_ROUTE_AWG_WARP_READY"
+	mtProtoAWGWarpBackend          = "awg_warp"
+	mtProtoRouteAWGWarpReady       = "MTPROTO_ROUTE_AWG_WARP_READY"
+	mtProtoAWGWarpConnectTimeout   = 10 * time.Second
+	mtProtoAWGWarpRelayInitTimeout = 5 * time.Second
 )
 
-type mtProtoAWGWarpConnector struct{}
+type mtProtoAWGWarpConnector struct {
+	dialContext      mtProtoDialContext
+	connectTimeout   time.Duration
+	relayInitTimeout time.Duration
+}
 
 func newMtProtoAWGWarpConnector() *mtProtoAWGWarpConnector {
-	return &mtProtoAWGWarpConnector{}
+	return &mtProtoAWGWarpConnector{
+		dialContext:      globalAWGWarpRouteRuntime.DialContext,
+		connectTimeout:   mtProtoAWGWarpConnectTimeout,
+		relayInitTimeout: mtProtoAWGWarpRelayInitTimeout,
+	}
 }
 
 func (c *mtProtoAWGWarpConnector) Capability() mtproxyfrontend.OutboundCapability {
@@ -62,17 +72,41 @@ func (c *mtProtoAWGWarpConnector) Connect(
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	logMtProtoRouteAttempt(request, routeAWGWarp, "target=%s", address)
 
-	conn, err := globalAWGWarpRouteRuntime.DialContext(ctx, "tcp", address)
+	connectCtx, cancelConnect := context.WithTimeout(ctx, c.effectiveConnectTimeout())
+	defer cancelConnect()
+	dialStarted := time.Now()
+	conn, err := c.effectiveDialContext()(connectCtx, "tcp", address)
 	if err != nil {
 		result.Reason = "awg_warp_connect_failed"
 		result.Err = fmt.Errorf("connect AWG/WARP target %s: %w", address, err)
 		return nil, result
 	}
-	if err := writeFullConn(conn, request.RelayInit); err != nil {
+	if logInfo != nil {
+		logInfo.Printf(
+			"AWG/WARP connect stage=tcp_connected signed_dc=%d dc=%d media=%t target=%s dial_ms=%d",
+			request.SignedDC,
+			request.DCID,
+			request.IsMedia,
+			address,
+			time.Since(dialStarted).Milliseconds(),
+		)
+	}
+
+	if err := writeFullConnWithTimeout(conn, request.RelayInit, c.effectiveRelayInitTimeout()); err != nil {
 		_ = conn.Close()
 		result.Reason = "relay_init_write_failed"
 		result.Err = fmt.Errorf("write relay init through AWG/WARP to %s: %w", address, err)
 		return nil, result
+	}
+	if logInfo != nil {
+		logInfo.Printf(
+			"AWG/WARP connect stage=relay_init_written signed_dc=%d dc=%d media=%t target=%s bytes=%d",
+			request.SignedDC,
+			request.DCID,
+			request.IsMedia,
+			address,
+			len(request.RelayInit),
+		)
 	}
 
 	result.ActualBackend = mtProtoAWGWarpBackend
@@ -83,6 +117,43 @@ func (c *mtProtoAWGWarpConnector) Connect(
 		request:     request,
 		innerTarget: address,
 	}, result
+}
+
+func (c *mtProtoAWGWarpConnector) effectiveDialContext() mtProtoDialContext {
+	if c.dialContext != nil {
+		return c.dialContext
+	}
+	return globalAWGWarpRouteRuntime.DialContext
+}
+
+func (c *mtProtoAWGWarpConnector) effectiveConnectTimeout() time.Duration {
+	if c.connectTimeout > 0 {
+		return c.connectTimeout
+	}
+	return mtProtoAWGWarpConnectTimeout
+}
+
+func (c *mtProtoAWGWarpConnector) effectiveRelayInitTimeout() time.Duration {
+	if c.relayInitTimeout > 0 {
+		return c.relayInitTimeout
+	}
+	return mtProtoAWGWarpRelayInitTimeout
+}
+
+func writeFullConnWithTimeout(conn net.Conn, data []byte, timeout time.Duration) error {
+	if conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+	if timeout <= 0 {
+		return writeFullConn(conn, data)
+	}
+	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("set relay init write deadline: %w", err)
+	}
+	defer func() {
+		_ = conn.SetWriteDeadline(time.Time{})
+	}()
+	return writeFullConn(conn, data)
 }
 
 type mtProtoAWGWarpDiagnosticsConn struct {
