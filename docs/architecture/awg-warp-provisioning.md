@@ -1,6 +1,6 @@
 # AWG/WARP profile provisioning
 
-Issue: #84
+Issues: #84, #86
 
 ## Scope
 
@@ -39,7 +39,7 @@ staging .conf
 saved profile
 ```
 
-Registration HTTP is not part of `AwgWarpDialer` and does not affect route selection. The runtime receives only the path of the explicitly selected profile through the existing runtime configuration.
+Registration orchestration remains separate from route selection. For #86, a narrowly scoped native helper may create a temporary `AwgWarpDialer` from an already validated saved profile and use it only to reach the fixed Consumer WARP API. The runtime route still receives only the path of the explicitly selected profile through the existing runtime configuration.
 
 ## Consumer registration provider
 
@@ -53,6 +53,29 @@ The consumer registration flow follows the currently observed Cloudflare consume
 - response/request bodies are never logged.
 
 This is not treated as a stable public API. If Cloudflare changes the consumer registration contract, the provider can be replaced without changing AWG transport code, profile storage, or route policy.
+
+## Bootstrap policy for a new Consumer registration
+
+A new profile always uses a newly generated local WireGuard keypair and a new Consumer WARP registration. A saved profile is never copied into the new profile and a failed fresh registration is not replaced with a stored registration seed.
+
+Bootstrap order is:
+
+1. the currently selected profile when its persisted health is `WORKING`;
+2. other saved `WORKING` profiles, newest first;
+3. direct Android HTTPS to `api.cloudflareclient.com`;
+4. the existing restricted Cloudflare Worker bootstrap.
+
+Both generated and imported profiles are eligible when they have already passed the real full-duplex profile check. Before use, the candidate config is parsed and validated again. The native reachability probe then has to prove that the fixed API host is reachable through a temporary userspace AWG tunnel.
+
+The native bootstrap boundary is intentionally not a generic proxy. It allows only:
+
+- `GET https://api.cloudflareclient.com/` for a side-effect-free reachability check;
+- `POST https://api.cloudflareclient.com/v0a4005/reg` with a newly generated public key;
+- `PATCH https://api.cloudflareclient.com/v0a4005/reg/<registration-id>` with `warp_enabled=true`.
+
+Redirects, arbitrary hosts, ports, paths, query strings and methods are rejected. The HTTP transport has no direct-socket fallback: DNS resolves only the fixed API hostname, while every TCP connection for the request is opened through `AwgWarpDialer.DialContext`.
+
+If a candidate fails before a side-effecting registration request is sent, provisioning continues to the next candidate and then to direct/Worker fallback. If request headers may already have left the device, the flow preserves the existing ambiguity guard and does not issue another registration POST through a different transport. Activation uses the same AWG bootstrap first; because the PATCH is idempotent, a transport failure may safely fall back to direct API and then Worker.
 
 ## AWG/WireGuard compatibility preset
 

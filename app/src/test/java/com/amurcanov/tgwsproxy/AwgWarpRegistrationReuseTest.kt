@@ -1,76 +1,68 @@
 package com.amurcanov.tgwsproxy
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class AwgWarpRegistrationReuseTest {
-    private val details = AwgWarpConfigDetails(
-        privateKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-        addresses = listOf("172.16.0.2/32", "2606:4700:110:1234::2/128"),
-        mtu = 1280,
-        deviceOptions = mapOf(
-            "Jc" to "4",
-            "Jmin" to "40",
-            "Jmax" to "70",
-        ),
-        peer = AwgWarpPeerDetails(
-            publicKey = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+class AwgWarpBootstrapSelectionTest {
+    @Test
+    fun selectedWorkingProfileIsPreferredBeforeNewerProfiles() {
+        val profiles = listOf(
+            summary(id = "newer", createdAtMs = 30L, selected = false),
+            summary(id = "selected", createdAtMs = 10L, selected = true),
+            summary(id = "older", createdAtMs = 20L, selected = false),
+        )
+
+        val ordered = orderedExistingAwgBootstrapProfiles(profiles)
+
+        assertEquals(listOf("selected", "newer", "older"), ordered.map { it.metadata.id })
+    }
+
+    @Test
+    fun onlyFullDuplexValidatedWorkingProfilesAreCandidates() {
+        val profiles = listOf(
+            summary(id = "working-import", source = AwgWarpProfileSource.IMPORTED),
+            summary(id = "unchecked", health = AwgWarpProfileHealth.NOT_CHECKED),
+            summary(id = "network-error", health = AwgWarpProfileHealth.NETWORK_ERROR),
+        )
+
+        val ordered = orderedExistingAwgBootstrapProfiles(profiles)
+
+        assertEquals(listOf("working-import"), ordered.map { it.metadata.id })
+        assertTrue(ordered.single().metadata.source == AwgWarpProfileSource.IMPORTED)
+    }
+
+    @Test
+    fun selectedButUnhealthyProfileDoesNotBypassHealthGate() {
+        val profiles = listOf(
+            summary(id = "selected-bad", selected = true, health = AwgWarpProfileHealth.NO_HANDSHAKE),
+            summary(id = "other-good", selected = false, health = AwgWarpProfileHealth.WORKING),
+        )
+
+        val ordered = orderedExistingAwgBootstrapProfiles(profiles)
+
+        assertEquals("other-good", ordered.single().metadata.id)
+        assertFalse(ordered.single().selected)
+    }
+
+    private fun summary(
+        id: String,
+        createdAtMs: Long = 1L,
+        selected: Boolean = false,
+        source: AwgWarpProfileSource = AwgWarpProfileSource.CONSUMER_WARP,
+        health: AwgWarpProfileHealth = AwgWarpProfileHealth.WORKING,
+    ): AwgWarpProfileSummary {
+        return AwgWarpProfileSummary(
+            metadata = AwgWarpProfileMetadata(
+                id = id,
+                name = id,
+                source = source,
+                createdAtMs = createdAtMs,
+                health = health,
+            ),
+            selected = selected,
             endpoint = "engage.cloudflareclient.com:2408",
-            allowedIps = listOf("0.0.0.0/0", "::/0"),
-            persistentKeepalive = 25,
-        ),
-    )
-
-    @Test
-    fun storedConsumerProfileReconstructsRegistrationSeed() {
-        val metadata = AwgWarpProfileMetadata(
-            id = "00000000-0000-0000-0000-000000000001",
-            name = "WARP",
-            source = AwgWarpProfileSource.CONSUMER_WARP,
-            createdAtMs = 1L,
-            localPublicKey = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
         )
-
-        val reused = reusableConsumerWarpRegistration(metadata, details)
-
-        requireNotNull(reused)
-        assertEquals(details.privateKey, reused.privateKey)
-        assertEquals(metadata.localPublicKey, reused.publicKey)
-        assertEquals("172.16.0.2/32", reused.assignedIpv4)
-        assertEquals("2606:4700:110:1234::2/128", reused.assignedIpv6)
-        assertEquals(details.peer.publicKey, reused.peerPublicKey)
-        assertEquals(details.peer.endpoint, reused.endpoint)
-        assertEquals(details.peer.allowedIps, reused.allowedIps)
-        assertEquals(details.mtu, reused.mtu)
-        assertEquals(25, reused.persistentKeepalive)
-        assertTrue(reused.deviceOptions.containsKey("Jc"))
-    }
-
-    @Test
-    fun importedProfileIsNeverUsedAsConsumerRegistrationSeed() {
-        val metadata = AwgWarpProfileMetadata(
-            id = "00000000-0000-0000-0000-000000000002",
-            name = "Imported",
-            source = AwgWarpProfileSource.IMPORTED,
-            createdAtMs = 1L,
-            localPublicKey = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
-        )
-
-        assertNull(reusableConsumerWarpRegistration(metadata, details))
-    }
-
-    @Test
-    fun consumerProfileWithoutLocalPublicKeyIsNotReusable() {
-        val metadata = AwgWarpProfileMetadata(
-            id = "00000000-0000-0000-0000-000000000003",
-            name = "WARP",
-            source = AwgWarpProfileSource.CONSUMER_WARP,
-            createdAtMs = 1L,
-            localPublicKey = null,
-        )
-
-        assertNull(reusableConsumerWarpRegistration(metadata, details))
     }
 }
