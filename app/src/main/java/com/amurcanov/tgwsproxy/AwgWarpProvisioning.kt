@@ -46,7 +46,7 @@ class WarpProvisioningException(
     cause: Throwable? = null,
 ) : Exception(code, cause)
 
-class ConsumerWarpProfileProvisioner(
+internal class ConsumerWarpProfileProvisioner(
     private val existingAwgBootstrapCandidates: List<ExistingAwgBootstrapCandidate> = emptyList(),
     private val bootstrapWorkerUrls: List<String> = emptyList(),
     private val onStage: (WarpProvisioningStage) -> Unit = {},
@@ -394,7 +394,9 @@ class ConsumerWarpProfileProvisioner(
                 return registration
             }
 
-            if (result.code == "registration_network_error" && !result.requestSent) {
+            if (!result.requestSent &&
+                (result.code == "registration_network_error" || result.code == "bootstrap_transport_init_failed")
+            ) {
                 diagnostic(
                     "WARP existing AWG bootstrap failed before registration send",
                     candidateDetails + ("fallback" to "next"),
