@@ -10,12 +10,12 @@
 
 ## Главное
 
-- Telegram can use `awg_warp` without root, Android `VpnService` or a system TUN.
-- Automatic profile creation now tries an existing validated AWG/WARP profile, direct Consumer API, custom provisioning Workers and then the optional built-in pool.
-- The app includes **3 built-in project provisioning Workers**. They are used only to generate/activate WARP profiles and never carry Telegram traffic or enter the normal `cf_worker_ws` Worker Pool.
-- Custom provisioning Workers can be added and checked separately; built-in provisioning can be disabled completely.
-- Profile validation requires a real Telegram MTProto `req_pq_multi → resPQ` round-trip before an automatic profile is accepted.
-- Saved profiles can be renamed and their config edited; generated names increment as `WARP 1`, `WARP 2`, and so on.
+- Telegram может использовать `awg_warp` без root, Android `VpnService` и system TUN.
+- Автоматическое создание профиля использует порядок: рабочий AWG/WARP-профиль → direct Consumer API → custom provisioning Workers → optional built-in pool.
+- В приложение встроены **3 project provisioning Worker**. Они используются только для генерации/активации WARP-профилей, не передают Telegram traffic и не попадают в обычный `cf_worker_ws` Worker Pool.
+- Custom provisioning Workers настраиваются отдельно; built-in provisioning можно полностью отключить.
+- Проверка профиля требует реальный Telegram MTProto `req_pq_multi → resPQ` до принятия автоматического профиля.
+- Сохранённые профили можно переименовывать и редактировать; автоматические имена идут как `WARP 1`, `WARP 2` и далее.
 
 ## Установка
 
