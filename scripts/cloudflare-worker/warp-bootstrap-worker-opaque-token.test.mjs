@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = (await readFile(new URL("./warp-bootstrap-worker.js", import.meta.url), "utf8"))
-  .replace(
-    'import relayWorker, { ChunkRelaySession } from "./chunk-relay-status-worker.js";',
-    `const relayWorker = { fetch: (...args) => globalThis.__warpBootstrapRelayFetch(...args) };
-     class ChunkRelaySession {}`,
-  );
-const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const source = await readFile(
+  new URL("./warp-bootstrap-standalone-worker.js", import.meta.url),
+  "utf8",
+);
+const mod = await import(
+  "data:text/javascript;base64," + Buffer.from(source).toString("base64")
+);
 
 function activationRequest(authorization) {
   return new Request(
