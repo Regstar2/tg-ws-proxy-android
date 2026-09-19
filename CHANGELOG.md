@@ -3,6 +3,8 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- WARP/AWG profile details now allow editing both the profile name and the saved `.conf` parameters for imported and automatically generated profiles; changed configs are revalidated and reset to `Not checked` before reuse.
+- Automatically generated Consumer WARP profiles now default to numbered names such as `WARP 1`, `WARP 2`, and so on instead of reusing one fixed name.
 - WARP/AWG provisioning now has a dedicated bootstrap Worker policy independent from the Telegram `cf_worker_ws` Worker Pool, with custom endpoints tried before the optional built-in pool.
 - Added settings to disable built-in provisioning Workers completely and to add, validate, enable/disable, check and delete custom HTTPS bootstrap endpoints.
 - Bootstrap health now identifies `service=warp-bootstrap` and revision `warp-bootstrap-v1`; redirects, credentials, query strings and arbitrary endpoint paths are rejected.
