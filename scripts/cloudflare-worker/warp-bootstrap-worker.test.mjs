@@ -39,7 +39,10 @@ test("health endpoint is local and does not reach relay", async (t) => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(response.headers.get("X-Tgws-Warp-Bootstrap-Revision"), "warp-bootstrap-v1");
-  assert.deepEqual(await response.json(), { revision: "warp-bootstrap-v1" });
+  assert.deepEqual(await response.json(), {
+    service: "warp-bootstrap",
+    revision: "warp-bootstrap-v1",
+  });
 });
 
 test("registration forwards only the public key to the fixed WARP API", async () => {
