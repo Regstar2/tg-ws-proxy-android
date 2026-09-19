@@ -16,7 +16,7 @@ val cloudflareOAuthClientId = providers.gradleProperty("TGWSPROXY_CF_OAUTH_CLIEN
     .getOrElse("")
 val cloudflareOAuthScopes = providers.gradleProperty("TGWSPROXY_CF_OAUTH_SCOPES")
     .orElse(providers.environmentVariable("TGWSPROXY_CF_OAUTH_SCOPES"))
-    .getOrElse("workers-platform.read workers-platform.write")
+    .getOrElse("memberships.read workers-scripts.read workers-scripts.write")
 val cloudflareOAuthRedirectUri = "tgwsproxy://oauth/cloudflare"
 val generatedCloudflareWorkerAssets = layout.buildDirectory.dir("generated/cloudflare-worker-assets")
 
