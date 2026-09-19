@@ -6,11 +6,14 @@ package main
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -19,11 +22,16 @@ import (
 )
 
 const (
-	defaultAwgWarpProbeTimeout = 15 * time.Second
-	awgWarpProbeReuseDelay     = 3 * time.Second
-	awgWarpProbeDataTimeout    = 4 * time.Second
-	awgWarpProbeDataTarget     = "1.1.1.1:80"
-	awgWarpProbeDataRequest    = "GET /cdn-cgi/trace HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n"
+	defaultAwgWarpProbeTimeout       = 15 * time.Second
+	awgWarpProbeReuseDelay           = 3 * time.Second
+	awgWarpProbeTelegramTimeout      = 4 * time.Second
+	awgWarpProbeMTProtoMaxPayload    = 64 * 1024
+	awgWarpIntermediateTransport     = uint32(0xeeeeeeee)
+	awgWarpReqPQMultiConstructor     = uint32(0xbe7e8ef1)
+	awgWarpResPQConstructor          = uint32(0x05162463)
+	awgWarpUnencryptedHeaderSize     = 20
+	awgWarpReqPQMultiBodySize        = 20
+	awgWarpMinResPQBodyPrefixSize    = 20
 )
 
 type wireGuardKeyPair struct {
@@ -61,40 +69,96 @@ func generateWireGuardKeyPair() (wireGuardKeyPair, error) {
 	}, nil
 }
 
-func probeAwgWarpDataRoundTrip(ctx context.Context, dial awgWarpProbeDialContext) error {
+func probeAwgWarpTelegramRoundTrip(
+	ctx context.Context,
+	dial awgWarpProbeDialContext,
+	target string,
+) error {
 	if ctx == nil {
-		return fmt.Errorf("data probe context is nil")
+		return fmt.Errorf("Telegram probe context is nil")
 	}
 	if dial == nil {
-		return fmt.Errorf("data probe dialer is nil")
+		return fmt.Errorf("Telegram probe dialer is nil")
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("Telegram probe target is empty")
 	}
 
-	conn, err := dial(ctx, "tcp", awgWarpProbeDataTarget)
+	conn, err := dial(ctx, "tcp", target)
 	if err != nil {
-		return fmt.Errorf("open data probe connection: %w", err)
+		return fmt.Errorf("open Telegram probe connection: %w", err)
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(awgWarpProbeDataTimeout)
+	deadline := time.Now().Add(awgWarpProbeTelegramTimeout)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
 	if err := conn.SetDeadline(deadline); err != nil {
-		return fmt.Errorf("set data probe deadline: %w", err)
-	}
-	if err := writeFullConn(conn, []byte(awgWarpProbeDataRequest)); err != nil {
-		return fmt.Errorf("write data probe request: %w", err)
+		return fmt.Errorf("set Telegram probe deadline: %w", err)
 	}
 
-	var response [1]byte
-	n, err := conn.Read(response[:])
-	if n > 0 {
-		return nil
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("generate Telegram probe nonce: %w", err)
 	}
-	if err != nil {
-		return fmt.Errorf("read data probe response: %w", err)
+
+	payload := make([]byte, awgWarpUnencryptedHeaderSize+awgWarpReqPQMultiBodySize)
+	messageID := uint64(time.Now().Unix()) << 32
+	messageID |= uint64(binary.LittleEndian.Uint32(nonce[:4]) & 0xfffffffc)
+	binary.LittleEndian.PutUint64(payload[8:16], messageID)
+	binary.LittleEndian.PutUint32(payload[16:20], awgWarpReqPQMultiBodySize)
+	binary.LittleEndian.PutUint32(payload[20:24], awgWarpReqPQMultiConstructor)
+	copy(payload[24:40], nonce[:])
+
+	var header [4]byte
+	binary.LittleEndian.PutUint32(header[:], awgWarpIntermediateTransport)
+	if err := writeFullConn(conn, header[:]); err != nil {
+		return fmt.Errorf("write Telegram probe transport preface: %w", err)
 	}
-	return fmt.Errorf("data probe returned no response bytes")
+	binary.LittleEndian.PutUint32(header[:], uint32(len(payload)))
+	if err := writeFullConn(conn, header[:]); err != nil {
+		return fmt.Errorf("write Telegram probe frame length: %w", err)
+	}
+	if err := writeFullConn(conn, payload); err != nil {
+		return fmt.Errorf("write Telegram req_pq_multi: %w", err)
+	}
+
+	if _, err := io.ReadFull(conn, header[:]); err != nil {
+		return fmt.Errorf("read Telegram response frame length: %w", err)
+	}
+	responseLength := binary.LittleEndian.Uint32(header[:])
+	if responseLength&0x80000000 != 0 {
+		return fmt.Errorf("unexpected Telegram quick ACK")
+	}
+	minimumResponseLength := uint32(awgWarpUnencryptedHeaderSize + awgWarpMinResPQBodyPrefixSize)
+	if responseLength < minimumResponseLength ||
+		responseLength > awgWarpProbeMTProtoMaxPayload ||
+		responseLength%4 != 0 {
+		return fmt.Errorf("invalid Telegram response length %d", responseLength)
+	}
+
+	response := make([]byte, int(responseLength))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		return fmt.Errorf("read Telegram response payload: %w", err)
+	}
+	if binary.LittleEndian.Uint64(response[:8]) != 0 {
+		return fmt.Errorf("Telegram probe response is encrypted")
+	}
+
+	messageLength := binary.LittleEndian.Uint32(response[16:20])
+	if messageLength < awgWarpMinResPQBodyPrefixSize ||
+		int(messageLength)+awgWarpUnencryptedHeaderSize != len(response) {
+		return fmt.Errorf("invalid Telegram response message length %d", messageLength)
+	}
+	if binary.LittleEndian.Uint32(response[20:24]) != awgWarpResPQConstructor {
+		return fmt.Errorf("unexpected Telegram response constructor")
+	}
+	if !bytes.Equal(response[24:40], nonce[:]) {
+		return fmt.Errorf("Telegram response nonce mismatch")
+	}
+	return nil
 }
 
 func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbeResult {
@@ -148,12 +212,12 @@ func probeAwgWarpConfig(path, target string, timeout time.Duration) awgWarpProbe
 	}
 	_ = thirdConn.Close()
 
-	// A TCP connect alone is insufficient. The failing Android profile that led
-	// to this probe could complete SYN/SYN-ACK to Telegram while every real
-	// application response remained at zero bytes. Require a small request and
-	// at least one downstream payload byte through the same userspace tunnel.
-	if err := probeAwgWarpDataRoundTrip(ctx, dialer.DialContext); err != nil {
-		return awgWarpProbeResult{Code: "data_roundtrip_failed"}
+	// A TCP connect alone is insufficient. Require Telegram itself to answer an
+	// unencrypted MTProto req_pq_multi request through the same userspace tunnel.
+	// This rejects WARP endpoints that can carry generic Internet traffic but
+	// leave real Telegram MTProto sessions with zero downstream bytes.
+	if err := probeAwgWarpTelegramRoundTrip(ctx, dialer.DialContext, target); err != nil {
+		return awgWarpProbeResult{Code: "telegram_roundtrip_failed"}
 	}
 
 	diagnostics, err := dialer.Diagnostics()
