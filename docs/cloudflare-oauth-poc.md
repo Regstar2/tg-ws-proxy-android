@@ -10,7 +10,7 @@ Cloudflare поддерживает OAuth 2.0 Authorization Code для third-pa
 
 OAuth endpoints: authorization https://dash.cloudflare.com/oauth2/auth, token https://dash.cloudflare.com/oauth2/token, revoke https://dash.cloudflare.com/oauth2/revoke.
 
-Cloudflare указывает, что OAuth scope names соответствуют API token permission names. Документация создания OAuth client использует workers-platform.read и workers-platform.write как Workers scope example. Перед production registration фактические scope IDs нужно сверить через GET /client/v4/oauth/scopes.
+Cloudflare указывает, что OAuth scope names соответствуют API token permission names. Реальная проверка GET /client/v4/oauth/scopes 2026-09-19 показала рабочие IDs memberships.read, workers-scripts.read и workers-scripts.write; workers-platform.read/write в фактическом списке scopes отсутствуют.
 
 Для Worker deployment endpoint PUT /accounts/{account_id}/workers/scripts/{script_name} требует Workers Scripts Write. PoC отправляет multipart modules chunk-relay-status-worker.js, chunk-relay-worker.js и worker.js, binding CHUNK_RELAY -> ChunkRelaySession и declarative export ChunkRelaySession с storage=sqlite.
 
@@ -33,14 +33,14 @@ PoC не запрашивает и не хранит refresh token. Access token
 3. Token authentication method: none.
 4. PKCE: S256.
 5. Redirect URI: tgwsproxy://oauth/cloudflare.
-6. Начальные Workers scopes для PoC: workers-platform.read workers-platform.write. После real-device PoC scope set нужно сузить до реально необходимых.
+6. Проверенный набор scopes для PoC: memberships.read workers-scripts.read workers-scripts.write.
 7. Для публичного приложения выполнить publisher domain verification и затем перевести client visibility в public.
 
 Client ID передаётся при сборке, secret отсутствует:
 
     .\gradlew.bat :app:assembleDebug `
       -PTGWSPROXY_CF_OAUTH_CLIENT_ID="<client-id>" `
-      -PTGWSPROXY_CF_OAUTH_SCOPES="workers-platform.read workers-platform.write"
+      -PTGWSPROXY_CF_OAUTH_SCOPES="memberships.read workers-scripts.read workers-scripts.write"
 
 Те же два значения можно передать environment variables TGWSPROXY_CF_OAUTH_CLIENT_ID и TGWSPROXY_CF_OAUTH_SCOPES.
 
@@ -62,7 +62,7 @@ APK не содержит вручную поддерживаемую втору
 
 Без зарегистрированного Cloudflare OAuth client и реального Android device нельзя считать выполненными следующие пункты:
 
-- Cloudflare принимает redirect URI текущего Android PoC;
+- Cloudflare API registration подтверждает поддержку redirect URI tgwsproxy://oauth/cloudflare для Android PKCE client;
 - consent с Workers scopes реально возвращает ожидаемые account resources;
 - выбранные scopes достаточны и могут быть сужены;
 - upload создаёт ChunkRelaySession / SQLite namespace и CHUNK_RELAY binding;
