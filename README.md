@@ -6,20 +6,19 @@
 
 Локальный прокси для Telegram на Android с MTProto- и SOCKS5-frontend и маршрутизацией через Cloudflare Proxy, прямой WebSocket, Cloudflare Worker, userspace AWG/WARP или TCP.
 
-**Русский** · [English](README_EN.md)
-
-[![Version](https://img.shields.io/badge/source-1.11.0-0969DA?style=for-the-badge)](CHANGELOG.md)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](app/build.gradle.kts)
-[![ABI](https://img.shields.io/badge/ABI-arm64--v8a-7B61FF?style=for-the-badge)](app/build.gradle.kts)
-[![Documentation](https://img.shields.io/badge/docs-open-4C8BF5?style=for-the-badge&logo=readthedocs&logoColor=white)](#документация)
+[![Release](https://img.shields.io/github/v/release/Regstar2/tg-ws-proxy-android?style=for-the-badge)](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Regstar2/tg-ws-proxy-android/trusted-ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Regstar2/tg-ws-proxy-android/actions/workflows/trusted-ci.yml)
+[![Platform](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#требования)
 [![License](https://img.shields.io/github/license/Regstar2/tg-ws-proxy-android?style=for-the-badge&label=license)](LICENSE)
+
+**Русский** · [English](README_EN.md)
 
 [🌐 Страница проекта](https://regstar2.github.io/projects/tg-ws-proxy-android/ru/) · [English website](https://regstar2.github.io/projects/tg-ws-proxy-android/)
 
 [Быстрый старт](#быстрый-старт) ·
 [Документация](#документация) ·
 [Релизы](https://github.com/Regstar2/tg-ws-proxy-android/releases) ·
-[Сообщить об ошибке](https://github.com/Regstar2/tg-ws-proxy-android/issues)
+[Обратная связь](https://github.com/Regstar2/tg-ws-proxy-android/issues)
 
 </div>
 
