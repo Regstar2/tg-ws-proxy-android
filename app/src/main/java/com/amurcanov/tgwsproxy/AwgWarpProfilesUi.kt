@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -168,6 +169,10 @@ fun AwgWarpProfilesPage(
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+        WarpProvisioningWorkersCard(
+            isProxyRunning = isProxyRunning,
+        )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = onCreate,
@@ -639,6 +644,236 @@ fun AwgWarpProfileDetailsPage(
             )
         }
     }
+}
+
+@Composable
+private fun WarpProvisioningWorkersCard(
+    isProxyRunning: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val repository = remember(context) { WarpProvisioningBootstrapSettingsRepository(context) }
+    val healthChecker = remember { WarpProvisioningWorkerHealthChecker() }
+    val scope = rememberCoroutineScope()
+    var settings by remember { mutableStateOf(repository.load()) }
+    var newWorkerUrl by remember { mutableStateOf("") }
+    var checkingWorkerId by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    fun refresh() {
+        settings = repository.load()
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                stringResource(R.string.warp_bootstrap_settings_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(R.string.warp_bootstrap_settings_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.warp_bootstrap_builtin_toggle),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        stringResource(R.string.warp_bootstrap_builtin_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.useBuiltInWorkers,
+                    onCheckedChange = { enabled ->
+                        repository.setUseBuiltInWorkers(enabled)
+                        refresh()
+                    },
+                    enabled = !isProxyRunning,
+                )
+            }
+
+            Text(
+                stringResource(
+                    R.string.warp_bootstrap_custom_workers_count,
+                    settings.customWorkers.size,
+                ),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 6.dp),
+            )
+            OutlinedTextField(
+                value = newWorkerUrl,
+                onValueChange = { newWorkerUrl = it.take(512) },
+                label = { Text(stringResource(R.string.warp_bootstrap_worker_url)) },
+                placeholder = { Text(stringResource(R.string.warp_bootstrap_worker_url_hint)) },
+                enabled = !isProxyRunning,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            FilledTonalButton(
+                onClick = {
+                    message = runCatching {
+                        repository.addCustomWorker(newWorkerUrl)
+                    }.fold(
+                        onSuccess = {
+                            newWorkerUrl = ""
+                            refresh()
+                            context.getString(R.string.warp_bootstrap_worker_added)
+                        },
+                        onFailure = {
+                            context.getString(
+                                R.string.warp_bootstrap_worker_action_failed,
+                                supportSafeError(it),
+                            )
+                        },
+                    )
+                },
+                enabled = !isProxyRunning && newWorkerUrl.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            ) {
+                Text(stringResource(R.string.warp_bootstrap_add_worker))
+            }
+
+            settings.customWorkers.forEach { worker ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            worker.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            provisioningWorkerHealthLabel(worker.lastHealthStatus),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
+                        worker.lastCheckedAtMs?.let { checkedAt ->
+                            Text(
+                                stringResource(
+                                    R.string.warp_bootstrap_worker_last_checked,
+                                    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                        .format(Date(checkedAt)),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        worker.lastErrorCode?.let { code ->
+                            Text(
+                                stringResource(R.string.warp_bootstrap_worker_last_error, code),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Switch(
+                                checked = worker.enabled,
+                                onCheckedChange = { enabled ->
+                                    repository.setCustomWorkerEnabled(worker.id, enabled)
+                                    refresh()
+                                },
+                                enabled = !isProxyRunning,
+                            )
+                            Text(
+                                if (worker.enabled) {
+                                    stringResource(R.string.warp_bootstrap_worker_enabled)
+                                } else {
+                                    stringResource(R.string.warp_bootstrap_worker_disabled)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(start = 6.dp).weight(1f),
+                            )
+                            TextButton(
+                                onClick = {
+                                    checkingWorkerId = worker.id
+                                    message = null
+                                    scope.launch {
+                                        val result = healthChecker.check(worker.url)
+                                        repository.updateHealth(worker.id, result)
+                                        checkingWorkerId = null
+                                        message = if (result.ok) {
+                                            context.getString(R.string.warp_bootstrap_worker_check_ok)
+                                        } else {
+                                            context.getString(
+                                                R.string.warp_bootstrap_worker_action_failed,
+                                                result.errorCode ?: "health_failed",
+                                            )
+                                        }
+                                        refresh()
+                                    }
+                                },
+                                enabled = checkingWorkerId == null,
+                            ) {
+                                Text(
+                                    if (checkingWorkerId == worker.id) {
+                                        stringResource(R.string.warp_bootstrap_worker_checking)
+                                    } else {
+                                        stringResource(R.string.warp_bootstrap_worker_check)
+                                    },
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    repository.deleteCustomWorker(worker.id)
+                                    refresh()
+                                },
+                                enabled = !isProxyRunning && checkingWorkerId != worker.id,
+                            ) {
+                                Text(stringResource(R.string.warp_bootstrap_worker_delete))
+                            }
+                        }
+                    }
+                }
+            }
+
+            message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun provisioningWorkerHealthLabel(status: ProvisioningWorkerHealthStatus): String = when (status) {
+    ProvisioningWorkerHealthStatus.UNCHECKED -> stringResource(R.string.warp_bootstrap_worker_status_unchecked)
+    ProvisioningWorkerHealthStatus.HEALTHY -> stringResource(R.string.warp_bootstrap_worker_status_healthy)
+    ProvisioningWorkerHealthStatus.FAILED -> stringResource(R.string.warp_bootstrap_worker_status_failed)
 }
 
 @Composable
