@@ -33,9 +33,13 @@ internal class WarpProvisioningBootstrapException(
 
 internal object BuiltInWarpProvisioningWorkers {
     // Issue #88: keep project-provided provisioning endpoints centralized and separate from
-    // the Telegram cf_worker_ws pool. Deployment URLs are filled only from verified project
-    // infrastructure and never inferred from the user's normal Worker settings.
-    val endpoints: List<String> = emptyList()
+    // the Telegram cf_worker_ws pool. These deployments are provisioning-only bootstrap
+    // Workers and are never inferred from the user's normal Telegram Worker settings.
+    val endpoints: List<String> = listOf(
+        "https://floral-surf-cc2c.awpmxkmo.workers.dev",
+        "https://lucky-frog-795f.ixmxdpw8.workers.dev",
+        "https://steep-snow-3ae9.4048pm01.workers.dev",
+    )
 }
 
 internal object ProvisioningWorkerUrlValidator {
