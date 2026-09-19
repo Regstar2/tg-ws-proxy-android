@@ -8,6 +8,18 @@ import org.junit.Test
 
 class AwgWarpProfileModelsTest {
     @Test
+    fun generatedProfileNamesStartAtOneAndAdvancePastHighestExistingIndex() {
+        assertEquals(1, AwgWarpProfileNames.nextGeneratedIndex("WARP", emptyList()))
+        assertEquals(
+            4,
+            AwgWarpProfileNames.nextGeneratedIndex(
+                "WARP",
+                listOf("WARP 1", "Home", "warp 3", "WARP invalid"),
+            ),
+        )
+    }
+
+    @Test
     fun generatedProfileRoundTripsThroughParser() {
         val profile = WarpProvisionedProfile(
             privateKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
