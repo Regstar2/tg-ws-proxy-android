@@ -216,15 +216,6 @@ class AwgWarpProfileRepository(
         updated
     }
 
-    fun updateImportedProfileConfig(profileId: String, configText: String): Result<AwgWarpProfileMetadata> {
-        val current = runCatching { loadMetadata(profileId) }.getOrNull()
-            ?: return Result.failure(IllegalArgumentException("profile_not_found"))
-        if (current.source != AwgWarpProfileSource.IMPORTED) {
-            return Result.failure(IllegalArgumentException("profile_not_editable"))
-        }
-        return updateProfile(profileId, current.name, configText)
-    }
-
     fun selectProfile(profileId: String): Result<Unit> = runCatching {
         val config = profileConfigFile(profileId)
         if (!config.isFile) error("profile_not_found")
