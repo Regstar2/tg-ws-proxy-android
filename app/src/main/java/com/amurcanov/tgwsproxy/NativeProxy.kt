@@ -27,6 +27,14 @@ interface ProxyLibrary : Library {
     fun GenerateWireGuardKeyPair(): Pointer?
     fun ValidateAWGWarpConfig(configPath: String): Int
     fun ProbeAWGWarpConfig(configPath: String, target: String, timeoutMillis: Long): Pointer?
+    fun ProbeConsumerWARPAPIWithAWG(configPath: String, timeoutMillis: Long): Pointer?
+    fun RegisterConsumerWARPWithAWG(configPath: String, publicKey: String, timeoutMillis: Long): Pointer?
+    fun ActivateConsumerWARPWithAWG(
+        configPath: String,
+        registrationId: String,
+        token: String,
+        timeoutMillis: Long,
+    ): Pointer?
     fun ResetAdaptiveRouteStats(all: Int)
     fun ResetAdaptiveNetworkRouteStats(profileId: String)
     fun FreeString(p: Pointer)
@@ -44,6 +52,14 @@ data class AwgWarpProbeResult(
     val lastHandshakeUnix: Long,
     val tunnelTxBytes: Long,
     val tunnelRxBytes: Long,
+)
+
+internal data class AwgWarpBootstrapHttpResult(
+    val ok: Boolean,
+    val code: String,
+    val status: Int,
+    val body: String?,
+    val requestSent: Boolean,
 )
 
 object NativeProxy {
@@ -166,6 +182,73 @@ object NativeProxy {
             )
         }.getOrElse {
             AwgWarpProbeResult(false, "native_probe_parse_failed", null, 0L, 0L, 0L)
+        }
+    }
+
+    internal fun probeConsumerWarpApiViaAwg(
+        configPath: String,
+        timeoutMillis: Long = 10_000L,
+    ): AwgWarpBootstrapHttpResult {
+        if (configPath.isBlank()) {
+            return AwgWarpBootstrapHttpResult(false, "config_path_empty", 0, null, false)
+        }
+        return parseAwgWarpBootstrapHttpResult(
+            ProxyLibrary.INSTANCE.ProbeConsumerWARPAPIWithAWG(configPath, timeoutMillis),
+        )
+    }
+
+    internal fun registerConsumerWarpViaAwg(
+        configPath: String,
+        publicKey: String,
+        timeoutMillis: Long = 20_000L,
+    ): AwgWarpBootstrapHttpResult {
+        if (configPath.isBlank() || publicKey.isBlank()) {
+            return AwgWarpBootstrapHttpResult(false, "registration_invalid_input", 0, null, false)
+        }
+        return parseAwgWarpBootstrapHttpResult(
+            ProxyLibrary.INSTANCE.RegisterConsumerWARPWithAWG(configPath, publicKey, timeoutMillis),
+        )
+    }
+
+    internal fun activateConsumerWarpViaAwg(
+        configPath: String,
+        registrationId: String,
+        token: String,
+        timeoutMillis: Long = 20_000L,
+    ): AwgWarpBootstrapHttpResult {
+        if (configPath.isBlank() || registrationId.isBlank() || token.isBlank()) {
+            return AwgWarpBootstrapHttpResult(false, "registration_invalid_input", 0, null, false)
+        }
+        return parseAwgWarpBootstrapHttpResult(
+            ProxyLibrary.INSTANCE.ActivateConsumerWARPWithAWG(
+                configPath,
+                registrationId,
+                token,
+                timeoutMillis,
+            ),
+        )
+    }
+
+    private fun parseAwgWarpBootstrapHttpResult(ptr: Pointer?): AwgWarpBootstrapHttpResult {
+        if (ptr == null) {
+            return AwgWarpBootstrapHttpResult(false, "native_bootstrap_empty", 0, null, false)
+        }
+        val payload = try {
+            ptr.getString(0)
+        } finally {
+            ProxyLibrary.INSTANCE.FreeString(ptr)
+        }
+        return runCatching {
+            val json = JSONObject(payload)
+            AwgWarpBootstrapHttpResult(
+                ok = json.optBoolean("ok", false),
+                code = json.optString("code", "unknown"),
+                status = json.optInt("status", 0),
+                body = json.optString("body").takeIf { it.isNotBlank() },
+                requestSent = json.optBoolean("request_sent", false),
+            )
+        }.getOrElse {
+            AwgWarpBootstrapHttpResult(false, "native_bootstrap_parse_failed", 0, null, false)
         }
     }
 

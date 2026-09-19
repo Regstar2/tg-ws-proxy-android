@@ -2,6 +2,11 @@
 
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
+## Unreleased
+- Consumer WARP provisioning now prefers an already full-duplex-validated saved AWG/WARP profile as a bootstrap transport to the fixed Cloudflare Consumer API, with the selected working profile tried first, then other working profiles, direct API, and Worker fallback.
+- Every new automatic profile still generates a new local WireGuard keypair and independent registration; provisioning no longer clones a stored Consumer registration when fresh registration fails.
+- The native existing-AWG bootstrap is restricted to the fixed `api.cloudflareclient.com` reachability, registration, and activation operations and has no direct-socket fallback.
+
 ## 1.11.0-beta.1 - 2026-09-17
 - Added the `awg_warp` MTProto backend using an app-local userspace AmneziaWG/WARP stack; it does not use Android `VpnService`, root, or a system TUN interface.
 - Added Settings → Cloudflare → WARP / AmneziaWG profile management with automatic Consumer WARP creation, manual `.conf` import, explicit selection, profile details, validation, and deletion.

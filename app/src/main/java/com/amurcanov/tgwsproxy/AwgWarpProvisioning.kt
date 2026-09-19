@@ -18,6 +18,7 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -45,7 +46,8 @@ class WarpProvisioningException(
     cause: Throwable? = null,
 ) : Exception(code, cause)
 
-class ConsumerWarpProfileProvisioner(
+internal class ConsumerWarpProfileProvisioner(
+    private val existingAwgBootstrapCandidates: List<ExistingAwgBootstrapCandidate> = emptyList(),
     private val bootstrapWorkerUrls: List<String> = emptyList(),
     private val onStage: (WarpProvisioningStage) -> Unit = {},
     private val onDiagnostic: (String, Map<String, String>) -> Unit = { _, _ -> },
@@ -79,6 +81,9 @@ class ConsumerWarpProfileProvisioner(
 
     @Volatile
     private var activeBootstrapBaseUrl: String? = null
+
+    @Volatile
+    private var activeExistingAwgBootstrap: ExistingAwgBootstrapCandidate? = null
 
     private val httpEvents = object : EventListener() {
         override fun dnsStart(call: Call, domainName: String) {
@@ -254,7 +259,6 @@ class ConsumerWarpProfileProvisioner(
                 "bootstrap_workers" to bootstrapWorkerUrls.size.toString(),
             ),
         )
-        probeApiReachability()
         val response = registerDevice(publicKey = keyPair.publicKey)
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.FETCHING_PARAMETERS)
@@ -309,18 +313,28 @@ class ConsumerWarpProfileProvisioner(
         coroutineContext.ensureActive()
         diagnostic("WARP registration attempt", mapOf("attempt" to "1"))
         return try {
-            withContext(Dispatchers.IO) {
-                val registration = performRegistration(publicKey)
-                enableWarp(registration)
-                registration
+            val existingAwgRegistration = withContext(Dispatchers.IO) {
+                performExistingAwgRegistration(publicKey)
             }
+            val registration = if (existingAwgRegistration != null) {
+                existingAwgRegistration
+            } else {
+                probeApiReachability()
+                withContext(Dispatchers.IO) {
+                    performDirectOrWorkerRegistration(publicKey)
+                }
+            }
+            withContext(Dispatchers.IO) {
+                enableWarp(registration)
+            }
+            registration
         } catch (e: WarpProvisioningException) {
             diagnostic(
                 "WARP registration attempt failed",
                 mapOf("attempt" to "1", "code" to e.code),
             )
             // Rapid retries after 429 only consume more registration quota. The caller can retry
-            // later, while a successful registration is reused for the entire transport autotune.
+            // later; this flow never substitutes a previously stored registration for a new one.
             throw e
         } catch (e: IOException) {
             diagnostic(
@@ -331,21 +345,90 @@ class ConsumerWarpProfileProvisioner(
         }
     }
 
-    private fun performRegistration(publicKey: String): JSONObject {
+    private fun performExistingAwgRegistration(publicKey: String): JSONObject? {
+        activeExistingAwgBootstrap = null
+        activeBootstrapBaseUrl = null
+
+        for ((index, candidate) in existingAwgBootstrapCandidates.withIndex()) {
+            val candidateDetails = mapOf(
+                "candidate" to (index + 1).toString(),
+                "total" to existingAwgBootstrapCandidates.size.toString(),
+                "source" to candidate.source.wireValue,
+                "selected" to candidate.selected.toString(),
+            )
+            diagnostic("WARP bootstrap profile probe started", candidateDetails)
+            val probe = NativeProxy.probeConsumerWarpApiViaAwg(candidate.configPath)
+            diagnostic(
+                "WARP bootstrap profile probe finished",
+                candidateDetails + mapOf(
+                    "ok" to probe.ok.toString(),
+                    "code" to probe.code,
+                    "status" to probe.status.toString(),
+                ),
+            )
+            if (!probe.ok) continue
+
+            diagnostic("WARP bootstrap profile selected", candidateDetails)
+            val result = NativeProxy.registerConsumerWarpViaAwg(candidate.configPath, publicKey)
+            diagnostic(
+                "WARP bootstrap registration response",
+                candidateDetails + mapOf(
+                    "status" to result.status.toString(),
+                    "ok" to result.ok.toString(),
+                    "code" to result.code,
+                ),
+            )
+            if (result.ok) {
+                val body = result.body ?: throw WarpProvisioningException("registration_empty_response")
+                val registration = runCatching { JSONObject(body) }
+                    .getOrElse { throw WarpProvisioningException("registration_response_invalid") }
+                activeExistingAwgBootstrap = candidate
+                diagnostic(
+                    "WARP provisioning bootstrap path",
+                    mapOf(
+                        "path" to "existing_awg",
+                        "source" to candidate.source.wireValue,
+                        "selected" to candidate.selected.toString(),
+                    ),
+                )
+                return registration
+            }
+
+            if (!result.requestSent &&
+                (result.code == "registration_network_error" || result.code == "bootstrap_transport_init_failed")
+            ) {
+                diagnostic(
+                    "WARP existing AWG bootstrap failed before registration send",
+                    candidateDetails + ("fallback" to "next"),
+                )
+                continue
+            }
+
+            // If request headers may have left the device, retrying POST through another transport
+            // could create a duplicate Consumer WARP device. Preserve the existing ambiguity guard.
+            throw WarpProvisioningException(result.code.ifBlank { "registration_network_error" })
+        }
+        return null
+    }
+
+    private fun performDirectOrWorkerRegistration(publicKey: String): JSONObject {
         val body = JSONObject()
             .put("key", publicKey)
             .toString()
 
         directRegistrationMayHaveBeenSent = false
         activeBootstrapBaseUrl = null
+        activeExistingAwgBootstrap = null
         try {
-            return executeJsonRequest(
+            val registration = executeJsonRequest(
                 method = "POST",
                 url = API_BASE_URL + REGISTER_PATH,
                 body = body,
                 bearerToken = null,
                 operationName = "registration",
             )
+            diagnostic("WARP provisioning bootstrap path", mapOf("path" to "direct"))
+            return registration
         } catch (e: IOException) {
             if (directRegistrationMayHaveBeenSent) {
                 diagnostic(
@@ -368,6 +451,7 @@ class ConsumerWarpProfileProvisioner(
                 operationName = "bootstrap registration",
             )
             activeBootstrapBaseUrl = bootstrapBaseUrl
+            diagnostic("WARP provisioning bootstrap path", mapOf("path" to "worker"))
             return registration
         }
     }
@@ -379,6 +463,40 @@ class ConsumerWarpProfileProvisioner(
         if (token.isBlank()) throw WarpProvisioningException("registration_missing_token")
 
         val body = JSONObject().put("warp_enabled", true).toString()
+        val existingAwgBootstrap = activeExistingAwgBootstrap
+        if (existingAwgBootstrap != null) {
+            val result = NativeProxy.activateConsumerWarpViaAwg(
+                configPath = existingAwgBootstrap.configPath,
+                registrationId = registrationId,
+                token = token,
+            )
+            diagnostic(
+                "WARP bootstrap activation response",
+                mapOf(
+                    "path" to "existing_awg",
+                    "source" to existingAwgBootstrap.source.wireValue,
+                    "selected" to existingAwgBootstrap.selected.toString(),
+                    "status" to result.status.toString(),
+                    "ok" to result.ok.toString(),
+                    "code" to result.code,
+                ),
+            )
+            if (result.ok) {
+                diagnostic("WARP registration activated", mapOf("transport" to "existing_awg"))
+                return
+            }
+            if (result.code != "registration_network_error" && result.code != "bootstrap_transport_init_failed") {
+                throw WarpProvisioningException(result.code.ifBlank { "registration_network_error" })
+            }
+            // PATCH is idempotent for the already-created registration, so transport failure can
+            // safely fall through to direct API and then the existing Worker fallback.
+            activeExistingAwgBootstrap = null
+            diagnostic(
+                "WARP activation switching from existing AWG bootstrap to direct API",
+                mapOf("code" to result.code),
+            )
+        }
+
         val bootstrapBaseUrl = activeBootstrapBaseUrl
         if (bootstrapBaseUrl != null) {
             executeJsonRequest(
@@ -577,47 +695,12 @@ data class AwgWarpProfileCheckResult(
     val probe: AwgWarpProbeResult? = null,
 )
 
-internal fun reusableConsumerWarpRegistration(
-    metadata: AwgWarpProfileMetadata,
-    details: AwgWarpConfigDetails,
-): WarpProvisionedProfile? {
-    if (metadata.source != AwgWarpProfileSource.CONSUMER_WARP) return null
-    val publicKey = metadata.localPublicKey?.trim().orEmpty()
-    if (publicKey.isBlank()) return null
-
-    val ipv4 = details.addresses.firstOrNull { address ->
-        !address.substringBefore('/').contains(':')
-    }.orEmpty()
-    val ipv6 = details.addresses.firstOrNull { address ->
-        address.substringBefore('/').contains(':')
-    }.orEmpty()
-    if (ipv4.isBlank() && ipv6.isBlank()) return null
-
-    return WarpProvisionedProfile(
-        privateKey = details.privateKey,
-        publicKey = publicKey,
-        assignedIpv4 = ipv4,
-        assignedIpv6 = ipv6,
-        peerPublicKey = details.peer.publicKey,
-        endpoint = details.peer.endpoint,
-        allowedIps = details.peer.allowedIps,
-        mtu = details.mtu,
-        persistentKeepalive = details.peer.persistentKeepalive ?: 25,
-        deviceOptions = details.deviceOptions,
-    )
-}
-
 class AwgWarpProfileManager(
     context: Context,
     private val repository: AwgWarpProfileRepository = AwgWarpProfileRepository(context.applicationContext),
 ) {
     companion object {
         private const val TELEGRAM_PROBE_TARGET = "149.154.175.50:443"
-        private val REGISTRATION_REUSE_FAILURES = setOf(
-            "registration_rate_limited",
-            "registration_network_error",
-            "registration_server_error",
-        )
     }
 
     private val appContext = context.applicationContext
@@ -638,43 +721,26 @@ class AwgWarpProfileManager(
         name: String,
         onStage: (WarpProvisioningStage) -> Unit,
     ): Result<AwgWarpProfileMetadata> = runCatching {
-        val provider = ConsumerWarpProfileProvisioner(
-            bootstrapWorkerUrls = WarpBootstrapWorkerCandidates.load(appContext),
-            onStage = onStage,
-            onDiagnostic = { message, details ->
-                AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
-            },
-        )
-        val request = WarpProvisionRequest(
-            profileName = name,
-            deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
-        )
-        val provisioned = provider.provision(request).fold(
-            onSuccess = { it },
-            onFailure = { throwable ->
-                if (throwable is CancellationException) throw throwable
-                val code = (throwable as? WarpProvisioningException)?.code
-                val reusable = if (code != null && code in REGISTRATION_REUSE_FAILURES) {
-                    reusableConsumerWarpRegistration()
-                } else {
-                    null
-                }
-                if (reusable == null) throw throwable
-
-                onStage(WarpProvisioningStage.FETCHING_PARAMETERS)
-                AppLogger.i(
-                    appContext,
-                    AppLogCategory.NETWORK,
-                    "WARP stored registration reused for autotune",
-                    mapOf(
-                        "reason" to code.orEmpty(),
-                        "selected_source_profile" to reusable.second.toString(),
-                        "endpoint" to reusable.first.endpoint,
-                    ),
-                )
-                reusable.first
-            },
-        )
+        val bootstrapCandidates = prepareExistingAwgBootstrapCandidates()
+        val provisioned = try {
+            val provider = ConsumerWarpProfileProvisioner(
+                existingAwgBootstrapCandidates = bootstrapCandidates,
+                bootstrapWorkerUrls = WarpBootstrapWorkerCandidates.load(appContext),
+                onStage = onStage,
+                onDiagnostic = { message, details ->
+                    AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
+                },
+            )
+            val request = WarpProvisionRequest(
+                profileName = name,
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+            )
+            provider.provision(request).getOrThrow()
+        } finally {
+            bootstrapCandidates.forEach { candidate ->
+                repository.removeStagingConfig(File(candidate.configPath))
+            }
+        }
 
         coroutineContext.ensureActive()
         onStage(WarpProvisioningStage.BUILDING_PROFILE)
@@ -818,22 +884,45 @@ class AwgWarpProfileManager(
         throw WarpProvisioningException("profile_creation_failed", throwable)
     }
 
-    private fun reusableConsumerWarpRegistration(): Pair<WarpProvisionedProfile, Boolean>? {
-        val candidates = repository.listProfiles()
-            .asSequence()
-            .filter { summary -> summary.metadata.source == AwgWarpProfileSource.CONSUMER_WARP }
-            .sortedWith(
-                compareByDescending<AwgWarpProfileSummary> { it.selected }
-                    .thenByDescending { it.metadata.createdAtMs },
+    private fun prepareExistingAwgBootstrapCandidates(): List<ExistingAwgBootstrapCandidate> {
+        val prepared = mutableListOf<ExistingAwgBootstrapCandidate>()
+        for (summary in orderedExistingAwgBootstrapProfiles(repository.listProfiles())) {
+            val configText = repository.loadConfig(summary.metadata.id) ?: continue
+            val staging = repository.createStagingConfig(configText).getOrNull()
+            if (staging == null) {
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP bootstrap profile skipped",
+                    mapOf(
+                        "source" to summary.metadata.source.wireValue,
+                        "selected" to summary.selected.toString(),
+                        "reason" to "structural_validation_failed",
+                    ),
+                )
+                continue
+            }
+            if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
+                repository.removeStagingConfig(staging)
+                AppLogger.i(
+                    appContext,
+                    AppLogCategory.NETWORK,
+                    "WARP bootstrap profile skipped",
+                    mapOf(
+                        "source" to summary.metadata.source.wireValue,
+                        "selected" to summary.selected.toString(),
+                        "reason" to "native_validation_failed",
+                    ),
+                )
+                continue
+            }
+            prepared += ExistingAwgBootstrapCandidate(
+                configPath = staging.absolutePath,
+                source = summary.metadata.source,
+                selected = summary.selected,
             )
-            .toList()
-
-        for (summary in candidates) {
-            val details = repository.loadDetails(summary.metadata.id).getOrNull() ?: continue
-            val registration = reusableConsumerWarpRegistration(summary.metadata, details) ?: continue
-            return registration to summary.selected
         }
-        return null
+        return prepared
     }
 
     suspend fun importProfile(uri: Uri, name: String): Result<AwgWarpProfileMetadata> = runCatching {
