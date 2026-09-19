@@ -214,7 +214,17 @@ Android-клиент считает endpoint совместимым только
 
 Никакие Variables, Secrets, Durable Object bindings или Routes для базового provisioning-only deployment не требуются.
 
-## Развёртывание одного Worker
+После проверки endpoint:
+
+1. откройте **Настройки → Cloudflare → WARP / AmneziaWG**;
+2. откройте список **Пользовательские bootstrap Worker**;
+3. добавьте базовый HTTPS URL Worker без `/warp-bootstrap/...`;
+4. выполните проверку Worker в приложении;
+5. оставьте endpoint включённым и запустите **Создать профиль**.
+
+Не добавляйте такой standalone Worker в обычный Telegram Worker Pool: он намеренно возвращает `404` для Telegram relay paths.
+
+## Развёртывание Telegram Worker (chunk relay)
 
 Требуется Cloudflare Workers с поддержкой Durable Objects и установленный Wrangler.
 
@@ -242,7 +252,9 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 }
 ```
 
-После deploy используйте выданный Cloudflare Worker-домен либо в отдельном списке **WARP / AmneziaWG → Пользовательские bootstrap Worker**, либо, для инфраструктуры проекта, в централизованном built-in provisioning pool. Не добавляйте provisioning-only deployment в обычный Telegram Worker Pool, если он не должен принимать Telegram proxy traffic.
+После deploy добавьте выданный Cloudflare Worker-домен в обычный **Telegram Worker Pool** TgWsProxy и используйте его как маршрут `cf_worker_ws`.
+
+Комбинированный entry point также отвечает на `/warp-bootstrap/*`, поэтому тот же deployment при необходимости можно отдельно добавить в список **WARP / AmneziaWG → Пользовательские bootstrap Worker**. Эти две записи остаются независимыми: наличие домена в одном списке не добавляет его в другой автоматически.
 
 Проверьте, что новый wrapper действительно опубликован:
 
@@ -259,11 +271,11 @@ Invoke-RestMethod "$Worker/warp-bootstrap/health"
 
 Этот health-check подтверждает только публикацию bootstrap wrapper. Реальный `fetch()` к Consumer WARP API должен быть отдельно подтверждён provisioning smoke-test; unit-тесты не заменяют сетевую проверку Cloudflare deployment.
 
-## Рекомендуется несколько Worker
+## Несколько Telegram Worker
 
-Для provisioning рекомендуется развернуть **не один, а несколько Worker deployment**. Пользовательские deployment добавляются в отдельный provisioning-список приложения; встроенные deployment задаются централизованно в приложении и управляются одним toggle.
+Для `cf_worker_ws` можно развернуть **несколько одинаковых chunk-relay Worker deployment** и добавить их в обычный Telegram Worker Pool.
 
-Практический стартовый вариант — **2–3 Worker**.
+Практический стартовый вариант — **2–3 Telegram Worker**. Это отдельная рекомендация от встроенного provisioning pool: три встроенных project Worker используются только при создании WARP-профиля и не являются Telegram Worker.
 
 Например:
 
@@ -281,9 +293,9 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name tgproxy-backup
 ```
 
-Все Worker должны использовать актуальный код v1.10.14+ и новую chunk-relay/Durable Object конфигурацию.
+Все Telegram Worker должны использовать актуальный код v1.10.14+ и chunk-relay/Durable Object конфигурацию.
 
-После развёртывания добавьте все домены в Worker-пул TgWsProxy и используйте стратегию распределения, поддерживающую несколько Worker.
+После развёртывания добавьте их домены в обычный Telegram Worker Pool TgWsProxy и используйте поддерживаемую стратегию распределения.
 
 ### Зачем несколько Worker
 
@@ -303,17 +315,22 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 
 ## Проверка после deploy
 
-После обновления Worker рекомендуется проверить:
+Для **Telegram Worker** проверьте:
+
+1. подключение Telegram через `cf_worker_ws`;
+2. отправку и получение сообщений;
+3. загрузку и скачивание медиа;
+4. reconnect после разрыва соединения;
+5. создание нескольких MTProto-сессий;
+6. работу пула из нескольких Telegram Worker;
+7. отсутствие возврата на старый WebSocket Worker transport.
+
+Для **provisioning Worker** отдельно проверьте:
 
 1. `GET /warp-bootstrap/health` и revision `warp-bootstrap-v1`;
-2. подключение Telegram через Worker-маршрут;
-3. отправку и получение сообщений;
-4. загрузку и скачивание медиа;
-5. reconnect после разрыва соединения;
-6. создание нескольких MTProto-сессий;
-7. работу пула из нескольких Worker;
-8. отсутствие возврата на старый WebSocket Worker transport;
-9. отдельный Consumer WARP provisioning smoke-test через bootstrap после подключения Android fallback.
+2. успешную проверку endpoint в списке пользовательских bootstrap Worker;
+3. реальное создание нового Consumer WARP-профиля через этот endpoint при недоступном direct API;
+4. отсутствие Worker в обычном Telegram Worker Pool, если deployment provisioning-only.
 
 В диагностике v1.10.14 должны быть видны признаки chunk-relay/RelayHub пути, а Worker должен отвечать актуальными revision headers.
 
