@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -44,42 +46,106 @@ func TestProbeAwgWarpConfigRejectsEmptyInputs(t *testing.T) {
 	}
 }
 
-func TestProbeAwgWarpDataRoundTripRequiresResponse(t *testing.T) {
+func TestProbeAwgWarpTelegramRoundTripAcceptsMatchingResPQ(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := probeAwgWarpDataRoundTrip(ctx, func(context.Context, string, string) (net.Conn, error) {
-		client, server := net.Pipe()
-		go func() {
-			defer server.Close()
-			buffer := make([]byte, 512)
-			if _, err := server.Read(buffer); err != nil {
-				return
+	const target = "149.154.175.50:443"
+	err := probeAwgWarpTelegramRoundTrip(
+		ctx,
+		func(_ context.Context, network, address string) (net.Conn, error) {
+			if network != "tcp" || address != target {
+				t.Fatalf("unexpected dial network=%q address=%q", network, address)
 			}
-			_, _ = server.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx"))
-		}()
-		return client, nil
-	})
+			client, server := net.Pipe()
+			go serveAwgWarpTelegramResPQ(server, false)
+			return client, nil
+		},
+		target,
+	)
 	if err != nil {
-		t.Fatalf("data round trip failed: %v", err)
+		t.Fatalf("Telegram round trip failed: %v", err)
 	}
 }
 
-func TestProbeAwgWarpDataRoundTripRejectsSilentPeer(t *testing.T) {
+func TestProbeAwgWarpTelegramRoundTripRejectsMismatchedNonce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := probeAwgWarpTelegramRoundTrip(
+		ctx,
+		func(context.Context, string, string) (net.Conn, error) {
+			client, server := net.Pipe()
+			go serveAwgWarpTelegramResPQ(server, true)
+			return client, nil
+		},
+		"149.154.175.50:443",
+	)
+	if err == nil {
+		t.Fatal("mismatched Telegram nonce unexpectedly passed")
+	}
+}
+
+func TestProbeAwgWarpTelegramRoundTripRejectsSilentPeer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err := probeAwgWarpDataRoundTrip(ctx, func(context.Context, string, string) (net.Conn, error) {
-		client, server := net.Pipe()
-		go func() {
-			defer server.Close()
-			buffer := make([]byte, 512)
-			_, _ = server.Read(buffer)
-			<-ctx.Done()
-		}()
-		return client, nil
-	})
+	err := probeAwgWarpTelegramRoundTrip(
+		ctx,
+		func(context.Context, string, string) (net.Conn, error) {
+			client, server := net.Pipe()
+			go func() {
+				defer server.Close()
+				_, _ = io.Copy(io.Discard, server)
+			}()
+			return client, nil
+		},
+		"149.154.175.50:443",
+	)
 	if err == nil {
-		t.Fatal("silent peer unexpectedly passed bidirectional data probe")
+		t.Fatal("silent Telegram peer unexpectedly passed")
 	}
+}
+
+func serveAwgWarpTelegramResPQ(conn net.Conn, mismatchNonce bool) {
+	defer conn.Close()
+
+	var header [4]byte
+	if _, err := io.ReadFull(conn, header[:]); err != nil {
+		return
+	}
+	if binary.LittleEndian.Uint32(header[:]) != awgWarpIntermediateTransport {
+		return
+	}
+	if _, err := io.ReadFull(conn, header[:]); err != nil {
+		return
+	}
+	requestLength := binary.LittleEndian.Uint32(header[:])
+	if requestLength != awgWarpUnencryptedHeaderSize+awgWarpReqPQMultiBodySize {
+		return
+	}
+	request := make([]byte, int(requestLength))
+	if _, err := io.ReadFull(conn, request); err != nil {
+		return
+	}
+	if binary.LittleEndian.Uint64(request[:8]) != 0 ||
+		binary.LittleEndian.Uint32(request[16:20]) != awgWarpReqPQMultiBodySize ||
+		binary.LittleEndian.Uint32(request[20:24]) != awgWarpReqPQMultiConstructor {
+		return
+	}
+
+	response := make([]byte, 100)
+	binary.LittleEndian.PutUint64(response[8:16], uint64(time.Now().Unix())<<32)
+	binary.LittleEndian.PutUint32(response[16:20], uint32(len(response)-awgWarpUnencryptedHeaderSize))
+	binary.LittleEndian.PutUint32(response[20:24], awgWarpResPQConstructor)
+	copy(response[24:40], request[24:40])
+	if mismatchNonce {
+		response[24] ^= 0xff
+	}
+
+	binary.LittleEndian.PutUint32(header[:], uint32(len(response)))
+	if err := writeFullConn(conn, header[:]); err != nil {
+		return
+	}
+	_ = writeFullConn(conn, response)
 }
