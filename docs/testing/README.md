@@ -2,7 +2,7 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The currently published application version is `1.10.12`; `v1.10.13` is the active development target. Do not mark a v1.10.13 check as passed unless it was actually run against the corresponding integrated build.
+The latest published prerelease is `v1.11.0-beta.1`; `v1.11.0` is the current stable release target. Do not mark a stable check as passed unless it was run against the corresponding integrated build.
 
 ## Automated checks
 
@@ -37,7 +37,7 @@ For changes that affect `.github/workflows/` or `scripts/ci.ps1`:
 - [ ] Project Sync runs on GitHub-hosted `ubuntu-latest` and does not checkout/execute PR code;
 - [ ] external/fork PR code is never executed on the persistent self-hosted runner;
 - [ ] no Project PAT or signing secret is printed in logs;
-- [ ] the self-hosted `Windows`/`X64` runner is reserved for the owner-controlled release workflow.
+- [ ] the owner-controlled release workflow runs the exact release tag on GitHub-hosted `windows-latest` and restores signing material only into the temporary runner directory.
 
 Release automation is not considered functionally verified by a debug CI run. Before an automated public release, separately validate release signing, `scripts/release.ps1`, the exact release tag and the generated `dist/` artifacts.
 
@@ -106,4 +106,11 @@ Automation contract: [../development/github-automation.md](../development/github
 Release process: [../releases/release.md](../releases/release.md).  
 Detailed checklist: [../releases/RELEASE_CHECKLIST.md](../releases/RELEASE_CHECKLIST.md).
 
-A v1.10.13 release candidate must additionally satisfy the acceptance criteria of the v1.10.13 GitHub Issues included in the release scope.
+A v1.11.0 stable candidate must additionally verify the AWG/WARP and provisioning paths introduced by #84, #86 and #88:
+
+- [ ] create and validate an automatic WARP profile;
+- [ ] verify real Telegram MTProto traffic through `awg_warp`;
+- [ ] verify existing-profile → direct API → custom Worker → built-in Worker bootstrap ordering as applicable;
+- [ ] confirm the three built-in project Workers are provisioning-only and never enter the Telegram Worker Pool;
+- [ ] verify built-in Worker opt-out;
+- [ ] install the signed stable APK over both `v1.10.14` and `v1.11.0-beta.1`.

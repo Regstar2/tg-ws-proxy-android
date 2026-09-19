@@ -1,114 +1,85 @@
-# Release checklist
+# Release checklist — v1.11.0 stable
 
-> Short workflow: [release.md](release.md). This file is the detailed checklist.
+## Metadata / documentation
 
-## Metadata / repository audit
-
-- [ ] `releaseVersionName = 1.10.13` and `releaseVersionCode = 51`.
-- [ ] `.\scripts\audit-release.ps1 -ExpectedVersion 1.10.13 -ExpectedVersionCode 51` passes.
-- [ ] RU/default-English resource keys have parity.
-- [ ] README RU/EN, CHANGELOG, version docs and `RELEASE_NOTES_v1.10.13.md` agree with the source metadata.
-- [ ] No obsolete `Regstar2/TgWsProxy_Android` repository URLs remain in README RU/EN.
-- [ ] No private governance/tool state, local logs, environment files, signing material or keystores are tracked.
-- [ ] Final branch diff contains no unrelated changes.
+- [ ] `releaseVersionName = 1.11.0`, `releaseVersionCode = 54`.
+- [ ] `.\scripts\audit-release.ps1 -ExpectedVersion 1.11.0 -ExpectedVersionCode 54` passes.
+- [ ] README RU/EN, CHANGELOG and release notes agree with source metadata.
+- [ ] Canonical Worker guide is `docs/cloudflare-worker.md`; legacy path only redirects to it.
+- [ ] No keystore, signing secret, local log, `.env`, `local.properties` or private governance files are tracked.
+- [ ] Release branch diff contains no unrelated changes.
 
 ## Automated build
 
 - [ ] `.\scripts\ci.ps1` passes.
-- [ ] `go mod verify` passes in `native/tgwsproxy`.
-- [ ] `go test ./...` passes in `native/tgwsproxy`.
-- [ ] `testDebugUnitTest` passes.
+- [ ] Go module verification/tests pass.
+- [ ] Android unit tests pass.
 - [ ] `assembleDebug` passes.
-- [ ] packaged APK icon/resource audit passes.
-- [ ] debug APK reports `versionName 1.10.13-debug` / `versionCode 52`.
+- [ ] packaged APK resource audit passes.
+- [ ] release preflight accepts `v1.11.0`.
 
 ## Signed release artifact
 
-- [ ] Local release signing variables/keystore are configured outside Git.
-- [ ] `.\scripts\release.ps1 -Version v1.10.13` succeeds.
-- [ ] `apksigner verify --verbose --print-certs` succeeds inside the release script.
-- [ ] `dist\TgWsProxy-Android-v1.10.13-arm64-v8a.apk` exists.
-- [ ] matching `.sha256` exists and contains the artifact SHA-256.
-- [ ] signed release APK reports `versionName 1.10.13` / `versionCode 51`.
+- [ ] `.\scripts\release.ps1 -Version v1.11.0` succeeds with the release keystore.
+- [ ] `apksigner verify --verbose --print-certs` succeeds.
+- [ ] `dist\TgWsProxy-Android-v1.11.0-arm64-v8a.apk` exists.
+- [ ] matching `.sha256` exists.
+- [ ] APK reports `versionName 1.11.0` / `versionCode 54`.
+- [ ] upgrade over signed `v1.10.14` succeeds without uninstall/data loss.
+- [ ] upgrade over signed `v1.11.0-beta.1` succeeds without uninstall/data loss.
 
-## Core runtime
+## Core Telegram runtime
 
-- [ ] Start proxy.
-- [ ] Stop proxy.
-- [ ] Reconnect proxy.
-- [ ] MTProto frontend starts on the configured local port (default `127.0.0.1:1443`).
-- [ ] **Apply in Telegram** opens the MTProto proxy configuration.
-- [ ] Telegram connects and receives text messages.
-- [ ] Telegram sends text messages.
-- [ ] Telegram loads images/media.
-- [ ] Telegram sends media where practical.
-- [ ] Main `cf_proxy_ws` route works.
-- [ ] Disabled routes are not selected.
-- [ ] Direct/TCP fallback behavior remains consistent with the saved route policy.
-- [ ] Worker route remains optional and does not become the default unexpectedly.
+- [ ] Start / stop / reconnect proxy.
+- [ ] **Apply in Telegram** opens the local MTProto proxy configuration.
+- [ ] Telegram sends and receives text messages.
+- [ ] Telegram loads and sends media.
+- [ ] main `cf_proxy_ws` route works.
+- [ ] disabled routes are not selected.
+- [ ] Wi-Fi → mobile and mobile → Wi-Fi reconfigure without manual restart.
 
-## Network / lifecycle
+## AWG/WARP stable path
 
-- [ ] Proxy works on Wi-Fi.
-- [ ] Proxy works on mobile data.
-- [ ] Start on Wi-Fi → switch to mobile → runtime reconfigures without manual restart.
-- [ ] Start on mobile → switch to Wi-Fi → runtime reconfigures without manual restart.
-- [ ] Foreground notification remains visible during reconfigure.
-- [ ] Background/resume does not stop the proxy unexpectedly.
-- [ ] Screen rotation does not break settings/runtime state.
+- [ ] Existing selected WORKING AWG profile can bootstrap a fresh independent Consumer WARP registration.
+- [ ] If selected profile is unavailable, other WORKING profiles are tried before direct API.
+- [ ] Direct `api.cloudflareclient.com` path works where reachable.
+- [ ] Automatic profile gets a new local keypair and independent registration.
+- [ ] Bounded autotune does not save a candidate before two successful confirmations.
+- [ ] Validation requires real Telegram MTProto `req_pq_multi → resPQ`, not only a generic tunnel handshake.
+- [ ] Selected profile can carry Telegram text and media through `actual_backend=awg_warp` with no unintended fallback.
+- [ ] Profile rename/config edit resets validation to **Not checked** until revalidated.
+- [ ] Generated names increment (`WARP 1`, `WARP 2`, ...).
 
-## Diagnostics / privacy
+## Provisioning Worker policy
 
-- [ ] Route diagnostics opens and completes expected checks.
-- [ ] Diagnostic report can be copied/shared.
-- [ ] Exported diagnostics do not expose raw proxy secrets/tokens.
-- [ ] Exported diagnostics do not expose raw SSID or SIM operator.
-- [ ] Exported diagnostics do not expose full sensitive domains when masking is expected.
+- [ ] Custom provisioning Worker can be added, checked, enabled/disabled and deleted.
+- [ ] Health requires `service=warp-bootstrap` and `revision=warp-bootstrap-v1`.
+- [ ] Custom Worker is tried before built-in provisioning Workers.
+- [ ] The three built-in project Workers are used only for WARP profile provisioning.
+- [ ] Built-in provisioning Workers never appear in or modify the Telegram `cf_worker_ws` Worker Pool.
+- [ ] With **Use built-in bootstrap Workers = OFF**, no built-in endpoint is contacted.
+- [ ] A failed provisioning Worker does not replace/deselect the current working AWG profile.
+- [ ] Standalone provisioning Worker returns 404 for unrelated paths and cannot act as an arbitrary proxy.
+
+## Privacy / diagnostics
+
+- [ ] WARP private key is not sent to the Consumer API/Worker and is not present in support-safe diagnostics.
+- [ ] Raw registration token, Authorization header and full `.conf` are not logged.
+- [ ] Exported diagnostics do not expose proxy credentials or unrelated device/network secrets.
 - [ ] Runtime/persistent logging remains disabled by default.
 
-## Feedback
+## UI / localization / updates
 
-- [ ] **Settings → Feedback / Обратная связь** opens a dedicated screen.
-- [ ] Report bug opens this repository's bug Issue Form.
-- [ ] Request feature opens this repository's feature Issue Form.
-- [ ] Copied helper context contains only app version/code, Android release/SDK and manufacturer/model.
-- [ ] No logs, proxy credentials, Telegram data, IPs or secrets are auto-attached.
-- [ ] Opening Feedback/browser while proxy is running does not stop/reconfigure it.
-
-## Updates
-
-- [ ] **Settings → Updates / Обновления** opens a dedicated screen.
-- [ ] Installed version/code are shown.
-- [ ] Automatic check starts only after the Updates screen opens.
-- [ ] Manual **Check for updates** works.
-- [ ] Release notes render as cleaned compact text; full notes can be expanded/collapsed.
-- [ ] Available update action opens only `Regstar2/tg-ws-proxy-android` official GitHub Release page.
-- [ ] Offline/timeout/API failures remain local UI errors and do not affect proxy connectivity.
-- [ ] No APK is silently downloaded or installed.
-
-## Localization / UI
-
-- [ ] Main UI reviewed in Russian.
-- [ ] Main UI reviewed in English/default fallback.
-- [ ] Feedback reviewed in RU/EN.
-- [ ] Updates reviewed in RU/EN.
-- [ ] No obvious unintended hardcoded user-facing strings are visible.
-- [ ] Back navigation from Feedback and Updates works.
-
-## Notification / packaged resources
-
-- [ ] Foreground notification visible while running.
-- [ ] Application icon resource: `ic_launcher_tgwsproxy_v2`.
-- [ ] Round icon: `ic_launcher_tgwsproxy_round_v2`.
-- [ ] Notification small icon: `ic_notification_small_v2`.
-- [ ] Notification large icon: `notification_app_icon_v2`.
-- [ ] `scripts/audit-apk-icons.ps1` reports no legacy filenames in APK.
-- [ ] Tap notification opens app.
-- [ ] Stop / Start / Reconnect / Open notification actions work.
+- [ ] Main UI, WARP screens, bootstrap Worker settings, Feedback and Updates reviewed in RU and EN.
+- [ ] No obvious clipping or fallback-key text.
+- [ ] Updates screen detects the stable release from the official GitHub Releases feed.
+- [ ] No APK is silently installed.
 
 ## Publication gate
 
-- [ ] Issue #6 manual acceptance is complete/closed or explicitly resolved as part of this final acceptance.
-- [ ] Issue #7 manual proxy acceptance is recorded.
-- [ ] Signed release artifact is verified.
-- [ ] Only then create/push tag `v1.10.13` and allow the owner-controlled release workflow to publish.
+- [ ] All automated checks above pass.
+- [ ] Signed APK device smoke is complete.
+- [ ] Release notes contain no unverified success claims.
+- [ ] Create/push exact tag `v1.11.0`.
+- [ ] Release workflow publishes exactly APK + SHA-256.
+- [ ] Downloaded release APK can be installed and launched.

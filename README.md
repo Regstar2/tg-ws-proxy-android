@@ -6,20 +6,19 @@
 
 Локальный прокси для Telegram на Android с MTProto- и SOCKS5-frontend и маршрутизацией через Cloudflare Proxy, прямой WebSocket, Cloudflare Worker, userspace AWG/WARP или TCP.
 
-**Русский** · [English](README_EN.md)
-
-[![Version](https://img.shields.io/badge/source-1.11.0--beta.1-0969DA?style=for-the-badge)](CHANGELOG.md)
-[![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](app/build.gradle.kts)
-[![ABI](https://img.shields.io/badge/ABI-arm64--v8a-7B61FF?style=for-the-badge)](app/build.gradle.kts)
-[![Documentation](https://img.shields.io/badge/docs-open-4C8BF5?style=for-the-badge&logo=readthedocs&logoColor=white)](#документация)
+[![Release](https://img.shields.io/github/v/release/Regstar2/tg-ws-proxy-android?style=for-the-badge)](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Regstar2/tg-ws-proxy-android/trusted-ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Regstar2/tg-ws-proxy-android/actions/workflows/trusted-ci.yml)
+[![Platform](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#требования)
 [![License](https://img.shields.io/github/license/Regstar2/tg-ws-proxy-android?style=for-the-badge&label=license)](LICENSE)
+
+**Русский** · [English](README_EN.md)
 
 [🌐 Страница проекта](https://regstar2.github.io/projects/tg-ws-proxy-android/ru/) · [English website](https://regstar2.github.io/projects/tg-ws-proxy-android/)
 
 [Быстрый старт](#быстрый-старт) ·
 [Документация](#документация) ·
 [Релизы](https://github.com/Regstar2/tg-ws-proxy-android/releases) ·
-[Сообщить об ошибке](https://github.com/Regstar2/tg-ws-proxy-android/issues)
+[Обратная связь](https://github.com/Regstar2/tg-ws-proxy-android/issues)
 
 </div>
 
@@ -29,17 +28,17 @@
 
 TgWsProxy запускает локальный прокси на Android-устройстве. Telegram подключается к нему через MTProto Proxy или совместимый SOCKS5-режим, после чего нативный runtime выбирает разрешённый маршрут к инфраструктуре Telegram.
 
-Основной сценарий остаётся **MTProto Proxy → Cloudflare Proxy** на локальном адресе `127.0.0.1:1443`. Версия `1.11.0-beta.1` дополнительно вводит необязательный userspace-маршрут `awg_warp` через AmneziaWG/WARP. Приложение не создаёт системный VPN-туннель и не перенаправляет весь трафик устройства.
+Основной сценарий остаётся **MTProto Proxy → Cloudflare Proxy** на локальном адресе `127.0.0.1:1443`. Версия `1.11.0` дополнительно вводит необязательный userspace-маршрут `awg_warp` через AmneziaWG/WARP. Приложение не создаёт системный VPN-туннель и не перенаправляет весь трафик устройства.
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.0-beta.1` (`versionCode 53`)  
-**Стадия:** beta candidate; перед тегом требуется финальная signed-APK установка/обновление и device smoke-test
+**Версия исходников:** `1.11.0` (`versionCode 54`)  
+**Стадия:** stable release candidate; перед тегом требуется финальная проверка signed APK на устройстве
 
 | Область | Статус |
 |---|---|
 | MTProto Proxy через `cf_proxy_ws` | Основной сценарий; вручную проверен на мобильной сети и Wi-Fi |
-| `awg_warp` | Beta: userspace AWG/WARP без `VpnService`; automatic provisioning и Telegram MTProto/media проверены на Android 14 |
+| `awg_warp` | Userspace AWG/WARP без `VpnService`; automatic provisioning, profile management и MTProto-aware validation реализованы |
 | SOCKS5 / WebSocket frontend | Реализован как режим совместимости |
 | `direct_ws` и `tcp_fallback` | Реализованы; доступность зависит от сети |
 | Cloudflare Worker | Реализован как необязательный Telegram-маршрут; Consumer WARP provisioning использует отдельный управляемый bootstrap Worker pool |
@@ -169,7 +168,7 @@ WebSocket — транспорт. Фактический путь в интер�
 
 ## Конфигурация
 
-Значения по умолчанию для версии `1.11.0-beta.1`:
+Значения по умолчанию для версии `1.11.0`:
 
 | Параметр | Значение |
 |---|---|
@@ -280,7 +279,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.0-beta.1
+.\scripts\release.ps1 -Version v1.11.0
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -301,7 +300,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Ручная проверка перед тегом должна включать signed-APK обновление поверх `v1.10.14`, запуск и остановку proxy service, обычный MTProto/CF маршрут, automatic WARP provisioning, `awg_warp` сообщения и медиа, Wi-Fi ↔ mobile, reconnect, Feedback/Updates и просмотр экспортируемого отчёта на наличие секретов.
+Ручная проверка перед тегом должна включать signed-APK обновление поверх `v1.10.14` и `v1.11.0-beta.1`, запуск и остановку proxy service, обычный MTProto/CF маршрут, automatic WARP provisioning, `awg_warp` сообщения и медиа, Wi-Fi ↔ mobile, reconnect, Feedback/Updates и просмотр экспортируемого отчёта на наличие секретов.
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
@@ -311,11 +310,11 @@ app\build\outputs\apk\debug\app-debug.apk
 |---|---|
 | Архитектура и поток данных | [docs/architecture/architecture.md](docs/architecture/architecture.md) |
 | Пул Cloudflare Proxy domains | [docs/architecture/CF_DOMAIN_POOL.md](docs/architecture/CF_DOMAIN_POOL.md) |
-| Настройка Cloudflare Worker | [docs/architecture/cloudflare-worker.md](docs/architecture/cloudflare-worker.md) |
+| Настройка Cloudflare Worker | [docs/cloudflare-worker.md](docs/cloudflare-worker.md) |
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.0-beta.1` | [docs/releases/RELEASE_NOTES_v1.11.0-beta.1.md](docs/releases/RELEASE_NOTES_v1.11.0-beta.1.md) |
+| Release notes `1.11.0` | [docs/releases/v1.11.0.md](docs/releases/v1.11.0.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -333,7 +332,7 @@ app\build\outputs\apk\debug\app-debug.apk
 - приложение является прокси для Telegram, а не системным VPN;
 - доступность маршрутов зависит от сети и внешней инфраструктуры;
 - Consumer WARP provisioning зависит от внешнего API; fresh install может потребовать отдельный bootstrap Worker, если direct registration недоступна. При включённом встроенном bootstrap registration-запрос может пройти через инфраструктуру проекта; эту политику можно отключить в настройках;
-- `awg_warp` в `1.11.0-beta.1` проверен на ограниченном числе устройств и сетей;
+- совместимость `awg_warp` зависит от Android-устройства, сети и доступности WARP; перед stable-тегом требуется device smoke текущего release candidate;
 - Worker Pool остаётся медленнее прямого соединения и не предназначен для основного сценария;
 - порт `1443` нужно изменить, если его уже использует другой локальный сервис;
 - native build script ориентирован на Windows; поддержка Linux и macOS не подтверждена;
