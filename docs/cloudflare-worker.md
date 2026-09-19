@@ -1,4 +1,90 @@
-# Развёртывание MTProto Worker для v1.10.14+
+# Cloudflare Worker: Telegram relay и WARP provisioning
+
+Этот документ — актуальный гайд для `v1.11.0`. В приложении есть **два разных типа Worker**, и их нельзя смешивать.
+
+## Какой Worker нужен
+
+### Telegram Worker (`cf_worker_ws`)
+
+Этот Worker передаёт **Telegram MTProto traffic**. Для `v1.10.14+` используется HTTPS chunk relay + Durable Objects. Его домен добавляется в обычный Worker Pool приложения и может участвовать в route policy.
+
+Для такого deployment используйте `scripts/cloudflare-worker/warp-bootstrap-worker.js` вместе с `scripts/cloudflare-worker/chunk-relay-status-worker.js` и `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc`.
+
+### Provisioning Worker для WARP/AWG
+
+Этот Worker нужен **только для создания и активации Consumer WARP-профиля**, когда прямой доступ к `api.cloudflareclient.com` недоступен. Он не принимает Telegram traffic и не должен добавляться в обычный `cf_worker_ws` Worker Pool.
+
+Для отдельного provisioning-only deployment используйте `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js`. Он не требует Durable Objects, bindings, Variables или Secrets.
+
+## Новый путь автоматического создания WARP/AWG-профиля
+
+При **Настройки → Cloudflare → WARP / AmneziaWG → Создать профиль** приложение использует следующий bounded порядок:
+
+```text
+новая локальная WireGuard keypair
+        ↓
+1. выбранный WORKING AWG/WARP-профиль как bootstrap transport
+        ↓ fail / unavailable
+2. другие WORKING AWG/WARP-профили
+        ↓ fail / unavailable
+3. direct HTTPS → api.cloudflareclient.com
+        ↓ fail
+4. включённые пользовательские provisioning Workers
+        ↓ all fail / none
+5. 3 встроенных provisioning Workers проекта, только если toggle включён
+        ↓
+Consumer WARP registration + activation
+        ↓
+AWG config + bounded autotune
+        ↓
+реальный Telegram MTProto req_pq_multi → resPQ
+        ↓
+повторное full-duplex подтверждение (2/2)
+        ↓
+сохранение нового профиля
+```
+
+Каждый автоматически создаваемый профиль получает **новую локальную keypair и отдельную Consumer WARP registration**. Сохранённая registration другого профиля не клонируется.
+
+### Три встроенных Worker проекта
+
+В `v1.11.0` приложение содержит три project-provided provisioning endpoint. Они:
+
+- используются только как последний Worker fallback при генерации/активации WARP-профиля;
+- не добавляются в Telegram Worker Pool и никогда не передают Telegram traffic;
+- управляются одним переключателем **Использовать встроенные bootstrap Worker**;
+- включены по умолчанию для cold-start provisioning, но могут быть полностью отключены пользователем;
+- используют тот же ограниченный протокол `warp-bootstrap-v1`, что и custom provisioning Workers.
+
+Если встроенный pool выключен, приложение не обращается к этим endpoint даже при отказе direct/custom путей.
+
+### Пользовательский provisioning Worker
+
+В **WARP / AmneziaWG** можно добавить свой HTTPS endpoint. Custom Workers проверяются раньше встроенного pool. URL должен быть базовым HTTPS URL без credentials, query/fragment и произвольного path.
+
+Совместимость проверяется запросом:
+
+```text
+GET /warp-bootstrap/health
+```
+
+Ожидаемый ответ:
+
+```json
+{"service":"warp-bootstrap","revision":"warp-bootstrap-v1"}
+```
+
+Provisioning protocol ограничен только следующими операциями:
+
+```text
+GET   /warp-bootstrap/health
+POST  /warp-bootstrap/v0a4005/reg
+PATCH /warp-bootstrap/v0a4005/reg/<registration-id>
+```
+
+Worker обращается только к фиксированному upstream `https://api.cloudflareclient.com` и не является универсальным HTTP/TCP proxy.
+
+---
 
 ## Важно при обновлении с предыдущих версий
 
