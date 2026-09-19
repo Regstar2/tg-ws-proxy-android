@@ -295,7 +295,7 @@ class CloudflareOAuthActivity : ComponentActivity() {
         val worker = if (existing == null) {
             repository.addWorker(
                 WorkerEndpoint.create(
-                    name = "Cloudflare / " + result.workerName,
+                    name = getString(R.string.cf_oauth_worker_pool_name, result.workerName),
                     url = result.workersDevUrl,
                     enabled = true,
                 ),

@@ -6,6 +6,18 @@ plugins {
 val releaseVersionCode = 54
 val releaseVersionName = "1.11.0"
 
+fun asBuildConfigString(value: String): String = "\\\"" + value.replace("\\\\", "\\\\\\\\").replace("\\\"", "\\\\\\\"") + "\\\""
+
+val cloudflareOAuthClientId = providers.gradleProperty("TGWSPROXY_CF_OAUTH_CLIENT_ID")
+    .orElse(providers.environmentVariable("TGWSPROXY_CF_OAUTH_CLIENT_ID"))
+    .getOrElse("")
+val cloudflareOAuthScopes = providers.gradleProperty("TGWSPROXY_CF_OAUTH_SCOPES")
+    .orElse(providers.environmentVariable("TGWSPROXY_CF_OAUTH_SCOPES"))
+    .getOrElse("workers-platform.read workers-platform.write")
+val cloudflareOAuthRedirectUri = "tgwsproxy://oauth/cloudflare"
+val generatedCloudflareWorkerAssets = layout.buildDirectory.dir("generated/cloudflare-worker-assets")
+
+
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
     val nativeDir = rootProject.file("native/tgwsproxy")
@@ -36,8 +48,16 @@ val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
     }
 }
 
+val syncCloudflareWorkerAssets by tasks.registering(org.gradle.api.tasks.Copy::class) {
+    from(rootProject.file("scripts/cloudflare-worker")) {
+        include("worker.js", "chunk-relay-worker.js", "chunk-relay-status-worker.js")
+        into("cloudflare-worker")
+    }
+    into(generatedCloudflareWorkerAssets)
+}
+
 tasks.named("preBuild") {
-    dependsOn(buildNativeAndroid, generateAppIcons)
+    dependsOn(buildNativeAndroid, generateAppIcons, syncCloudflareWorkerAssets)
 }
 
 android {
@@ -50,6 +70,10 @@ android {
         targetSdk = 35
         versionCode = releaseVersionCode
         versionName = releaseVersionName
+
+        buildConfigField("String", "CLOUDFLARE_OAUTH_CLIENT_ID", asBuildConfigString(cloudflareOAuthClientId))
+        buildConfigField("String", "CLOUDFLARE_OAUTH_SCOPES", asBuildConfigString(cloudflareOAuthScopes))
+        buildConfigField("String", "CLOUDFLARE_OAUTH_REDIRECT_URI", asBuildConfigString(cloudflareOAuthRedirectUri))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -103,6 +127,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
@@ -115,6 +140,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir("src/main/jniLibs")
+            assets.srcDir(generatedCloudflareWorkerAssets)
         }
     }
 }

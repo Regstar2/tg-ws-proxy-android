@@ -42,6 +42,22 @@
             android:exported="false"
             android:theme="@android:style/Theme.NoTitleBar" />
 
+        <activity
+            android:name="com.amurcanov.tgwsproxy.cloudflare.CloudflareOAuthActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="tgwsproxy"
+                    android:host="oauth"
+                    android:path="/cloudflare" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name="com.amurcanov.tgwsproxy.ProxyService"
             android:exported="false"

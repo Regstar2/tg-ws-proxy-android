@@ -3,6 +3,7 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- Added an experimental Cloudflare OAuth + API Worker deployment PoC with PKCE, multiple independent Cloudflare logins/accounts, encrypted access-token storage, deploy/update/delete, workers.dev smoke testing, and automatic Worker Pool registration.
 
 ## 1.11.0 - 2026-09-19
 - Promoted the userspace `awg_warp` backend to the stable channel. Telegram traffic can use AmneziaWG/WARP inside the app without Android `VpnService`, root, or a system TUN interface.

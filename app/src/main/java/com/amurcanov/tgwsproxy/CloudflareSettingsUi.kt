@@ -1,5 +1,6 @@
 package com.amurcanov.tgwsproxy
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.amurcanov.tgwsproxy.cloudflare.CloudflareOAuthActivity
 import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
 import com.amurcanov.tgwsproxy.worker.WorkerPoolSettingsScreen
 import com.amurcanov.tgwsproxy.worker.WorkerUrlSanitizer
@@ -434,6 +436,23 @@ private fun CloudflareOverviewScreen(
             }
             TextButton(onClick = onOpenWorkerPool) {
                 Text(stringResource(R.string.cf_worker_pool_open))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        CfSectionCard(titleRes = R.string.cf_oauth_overview_title) {
+            Text(
+                stringResource(R.string.cf_oauth_overview_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = {
+                    context.startActivity(Intent(context, CloudflareOAuthActivity::class.java))
+                },
+            ) {
+                Text(stringResource(R.string.cf_oauth_overview_open))
             }
         }
 
