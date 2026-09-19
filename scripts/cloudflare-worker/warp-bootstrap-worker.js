@@ -2,6 +2,7 @@ import relayWorker, { ChunkRelaySession } from "./chunk-relay-status-worker.js";
 
 export { ChunkRelaySession };
 
+const BOOTSTRAP_SERVICE = "warp-bootstrap";
 const BOOTSTRAP_REVISION = "warp-bootstrap-v1";
 const BOOTSTRAP_PREFIX = "/warp-bootstrap";
 const API_ORIGIN = "https://api.cloudflareclient.com";
@@ -163,7 +164,7 @@ export async function handleWarpBootstrapRequest(request, url = new URL(request.
     if (request.method !== "GET") {
       return textResponse(405, "method not allowed", { "Allow": "GET" });
     }
-    return jsonResponse(200, { revision: BOOTSTRAP_REVISION });
+    return jsonResponse(200, { service: BOOTSTRAP_SERVICE, revision: BOOTSTRAP_REVISION });
   }
 
   if (url.pathname === `${BOOTSTRAP_PREFIX}${REGISTER_PATH}`) {
