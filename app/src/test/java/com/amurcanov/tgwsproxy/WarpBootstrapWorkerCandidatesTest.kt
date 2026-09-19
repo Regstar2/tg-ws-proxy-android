@@ -1,6 +1,7 @@
 package com.amurcanov.tgwsproxy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WarpBootstrapWorkerCandidatesTest {
@@ -104,6 +105,20 @@ class WarpBootstrapWorkerCandidatesTest {
                 ),
             ),
             result,
+        )
+    }
+
+
+    @Test
+    fun builtInPoolContainsThreeUniqueValidHttpsOrigins() {
+        val endpoints = BuiltInWarpProvisioningWorkers.endpoints
+
+        assertEquals(3, endpoints.size)
+        assertEquals(endpoints.size, endpoints.distinct().size)
+        assertTrue(
+            endpoints.all { endpoint ->
+                ProvisioningWorkerUrlValidator.normalize(endpoint) == endpoint
+            },
         )
     }
 
