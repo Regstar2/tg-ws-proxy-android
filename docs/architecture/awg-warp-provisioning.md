@@ -68,7 +68,7 @@ Bootstrap order is:
 
 Provisioning Workers are a separate settings/repository model from the Telegram `cf_worker_ws` Worker Pool. Configuring one does not populate or change the other. Custom provisioning endpoints are validated as HTTPS origins without credentials, query, fragment or arbitrary path. The client performs `GET /warp-bootstrap/health` first and requires `service=warp-bootstrap` plus the supported `warp-bootstrap-v1` revision before registration or activation requests are sent.
 
-The built-in pool is application configuration, not copied into the user's custom list. A disabled built-in toggle is authoritative: no built-in provisioning endpoint is attempted as a hidden fallback. One failed candidate may advance to the next only for bounded transport failures, HTTP 429 or 5xx; non-retryable protocol/application errors stop the operation.
+The built-in pool is application configuration, not copied into the user's custom list. In v1.11.0 it contains three project-provided provisioning endpoints. They are provisioning-only and are never inserted into or inferred from the Telegram `cf_worker_ws` Worker Pool. A disabled built-in toggle is authoritative: no built-in provisioning endpoint is attempted as a hidden fallback. One failed candidate may advance to the next only for bounded transport failures, HTTP 429 or 5xx; non-retryable protocol/application errors stop the operation.
 
 Both generated and imported profiles are eligible when they have already passed the real full-duplex profile check. Before use, the candidate config is parsed and validated again. The native reachability probe then has to prove that the fixed API host is reachable through a temporary userspace AWG tunnel.
 
@@ -129,15 +129,18 @@ Configuration and network validation are separate operations.
 
 ### Network validation
 
-`ProbeAWGWarpConfig` creates an isolated temporary AWG dialer and performs a bounded TCP connection to a Telegram DC through the userspace tunnel. The result is accepted only when:
+`ProbeAWGWarpConfig` creates an isolated temporary AWG dialer and validates the profile against Telegram itself, not only against a generic TCP target. The probe:
 
-- the connection succeeded through the temporary AWG dialer;
-- the latest AWG handshake is non-zero;
-- tunnel TX and RX counters are non-zero.
+1. opens the Telegram DC connection through the temporary userspace AWG tunnel;
+2. requires a non-zero recent AWG handshake and non-zero tunnel TX/RX;
+3. sends a real MTProto `req_pq_multi` request;
+4. accepts the candidate only after receiving and validating the matching `resPQ` response.
 
-The probe has no fallback to direct TCP. It returns only support-safe code, endpoint, handshake timestamp and counters.
+The probe has no fallback to direct TCP. A TCP connect or WARP handshake without the MTProto response is not enough to mark a profile as `WORKING`.
 
-An automatically provisioned profile is persisted only after both checks succeed. A failed attempt therefore cannot overwrite the selected working profile.
+Automatic provisioning additionally performs a second bounded confirmation of the selected autotune candidate. The profile is persisted only after the full-duplex validation succeeds twice (`2/2`). A failed attempt therefore cannot overwrite or deselect the current working profile.
+
+The result exposes only support-safe status, endpoint/handshake summary and counters; the MTProto probe does not expose application messages or profile secrets.
 
 ## Security rules
 
@@ -149,14 +152,16 @@ An automatically provisioned profile is persisted only after both checks succeed
 
 ## Manual device acceptance
 
-CI verifies parser/serializer/key-generation and existing native transport regressions, but the consumer provider is network-dependent. Before merging #84, verify on a real Android device:
+CI verifies parser/serializer/key-generation, MTProto-aware profile probe logic and native transport regressions, but the Consumer provider and real network path remain environment-dependent. Before tagging v1.11.0 stable, verify on a real Android device:
 
 1. Settings → Cloudflare → WARP / AmneziaWG → Create profile.
 2. Provisioning reaches Save without exposing a secret in logcat.
-3. The created profile shows `Working` and a recent check.
+3. The created profile shows `Working` only after the Telegram MTProto `req_pq_multi` → `resPQ` check and the second confirmation succeed.
 4. Select the profile and enable/prefer the `awg_warp` route.
 5. Start the proxy.
 6. Confirm AWG handshake and non-zero tunnel TX/RX.
 7. Confirm Telegram has bidirectional traffic with `actual_backend=awg_warp` and no silent fallback.
 8. Stop/start the proxy and verify the selected generated profile is preserved.
 9. Verify manual `.conf` import still works after a failed automatic provisioning attempt.
+10. Make direct Consumer API unavailable and verify custom provisioning Worker fallback.
+11. Verify the three built-in provisioning Workers are used only when their dedicated toggle is enabled and never appear in the Telegram Worker Pool.
