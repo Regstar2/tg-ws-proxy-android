@@ -85,4 +85,26 @@
     <string name="awg_warp_stage_validating">Validating configuration</string>
     <string name="awg_warp_stage_connection">Checking connection</string>
     <string name="awg_warp_stage_saving">Saving</string>
+
+    <string name="warp_bootstrap_settings_title">WARP profile creation</string>
+    <string name="warp_bootstrap_settings_hint">Bootstrap Workers are used only for Consumer WARP registration when existing AWG and direct API paths are unavailable. They are not used for Telegram proxy traffic.</string>
+    <string name="warp_bootstrap_builtin_toggle">Use built-in bootstrap Workers</string>
+    <string name="warp_bootstrap_builtin_hint">Allow the project-provided provisioning pool as the last fallback.</string>
+    <string name="warp_bootstrap_custom_workers_count">Custom bootstrap Workers: %1$d</string>
+    <string name="warp_bootstrap_worker_url">Worker URL</string>
+    <string name="warp_bootstrap_worker_url_hint">https://example.workers.dev</string>
+    <string name="warp_bootstrap_add_worker">Add Worker</string>
+    <string name="warp_bootstrap_worker_added">Bootstrap Worker added</string>
+    <string name="warp_bootstrap_worker_action_failed">Bootstrap Worker error: %1$s</string>
+    <string name="warp_bootstrap_worker_enabled">Enabled</string>
+    <string name="warp_bootstrap_worker_disabled">Disabled</string>
+    <string name="warp_bootstrap_worker_check">Check</string>
+    <string name="warp_bootstrap_worker_checking">Checking…</string>
+    <string name="warp_bootstrap_worker_check_ok">Bootstrap Worker is compatible</string>
+    <string name="warp_bootstrap_worker_delete">Delete</string>
+    <string name="warp_bootstrap_worker_status_unchecked">Not checked</string>
+    <string name="warp_bootstrap_worker_status_healthy">Working</string>
+    <string name="warp_bootstrap_worker_status_failed">Check failed</string>
+    <string name="warp_bootstrap_worker_last_checked">Last checked: %1$s</string>
+    <string name="warp_bootstrap_worker_last_error">Last error: %1$s</string>
 </resources>
