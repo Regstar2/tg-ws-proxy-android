@@ -52,7 +52,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 - local MTProto Proxy with `t.me/proxy` and `tg://proxy` link generation;
 - compatible SOCKS5 frontend on the same configurable port;
 - `cf_proxy_ws`, `direct_ws`, `cf_worker_ws`, `awg_warp`, and `tcp_fallback` routes;
-- in-app WARP/AWG profile management: automatic Consumer WARP provisioning, `.conf` import, selection, validation, and deletion;
+- in-app WARP/AWG profile management: automatic Consumer WARP provisioning, `.conf` import, name/config editing, selection, validation, and deletion;
 - separate custom/built-in bootstrap Workers for Consumer WARP profile creation; they are not added to the Telegram `cf_worker_ws` Worker Pool and the built-in pool can be fully disabled;
 - userspace AmneziaWG/WARP routing without root, Android `VpnService`, or a system TUN interface;
 - separate route policies for Wi-Fi, mobile data, and unknown networks;
