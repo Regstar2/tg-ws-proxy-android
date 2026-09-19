@@ -45,7 +45,7 @@ data class AwgWarpProfileSummary(
     val endpoint: String?,
 )
 
-object AwgWarpProfileNames {
+internal object AwgWarpProfileNames {
     fun nextGeneratedIndex(prefix: String, existingNames: Iterable<String>): Int {
         val normalizedPrefix = prefix.trim()
         require(normalizedPrefix.isNotBlank()) { "profile_name_prefix_empty" }
