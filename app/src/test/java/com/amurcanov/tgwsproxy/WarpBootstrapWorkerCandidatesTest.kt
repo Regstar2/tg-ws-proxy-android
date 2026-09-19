@@ -1,65 +1,139 @@
 package com.amurcanov.tgwsproxy
 
-import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
-import com.amurcanov.tgwsproxy.worker.WorkerHealthState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WarpBootstrapWorkerCandidatesTest {
     @Test
-    fun selectedWorkerComesFirstAndDeadWorkersAreSkipped() {
-        val selected = worker("selected", "https://selected.example.workers.dev", WorkerHealthState.HEALTHY)
-        val healthy = worker("healthy", "healthy.example.workers.dev", WorkerHealthState.HEALTHY)
-        val dead = worker("dead", "dead.example.workers.dev", WorkerHealthState.DEAD)
+    fun customWorkersComeBeforeBuiltInWorkers() {
+        val settings = WarpProvisioningBootstrapSettings(
+            useBuiltInWorkers = true,
+            customWorkers = listOf(
+                worker("custom-2", "https://second.example.workers.dev", order = 2),
+                worker("custom-1", "https://first.example.workers.dev", order = 1),
+            ),
+        )
 
         val result = WarpBootstrapWorkerCandidates.resolve(
-            selected = selected,
-            workers = listOf(healthy, dead, selected),
-            legacyDomain = "legacy.example.workers.dev",
+            settings = settings,
+            builtInUrls = listOf(
+                "https://builtin-a.example.workers.dev",
+                "https://builtin-b.example.workers.dev",
+            ),
         )
 
         assertEquals(
             listOf(
-                "https://selected.example.workers.dev",
-                "https://healthy.example.workers.dev",
-                "https://legacy.example.workers.dev",
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.CUSTOM,
+                    1,
+                    "https://first.example.workers.dev",
+                ),
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.CUSTOM,
+                    2,
+                    "https://second.example.workers.dev",
+                ),
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.BUILT_IN,
+                    1,
+                    "https://builtin-a.example.workers.dev",
+                ),
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.BUILT_IN,
+                    2,
+                    "https://builtin-b.example.workers.dev",
+                ),
             ),
             result,
         )
     }
 
     @Test
-    fun duplicateAndDisabledCandidatesAreRemoved() {
-        val first = worker("first", "worker.example.workers.dev", WorkerHealthState.UNKNOWN)
-        val duplicate = worker("duplicate", "https://worker.example.workers.dev/apiws", WorkerHealthState.DEGRADED)
-        val disabled = worker(
-            "disabled",
-            "disabled.example.workers.dev",
-            WorkerHealthState.DISABLED,
-            enabled = false,
+    fun disabledCustomAndBuiltInToggleAreRespected() {
+        val settings = WarpProvisioningBootstrapSettings(
+            useBuiltInWorkers = false,
+            customWorkers = listOf(
+                worker("enabled", "https://enabled.example.workers.dev", order = 0),
+                worker(
+                    "disabled",
+                    "https://disabled.example.workers.dev",
+                    order = 1,
+                    enabled = false,
+                ),
+            ),
         )
 
         val result = WarpBootstrapWorkerCandidates.resolve(
-            selected = null,
-            workers = listOf(first, duplicate, disabled),
-            legacyDomain = "worker.example.workers.dev",
+            settings = settings,
+            builtInUrls = listOf("https://builtin.example.workers.dev"),
         )
 
-        assertEquals(listOf("https://worker.example.workers.dev"), result)
+        assertEquals(
+            listOf(
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.CUSTOM,
+                    1,
+                    "https://enabled.example.workers.dev",
+                ),
+            ),
+            result,
+        )
+    }
+
+    @Test
+    fun duplicateBuiltInWorkerDoesNotOverrideCustomSource() {
+        val settings = WarpProvisioningBootstrapSettings(
+            useBuiltInWorkers = true,
+            customWorkers = listOf(
+                worker("custom", "https://same.example.workers.dev/", order = 0),
+            ),
+        )
+
+        val result = WarpBootstrapWorkerCandidates.resolve(
+            settings = settings,
+            builtInUrls = listOf("https://same.example.workers.dev"),
+        )
+
+        assertEquals(
+            listOf(
+                WarpBootstrapWorkerCandidate(
+                    WarpBootstrapWorkerSource.CUSTOM,
+                    1,
+                    "https://same.example.workers.dev",
+                ),
+            ),
+            result,
+        )
+    }
+
+
+    @Test
+    fun builtInPoolContainsThreeUniqueValidHttpsOrigins() {
+        val endpoints = BuiltInWarpProvisioningWorkers.endpoints
+
+        assertEquals(3, endpoints.size)
+        assertEquals(endpoints.size, endpoints.distinct().size)
+        assertTrue(
+            endpoints.all { endpoint ->
+                ProvisioningWorkerUrlValidator.normalize(endpoint) == endpoint
+            },
+        )
     }
 
     private fun worker(
         id: String,
         url: String,
-        state: WorkerHealthState,
+        order: Int,
         enabled: Boolean = true,
-    ): WorkerEndpoint = WorkerEndpoint(
+    ) = ProvisioningWorkerEndpoint(
         id = id,
-        name = id,
         url = url,
         enabled = enabled,
-        state = state,
-        createdAt = 1L,
-        updatedAt = 1L,
+        order = order,
+        lastHealthStatus = ProvisioningWorkerHealthStatus.UNCHECKED,
+        lastCheckedAtMs = null,
+        lastErrorCode = null,
     )
 }

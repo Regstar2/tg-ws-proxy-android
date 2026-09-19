@@ -1,6 +1,6 @@
 # AWG/WARP profile provisioning
 
-Issues: #84, #86
+Issues: #84, #86, #88
 
 ## Scope
 
@@ -63,7 +63,12 @@ Bootstrap order is:
 1. the currently selected profile when its persisted health is `WORKING`;
 2. other saved `WORKING` profiles, newest first;
 3. direct Android HTTPS to `api.cloudflareclient.com`;
-4. the existing restricted Cloudflare Worker bootstrap.
+4. enabled custom provisioning Workers, in user-defined list order;
+5. the project built-in provisioning Worker pool, only when the dedicated built-in toggle is enabled.
+
+Provisioning Workers are a separate settings/repository model from the Telegram `cf_worker_ws` Worker Pool. Configuring one does not populate or change the other. Custom provisioning endpoints are validated as HTTPS origins without credentials, query, fragment or arbitrary path. The client performs `GET /warp-bootstrap/health` first and requires `service=warp-bootstrap` plus the supported `warp-bootstrap-v1` revision before registration or activation requests are sent.
+
+The built-in pool is application configuration, not copied into the user's custom list. A disabled built-in toggle is authoritative: no built-in provisioning endpoint is attempted as a hidden fallback. One failed candidate may advance to the next only for bounded transport failures, HTTP 429 or 5xx; non-retryable protocol/application errors stop the operation.
 
 Both generated and imported profiles are eligible when they have already passed the real full-duplex profile check. Before use, the candidate config is parsed and validated again. The native reachability probe then has to prove that the fixed API host is reachable through a temporary userspace AWG tunnel.
 

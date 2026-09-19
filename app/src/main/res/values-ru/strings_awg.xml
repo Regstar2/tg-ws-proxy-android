@@ -85,4 +85,26 @@
     <string name="awg_warp_stage_validating">Проверка конфигурации</string>
     <string name="awg_warp_stage_connection">Проверка соединения</string>
     <string name="awg_warp_stage_saving">Сохранение</string>
+
+    <string name="warp_bootstrap_settings_title">Создание WARP-профилей</string>
+    <string name="warp_bootstrap_settings_hint">Bootstrap Worker используются только для регистрации Consumer WARP, когда существующий AWG-профиль и прямой API недоступны. Для Telegram proxy traffic они не используются.</string>
+    <string name="warp_bootstrap_builtin_toggle">Использовать встроенные bootstrap Worker</string>
+    <string name="warp_bootstrap_builtin_hint">Разрешить встроенный provisioning-пул проекта как последний fallback.</string>
+    <string name="warp_bootstrap_custom_workers_count">Пользовательские bootstrap Worker: %1$d</string>
+    <string name="warp_bootstrap_worker_url">URL Worker</string>
+    <string name="warp_bootstrap_worker_url_hint">https://example.workers.dev</string>
+    <string name="warp_bootstrap_add_worker">Добавить Worker</string>
+    <string name="warp_bootstrap_worker_added">Bootstrap Worker добавлен</string>
+    <string name="warp_bootstrap_worker_action_failed">Ошибка bootstrap Worker: %1$s</string>
+    <string name="warp_bootstrap_worker_enabled">Включён</string>
+    <string name="warp_bootstrap_worker_disabled">Выключен</string>
+    <string name="warp_bootstrap_worker_check">Проверить</string>
+    <string name="warp_bootstrap_worker_checking">Проверяется…</string>
+    <string name="warp_bootstrap_worker_check_ok">Bootstrap Worker совместим</string>
+    <string name="warp_bootstrap_worker_delete">Удалить</string>
+    <string name="warp_bootstrap_worker_status_unchecked">Не проверен</string>
+    <string name="warp_bootstrap_worker_status_healthy">Работает</string>
+    <string name="warp_bootstrap_worker_status_failed">Проверка не пройдена</string>
+    <string name="warp_bootstrap_worker_last_checked">Последняя проверка: %1$s</string>
+    <string name="warp_bootstrap_worker_last_error">Последняя ошибка: %1$s</string>
 </resources>

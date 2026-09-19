@@ -8,7 +8,8 @@
 
 Используйте:
 
-- `scripts/cloudflare-worker/warp-bootstrap-worker.js` — актуальный Worker entry point; он добавляет ограниченный WARP provisioning bootstrap и передаёт весь остальной трафик в chunk-relay Worker;
+- `scripts/cloudflare-worker/warp-bootstrap-worker.js` — комбинированный Worker entry point для Wrangler: WARP provisioning bootstrap + передача остального трафика в chunk-relay Worker;
+- `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js` — standalone provisioning-only Worker без imports, Durable Objects и bindings; его можно целиком вставить через Cloudflare Dashboard;
 - `scripts/cloudflare-worker/chunk-relay-status-worker.js` — существующая реализация MTProto chunk relay;
 - `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
 
@@ -80,11 +81,52 @@ Worker всегда обращается только к фиксированн�
 
 Curve25519/WireGuard private key должен генерироваться и храниться на Android-устройстве. Через Worker передаётся public key и, на этапе activation, registration bearer token, поэтому bootstrap следует рассматривать как доверенный компонент конкретного deployment.
 
-Revision bootstrap-контракта:
+Идентификатор bootstrap-контракта:
 
 ```text
 X-Tgws-Warp-Bootstrap-Revision: warp-bootstrap-v1
 ```
+
+Health response:
+
+```json
+{"service":"warp-bootstrap","revision":"warp-bootstrap-v1"}
+```
+
+Android-клиент считает endpoint совместимым только после успешного HTTPS health-check с ожидаемыми `service` и `revision`. Redirect на другой host не используется. Provisioning endpoint-ы хранятся отдельно от обычного Telegram Worker Pool: добавление Worker для создания WARP-профиля не делает его маршрутом `cf_worker_ws`.
+
+## Standalone bootstrap через Cloudflare Dashboard
+
+Для встроенных и пользовательских provisioning-only endpoint используйте `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js`.
+
+Этот файл:
+
+- не импортирует другие файлы;
+- не требует `CHUNK_RELAY`;
+- не использует Durable Objects;
+- не принимает Telegram proxy traffic;
+- обслуживает только `/warp-bootstrap/*`, а остальные пути возвращают `404`;
+- использует тот же `warp-bootstrap-v1` контракт и те же ограничения запросов, что и комбинированный entry point.
+
+Развёртывание через GUI:
+
+1. Cloudflare Dashboard → **Workers & Pages** → **Create** → Worker.
+2. Откройте **Edit code**.
+3. Замените пример кода полным содержимым `warp-bootstrap-standalone-worker.js`.
+4. Нажмите **Deploy**.
+5. Проверьте:
+   ```powershell
+   $Worker = "https://<name>.<account>.workers.dev"
+   Invoke-RestMethod "$Worker/warp-bootstrap/health"
+   ```
+
+Ожидаемый ответ:
+
+```json
+{"service":"warp-bootstrap","revision":"warp-bootstrap-v1"}
+```
+
+Никакие Variables, Secrets, Durable Object bindings или Routes для базового provisioning-only deployment не требуются.
 
 ## Развёртывание одного Worker
 
@@ -114,7 +156,7 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 }
 ```
 
-После deploy используйте выданный Cloudflare Worker-домен в настройках Worker-пула TgWsProxy.
+После deploy используйте выданный Cloudflare Worker-домен либо в отдельном списке **WARP / AmneziaWG → Пользовательские bootstrap Worker**, либо, для инфраструктуры проекта, в централизованном built-in provisioning pool. Не добавляйте provisioning-only deployment в обычный Telegram Worker Pool, если он не должен принимать Telegram proxy traffic.
 
 Проверьте, что новый wrapper действительно опубликован:
 
@@ -126,14 +168,14 @@ Invoke-RestMethod "$Worker/warp-bootstrap/health"
 Ожидаемый ответ:
 
 ```json
-{"revision":"warp-bootstrap-v1"}
+{"service":"warp-bootstrap","revision":"warp-bootstrap-v1"}
 ```
 
 Этот health-check подтверждает только публикацию bootstrap wrapper. Реальный `fetch()` к Consumer WARP API должен быть отдельно подтверждён provisioning smoke-test; unit-тесты не заменяют сетевую проверку Cloudflare deployment.
 
 ## Рекомендуется несколько Worker
 
-Для постоянного использования рекомендуется развернуть **не один, а несколько Worker deployment** и добавить их домены в Worker-пул приложения.
+Для provisioning рекомендуется развернуть **не один, а несколько Worker deployment**. Пользовательские deployment добавляются в отдельный provisioning-список приложения; встроенные deployment задаются централизованно в приложении и управляются одним toggle.
 
 Практический стартовый вариант — **2–3 Worker**.
 
