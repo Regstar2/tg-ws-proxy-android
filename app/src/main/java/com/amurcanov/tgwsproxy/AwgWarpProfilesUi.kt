@@ -234,7 +234,7 @@ fun AwgWarpCreateProfilePage(
     val context = LocalContext.current
     val manager = remember(context) { AwgWarpProfileManager(context) }
     val scope = rememberCoroutineScope()
-    var profileName by remember { mutableStateOf(context.getString(R.string.awg_warp_default_profile_name)) }
+    var profileName by remember(manager) { mutableStateOf(manager.suggestedGeneratedProfileName()) }
     var stage by remember { mutableStateOf<WarpProvisioningStage?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -556,14 +556,15 @@ fun AwgWarpProfileDetailsPage(
                     }
                     Text(stringResource(R.string.awg_warp_check_profile))
                 }
-                if (profile.metadata.source == AwgWarpProfileSource.IMPORTED) {
-                    AwgWarpImportedConfigEditor(
-                        profileId = profileId,
-                        isProxyRunning = isProxyRunning,
-                        onSaved = { refresh() },
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                }
+                AwgWarpProfileEditor(
+                    profileId = profileId,
+                    isProxyRunning = isProxyRunning,
+                    onSaved = {
+                        revealSecret = false
+                        refresh()
+                    },
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
 

@@ -45,6 +45,22 @@ data class AwgWarpProfileSummary(
     val endpoint: String?,
 )
 
+internal object AwgWarpProfileNames {
+    fun nextGeneratedIndex(prefix: String, existingNames: Iterable<String>): Int {
+        val normalizedPrefix = prefix.trim()
+        require(normalizedPrefix.isNotBlank()) { "profile_name_prefix_empty" }
+        val pattern = Regex(
+            "^" + Regex.escape(normalizedPrefix) + "\\s+(\\d+)$",
+            RegexOption.IGNORE_CASE,
+        )
+        val highest = existingNames
+            .mapNotNull { name -> pattern.matchEntire(name.trim())?.groupValues?.getOrNull(1)?.toIntOrNull() }
+            .maxOrNull()
+            ?: 0
+        return highest + 1
+    }
+}
+
 data class AwgWarpPeerDetails(
     val publicKey: String,
     val endpoint: String,

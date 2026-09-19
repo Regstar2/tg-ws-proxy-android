@@ -54,6 +54,19 @@ class AwgWarpProfileRepository(
             .toList()
     }
 
+    fun suggestedGeneratedProfileName(): String {
+        val prefix = context.getString(R.string.awg_warp_generated_profile_name_prefix)
+        val nextIndex = AwgWarpProfileNames.nextGeneratedIndex(
+            prefix = prefix,
+            existingNames = listProfiles().map { it.metadata.name },
+        )
+        return context.getString(
+            R.string.awg_warp_generated_profile_name_format,
+            prefix,
+            nextIndex,
+        )
+    }
+
     fun selectedProfileId(): String? {
         if (!selectedFile.isFile) return null
         val id = runCatching { selectedFile.readText(Charsets.UTF_8).trim() }.getOrNull().orEmpty()
@@ -162,32 +175,48 @@ class AwgWarpProfileRepository(
         )
     }
 
-    fun updateImportedProfileConfig(profileId: String, configText: String): Result<AwgWarpProfileMetadata> = runCatching {
+    fun updateProfile(
+        profileId: String,
+        name: String,
+        configText: String,
+    ): Result<AwgWarpProfileMetadata> = runCatching {
         validateContentSize(configText)
-        AwgWarpConfigParser.parse(configText).getOrThrow()
+        val updatedDetails = AwgWarpConfigParser.parse(configText).getOrThrow()
 
         val directory = profileDirectory(profileId)
         val current = loadMetadata(directory) ?: error("profile_not_found")
-        require(current.source == AwgWarpProfileSource.IMPORTED) { "profile_not_editable" }
         val target = profileConfigFile(profileId)
-        if (!target.isFile) error("profile_not_found")
+        val currentConfig = readConfig(directory) ?: error("profile_not_found")
+        val currentDetails = AwgWarpConfigParser.parse(currentConfig).getOrThrow()
+        val normalizedName = normalizeName(name)
+        val configChanged = currentConfig != configText
 
-        val staging = createStagingConfig(configText).getOrThrow()
-        try {
-            if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
-                error("profile_config_invalid")
+        if (configChanged) {
+            val staging = createStagingConfig(configText).getOrThrow()
+            try {
+                if (!NativeProxy.validateAwgWarpConfig(staging.absolutePath)) {
+                    error("profile_config_invalid")
+                }
+            } finally {
+                removeStagingConfig(staging)
             }
-        } finally {
-            removeStagingConfig(staging)
+            atomicWrite(target, configText.toByteArray(Charsets.UTF_8))
         }
 
-        atomicWrite(target, configText.toByteArray(Charsets.UTF_8))
         val updated = current.copy(
-            health = AwgWarpProfileHealth.NOT_CHECKED,
-            lastCheckedAtMs = null,
-            lastErrorCode = null,
+            name = normalizedName,
+            localPublicKey = if (currentDetails.privateKey == updatedDetails.privateKey) {
+                current.localPublicKey
+            } else {
+                null
+            },
+            health = if (configChanged) AwgWarpProfileHealth.NOT_CHECKED else current.health,
+            lastCheckedAtMs = if (configChanged) null else current.lastCheckedAtMs,
+            lastErrorCode = if (configChanged) null else current.lastErrorCode,
         )
-        writeMetadata(directory, updated)
+        if (updated != current) {
+            writeMetadata(directory, updated)
+        }
         updated
     }
 

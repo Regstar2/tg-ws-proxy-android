@@ -52,7 +52,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 - локальный MTProto Proxy с генерацией ссылок `t.me/proxy` и `tg://proxy`;
 - совместимый SOCKS5 frontend на том же настраиваемом порту;
 - маршруты `cf_proxy_ws`, `direct_ws`, `cf_worker_ws`, `awg_warp` и `tcp_fallback`;
-- встроенное управление WARP/AWG-профилями: automatic Consumer WARP provisioning, импорт `.conf`, выбор, проверка и удаление;
+- встроенное управление WARP/AWG-профилями: automatic Consumer WARP provisioning, импорт `.conf`, редактирование имени и параметров, выбор, проверка и удаление;
 - отдельные custom/built-in bootstrap Worker для создания Consumer WARP-профилей; они не добавляются в Telegram `cf_worker_ws` Worker Pool и встроенный pool можно полностью отключить;
 - userspace AmneziaWG/WARP route без root, Android `VpnService` и system TUN;
 - отдельные политики маршрутов для Wi-Fi, мобильной и неизвестной сети;
