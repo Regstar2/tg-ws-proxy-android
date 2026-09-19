@@ -8,7 +8,8 @@
 
 Используйте:
 
-- `scripts/cloudflare-worker/warp-bootstrap-worker.js` — актуальный Worker entry point; он добавляет ограниченный WARP provisioning bootstrap и передаёт весь остальной трафик в chunk-relay Worker;
+- `scripts/cloudflare-worker/warp-bootstrap-worker.js` — комбинированный Worker entry point для Wrangler: WARP provisioning bootstrap + передача остального трафика в chunk-relay Worker;
+- `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js` — standalone provisioning-only Worker без imports, Durable Objects и bindings; его можно целиком вставить через Cloudflare Dashboard;
 - `scripts/cloudflare-worker/chunk-relay-status-worker.js` — существующая реализация MTProto chunk relay;
 - `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
 
@@ -93,6 +94,39 @@ Health response:
 ```
 
 Android-клиент считает endpoint совместимым только после успешного HTTPS health-check с ожидаемыми `service` и `revision`. Redirect на другой host не используется. Provisioning endpoint-ы хранятся отдельно от обычного Telegram Worker Pool: добавление Worker для создания WARP-профиля не делает его маршрутом `cf_worker_ws`.
+
+## Standalone bootstrap через Cloudflare Dashboard
+
+Для встроенных и пользовательских provisioning-only endpoint используйте `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js`.
+
+Этот файл:
+
+- не импортирует другие файлы;
+- не требует `CHUNK_RELAY`;
+- не использует Durable Objects;
+- не принимает Telegram proxy traffic;
+- обслуживает только `/warp-bootstrap/*`, а остальные пути возвращают `404`;
+- использует тот же `warp-bootstrap-v1` контракт и те же ограничения запросов, что и комбинированный entry point.
+
+Развёртывание через GUI:
+
+1. Cloudflare Dashboard → **Workers & Pages** → **Create** → Worker.
+2. Откройте **Edit code**.
+3. Замените пример кода полным содержимым `warp-bootstrap-standalone-worker.js`.
+4. Нажмите **Deploy**.
+5. Проверьте:
+   ```powershell
+   $Worker = "https://<name>.<account>.workers.dev"
+   Invoke-RestMethod "$Worker/warp-bootstrap/health"
+   ```
+
+Ожидаемый ответ:
+
+```json
+{"service":"warp-bootstrap","revision":"warp-bootstrap-v1"}
+```
+
+Никакие Variables, Secrets, Durable Object bindings или Routes для базового provisioning-only deployment не требуются.
 
 ## Развёртывание одного Worker
 
