@@ -42,7 +42,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 | `awg_warp` | Beta: userspace AWG/WARP without `VpnService`; automatic provisioning and Telegram MTProto/media verified on Android 14 |
 | SOCKS5 / WebSocket frontend | Implemented as a compatibility mode |
 | `direct_ws` and `tcp_fallback` | Implemented; availability depends on the network |
-| Cloudflare Worker | Optional route and bootstrap for Consumer WARP provisioning when the direct API is unavailable |
+| Cloudflare Worker | Optional Telegram route; Consumer WARP provisioning uses a separately managed bootstrap Worker pool |
 | Worker Pool | Implemented but still slower than direct connectivity and not recommended as the primary route |
 | Feedback | Dedicated screen; GitHub Issue Forms without an embedded PAT |
 | Updates | Official GitHub Releases check with SemVer and official release-page navigation |
@@ -53,6 +53,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 - compatible SOCKS5 frontend on the same configurable port;
 - `cf_proxy_ws`, `direct_ws`, `cf_worker_ws`, `awg_warp`, and `tcp_fallback` routes;
 - in-app WARP/AWG profile management: automatic Consumer WARP provisioning, `.conf` import, selection, validation, and deletion;
+- separate custom/built-in bootstrap Workers for Consumer WARP profile creation; they are not added to the Telegram `cf_worker_ws` Worker Pool and the built-in pool can be fully disabled;
 - userspace AmneziaWG/WARP routing without root, Android `VpnService`, or a system TUN interface;
 - separate route policies for Wi-Fi, mobile data, and unknown networks;
 - Fake TLS secrets in `dd<secret>` and `ee<secret><domain_hex>` formats;
