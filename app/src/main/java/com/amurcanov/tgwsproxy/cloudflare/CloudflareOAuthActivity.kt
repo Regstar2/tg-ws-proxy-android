@@ -3,9 +3,11 @@ package com.amurcanov.tgwsproxy.cloudflare
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -34,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -64,8 +71,27 @@ class CloudflareOAuthActivity : ComponentActivity() {
         refreshState()
 
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            val prefs = remember { getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE) }
+            val context = LocalContext.current
+            val systemDarkTheme = isSystemInDarkTheme()
+            val isDarkTheme = when (prefs.getString("theme_mode", "System")) {
+                "Light" -> false
+                "Dark" -> true
+                else -> systemDarkTheme
+            }
+            val colorScheme = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    if (isDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                }
+                isDarkTheme -> darkColorScheme()
+                else -> lightColorScheme()
+            }
+
+            MaterialTheme(colorScheme = colorScheme) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
                     CloudflareOAuthScreen(
                         configured = config.isConfigured,
                         state = uiState,
