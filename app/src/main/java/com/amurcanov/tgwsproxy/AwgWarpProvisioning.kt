@@ -801,11 +801,21 @@ class AwgWarpProfileManager(
 
     fun listProfiles(): List<AwgWarpProfileSummary> = repository.listProfiles()
 
+    fun suggestedGeneratedProfileName(): String = repository.suggestedGeneratedProfileName()
+
     fun selectedProfileId(): String? = repository.selectedProfileId()
 
     fun loadDetails(profileId: String): Result<AwgWarpConfigDetails> = repository.loadDetails(profileId)
 
     fun loadMetadata(profileId: String): AwgWarpProfileMetadata? = repository.loadMetadata(profileId)
+
+    fun loadConfig(profileId: String): String? = repository.loadConfig(profileId)
+
+    fun updateProfile(
+        profileId: String,
+        name: String,
+        configText: String,
+    ): Result<AwgWarpProfileMetadata> = repository.updateProfile(profileId, name, configText)
 
     fun selectProfile(profileId: String): Result<Unit> = repository.selectProfile(profileId)
 
