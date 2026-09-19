@@ -6,7 +6,7 @@
 
 `v1.11.0` makes the userspace AWG/WARP route and in-app Consumer WARP profile provisioning part of the stable release.
 
-[Полное описание на русском](../../blob/v1.11.0/docs/releases/v1.11.0.md) · [Full release notes in English](../../blob/v1.11.0/docs/releases/v1.11.0_EN.md)
+[Полное описание на русском](https://github.com/Regstar2/tg-ws-proxy-android/blob/v1.11.0/docs/releases/v1.11.0.md) · [Full release notes in English](https://github.com/Regstar2/tg-ws-proxy-android/blob/v1.11.0/docs/releases/v1.11.0_EN.md)
 
 ## Главное
 
@@ -25,7 +25,7 @@
 
 ## Worker
 
-Актуальный гайд разделяет Telegram Worker и provisioning-only Worker: [docs/cloudflare-worker.md](../../blob/v1.11.0/docs/cloudflare-worker.md).
+Актуальный гайд разделяет Telegram Worker и provisioning-only Worker: [docs/cloudflare-worker.md](https://github.com/Regstar2/tg-ws-proxy-android/blob/v1.11.0/docs/cloudflare-worker.md).
 
 ## Assets
 
