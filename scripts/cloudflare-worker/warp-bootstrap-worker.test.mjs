@@ -2,13 +2,32 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = (await readFile(new URL("./warp-bootstrap-worker.js", import.meta.url), "utf8"))
+const standaloneSource = await readFile(
+  new URL("./warp-bootstrap-standalone-worker.js", import.meta.url),
+  "utf8",
+);
+const standaloneMod = await import(
+  "data:text/javascript;base64," + Buffer.from(standaloneSource).toString("base64")
+);
+
+const wrapperSource = (
+  await readFile(new URL("./warp-bootstrap-worker.js", import.meta.url), "utf8")
+)
   .replace(
     'import relayWorker, { ChunkRelaySession } from "./chunk-relay-status-worker.js";',
     `const relayWorker = { fetch: (...args) => globalThis.__warpBootstrapRelayFetch(...args) };
      class ChunkRelaySession {}`,
+  )
+  .replace(
+    /import \{[\s\S]*?\} from "\.\/warp-bootstrap-standalone-worker\.js";/,
+    `const handleWarpBootstrapRequest = (...args) =>
+       globalThis.__warpBootstrapHandle(...args);
+     const isWarpBootstrapPath = (pathname) =>
+       pathname === "/warp-bootstrap" || pathname.startsWith("/warp-bootstrap/");`,
   );
-const mod = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const wrapperMod = await import(
+  "data:text/javascript;base64," + Buffer.from(wrapperSource).toString("base64")
+);
 
 const validPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
@@ -20,29 +39,27 @@ function jsonRequest(path, method, body, headers = {}) {
   });
 }
 
-test("bootstrap entrypoint exports the configured Durable Object class", () => {
-  assert.equal(typeof mod.ChunkRelaySession, "function");
-});
-
-test("health endpoint is local and does not reach relay", async (t) => {
-  const old = globalThis.__warpBootstrapRelayFetch;
-  globalThis.__warpBootstrapRelayFetch = async () => {
-    assert.fail("relay must not handle bootstrap health");
-  };
-  t.after(() => { globalThis.__warpBootstrapRelayFetch = old; });
-
-  const response = await mod.default.fetch(
+test("standalone health endpoint exposes the provisioning contract", async () => {
+  const response = await standaloneMod.default.fetch(
     new Request("https://example.workers.dev/warp-bootstrap/health"),
-    {},
-    {},
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-  assert.equal(response.headers.get("X-Tgws-Warp-Bootstrap-Revision"), "warp-bootstrap-v1");
+  assert.equal(
+    response.headers.get("X-Tgws-Warp-Bootstrap-Revision"),
+    "warp-bootstrap-v1",
+  );
   assert.deepEqual(await response.json(), {
     service: "warp-bootstrap",
     revision: "warp-bootstrap-v1",
   });
+});
+
+test("standalone worker rejects non-bootstrap paths", async () => {
+  const response = await standaloneMod.default.fetch(
+    new Request("https://example.workers.dev/chunk-relay/open"),
+  );
+  assert.equal(response.status, 404);
 });
 
 test("registration forwards only the public key to the fixed WARP API", async () => {
@@ -57,7 +74,7 @@ test("registration forwards only the public key to the fixed WARP API", async ()
     });
   };
 
-  const response = await mod.handleWarpBootstrapRequest(
+  const response = await standaloneMod.handleWarpBootstrapRequest(
     jsonRequest(
       "/warp-bootstrap/v0a4005/reg",
       "POST",
@@ -76,8 +93,14 @@ test("registration forwards only the public key to the fixed WARP API", async ()
   assert.equal(upstreamInit.headers.get("Authorization"), null);
   assert.deepEqual(JSON.parse(upstreamInit.body), { key: validPublicKey });
   assert.equal(response.status, 201);
-  assert.equal(response.headers.get("X-Tgws-Warp-Bootstrap-Revision"), "warp-bootstrap-v1");
-  assert.deepEqual(await response.json(), { id: "registration-id", token: "sensitive-token" });
+  assert.equal(
+    response.headers.get("X-Tgws-Warp-Bootstrap-Revision"),
+    "warp-bootstrap-v1",
+  );
+  assert.deepEqual(await response.json(), {
+    id: "registration-id",
+    token: "sensitive-token",
+  });
 });
 
 test("activation forwards only warp_enabled and a bounded bearer token", async () => {
@@ -92,7 +115,7 @@ test("activation forwards only warp_enabled and a bounded bearer token", async (
     });
   };
 
-  const response = await mod.handleWarpBootstrapRequest(
+  const response = await standaloneMod.handleWarpBootstrapRequest(
     jsonRequest(
       "/warp-bootstrap/v0a4005/reg/123e4567-e89b-12d3-a456-426614174000",
       "PATCH",
@@ -116,10 +139,13 @@ test("activation forwards only warp_enabled and a bounded bearer token", async (
 
 test("invalid public key is rejected before any upstream request", async () => {
   let calls = 0;
-  const response = await mod.handleWarpBootstrapRequest(
+  const response = await standaloneMod.handleWarpBootstrapRequest(
     jsonRequest("/warp-bootstrap/v0a4005/reg", "POST", { key: "invalid" }),
     undefined,
-    async () => { calls++; return new Response(); },
+    async () => {
+      calls++;
+      return new Response();
+    },
   );
   assert.equal(response.status, 400);
   assert.equal(calls, 0);
@@ -132,10 +158,13 @@ test("activation requires authorization and exact activation payload", async () 
     "PATCH",
     { warp_enabled: false },
   );
-  const response = await mod.handleWarpBootstrapRequest(
+  const response = await standaloneMod.handleWarpBootstrapRequest(
     request,
     undefined,
-    async () => { calls++; return new Response(); },
+    async () => {
+      calls++;
+      return new Response();
+    },
   );
   assert.equal(response.status, 401);
   assert.equal(calls, 0);
@@ -143,28 +172,67 @@ test("activation requires authorization and exact activation payload", async () 
 
 test("unknown bootstrap paths never become an open proxy", async () => {
   let calls = 0;
-  const response = await mod.handleWarpBootstrapRequest(
+  const response = await standaloneMod.handleWarpBootstrapRequest(
     jsonRequest("/warp-bootstrap/proxy", "POST", { url: "https://example.com" }),
     undefined,
-    async () => { calls++; return new Response(); },
+    async () => {
+      calls++;
+      return new Response();
+    },
   );
   assert.equal(response.status, 404);
   assert.equal(calls, 0);
 });
 
-test("non-bootstrap requests are delegated unchanged", async (t) => {
-  const old = globalThis.__warpBootstrapRelayFetch;
+test("combined entrypoint exports the configured Durable Object class", () => {
+  assert.equal(typeof wrapperMod.ChunkRelaySession, "function");
+});
+
+test("combined entrypoint routes bootstrap paths to the standalone handler", async (t) => {
+  const oldHandle = globalThis.__warpBootstrapHandle;
+  const oldRelay = globalThis.__warpBootstrapRelayFetch;
+  let handledRequest;
+  globalThis.__warpBootstrapHandle = async (request) => {
+    handledRequest = request;
+    return new Response("bootstrap", { status: 203 });
+  };
+  globalThis.__warpBootstrapRelayFetch = async () => {
+    assert.fail("relay must not handle bootstrap routes");
+  };
+  t.after(() => {
+    globalThis.__warpBootstrapHandle = oldHandle;
+    globalThis.__warpBootstrapRelayFetch = oldRelay;
+  });
+
+  const request = new Request("https://example.workers.dev/warp-bootstrap/health");
+  const response = await wrapperMod.default.fetch(request, {}, {});
+
+  assert.equal(response.status, 203);
+  assert.equal(await response.text(), "bootstrap");
+  assert.equal(handledRequest, request);
+});
+
+test("combined entrypoint delegates non-bootstrap requests unchanged", async (t) => {
+  const oldHandle = globalThis.__warpBootstrapHandle;
+  const oldRelay = globalThis.__warpBootstrapRelayFetch;
   let seen;
+  globalThis.__warpBootstrapHandle = async () => {
+    assert.fail("bootstrap handler must not handle relay routes");
+  };
   globalThis.__warpBootstrapRelayFetch = async (...args) => {
     seen = args;
     return new Response("relay", { status: 202 });
   };
-  t.after(() => { globalThis.__warpBootstrapRelayFetch = old; });
+  t.after(() => {
+    globalThis.__warpBootstrapHandle = oldHandle;
+    globalThis.__warpBootstrapRelayFetch = oldRelay;
+  });
 
   const request = new Request("https://example.workers.dev/chunk-relay/open?sid=session_123");
   const env = { CHUNK_RELAY: "binding" };
   const ctx = { marker: true };
-  const response = await mod.default.fetch(request, env, ctx);
+  const response = await wrapperMod.default.fetch(request, env, ctx);
+
   assert.equal(response.status, 202);
   assert.equal(await response.text(), "relay");
   assert.equal(seen[0], request);
