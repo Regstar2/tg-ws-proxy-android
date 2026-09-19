@@ -76,7 +76,7 @@ Invoke-CheckedCommand `
         '-ExecutionPolicy', 'Bypass',
         '-File', $releaseAudit,
         '-ExpectedVersion', '1.11.0',
-        '-ExpectedVersionCode', '53'
+        '-ExpectedVersionCode', '54'
     )
 
 Write-Host "`n==> Validate release-script metadata preflight"
