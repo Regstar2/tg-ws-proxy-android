@@ -3,15 +3,20 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
-- WARP/AWG profile validation now requires a real Telegram MTProto `req_pq_multi` → `resPQ` round-trip, preventing generic-WARP false positives that leave Telegram sessions with zero downstream bytes.
-- WARP/AWG profile details now allow editing both the profile name and the saved `.conf` parameters for imported and automatically generated profiles; changed configs are revalidated and reset to `Not checked` before reuse.
-- Automatically generated Consumer WARP profiles now default to numbered names such as `WARP 1`, `WARP 2`, and so on instead of reusing one fixed name.
-- WARP/AWG provisioning now has a dedicated bootstrap Worker policy independent from the Telegram `cf_worker_ws` Worker Pool, with custom endpoints tried before the optional built-in pool.
-- Added settings to disable built-in provisioning Workers completely and to add, validate, enable/disable, check and delete custom HTTPS bootstrap endpoints.
-- Bootstrap health now identifies `service=warp-bootstrap` and revision `warp-bootstrap-v1`; redirects, credentials, query strings and arbitrary endpoint paths are rejected.
-- Consumer WARP provisioning now prefers an already full-duplex-validated saved AWG/WARP profile as a bootstrap transport to the fixed Cloudflare Consumer API, with the selected working profile tried first, then other working profiles, direct API, and Worker fallback.
-- Every new automatic profile still generates a new local WireGuard keypair and independent registration; provisioning no longer clones a stored Consumer registration when fresh registration fails.
-- The native existing-AWG bootstrap is restricted to the fixed `api.cloudflareclient.com` reachability, registration, and activation operations and has no direct-socket fallback.
+
+## 1.11.0 - 2026-09-19
+- Promoted the userspace `awg_warp` backend to the stable channel. Telegram traffic can use AmneziaWG/WARP inside the app without Android `VpnService`, root, or a system TUN interface.
+- Added in-app Consumer WARP profile creation, multi-profile storage, explicit profile selection, manual `.conf` import, profile details, deletion, and safe private-key handling.
+- Automatic provisioning creates a new local WireGuard keypair and an independent Consumer WARP registration for every generated profile.
+- WARP/AWG provisioning now tries an already validated saved AWG/WARP profile first (selected profile before other working profiles), then direct `api.cloudflareclient.com`, then enabled custom provisioning Workers, and finally the optional built-in provisioning Worker pool.
+- Added three project-provided built-in provisioning Workers for cold-start profile generation. They are isolated from the Telegram `cf_worker_ws` Worker Pool and are never used for Telegram proxy traffic.
+- Added settings to disable the built-in provisioning Worker pool and to add, validate, enable/disable, check, and delete custom HTTPS provisioning Workers.
+- Provisioning Worker compatibility is verified through `service=warp-bootstrap` / `revision=warp-bootstrap-v1`; redirects, URL credentials, query strings, and arbitrary endpoint paths are rejected.
+- Automatic profile validation now requires a real Telegram MTProto `req_pq_multi` → `resPQ` round-trip in addition to tunnel checks, preventing generic-WARP false positives with zero Telegram downstream.
+- Bounded AWG autotuning still requires two successful full-duplex confirmations (`2/2`) before an automatically generated profile is saved.
+- Saved WARP/AWG profiles can now be renamed and their `.conf` parameters edited. A changed profile returns to `Not checked` until it is validated again.
+- Automatically generated profiles use numbered names such as `WARP 1`, `WARP 2`, and so on.
+- The native existing-AWG bootstrap is restricted to the fixed Cloudflare Consumer API registration/activation operations and does not expose a general direct-socket or arbitrary proxy fallback.
 
 ## 1.11.0-beta.1 - 2026-09-17
 - Added the `awg_warp` MTProto backend using an app-local userspace AmneziaWG/WARP stack; it does not use Android `VpnService`, root, or a system TUN interface.
