@@ -6,7 +6,10 @@ plugins {
 val releaseVersionCode = 54
 val releaseVersionName = "1.11.0"
 
-fun asBuildConfigString(value: String): String = "\\\"" + value.replace("\\\\", "\\\\\\\\").replace("\\\"", "\\\\\\\"") + "\\\""
+fun asBuildConfigString(value: String): String {
+    val escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+    return "\"$escaped\""
+}
 
 val cloudflareOAuthClientId = providers.gradleProperty("TGWSPROXY_CF_OAUTH_CLIENT_ID")
     .orElse(providers.environmentVariable("TGWSPROXY_CF_OAUTH_CLIENT_ID"))
