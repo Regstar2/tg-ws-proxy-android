@@ -7,7 +7,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.ResponseBody
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -39,18 +38,41 @@ internal object WarpBootstrapProtocol {
             )
         }
 
-        val payload = runCatching { JSONObject(bodyText) }.getOrNull()
+        val payload = parseHealthPayload(bodyText)
             ?: return ProvisioningWorkerHealthCheckResult(false, "health_response_invalid", httpStatus)
-        if (payload.optString("service") != SERVICE) {
+        if (payload.service != SERVICE) {
             return ProvisioningWorkerHealthCheckResult(false, "health_service_mismatch", httpStatus)
         }
-        if (payload.optString("revision") != REVISION) {
+        if (payload.revision != REVISION) {
             return ProvisioningWorkerHealthCheckResult(false, "health_revision_unsupported", httpStatus)
         }
         if (!headerRevision.isNullOrBlank() && headerRevision != REVISION) {
             return ProvisioningWorkerHealthCheckResult(false, "health_header_revision_mismatch", httpStatus)
         }
         return ProvisioningWorkerHealthCheckResult(true, null, httpStatus)
+    }
+
+    private data class HealthPayload(
+        val service: String,
+        val revision: String,
+    )
+
+    private fun parseHealthPayload(bodyText: String): HealthPayload? {
+        val trimmed = bodyText.trim()
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
+
+        val service = extractSingleJsonStringField(trimmed, "service") ?: return null
+        val revision = extractSingleJsonStringField(trimmed, "revision") ?: return null
+        return HealthPayload(service = service, revision = revision)
+    }
+
+    private fun extractSingleJsonStringField(json: String, field: String): String? {
+        val pattern = Regex(
+            "\\\"${Regex.escape(field)}\\\"\\s*:\\s*\\\"([^\\\"\\\\]*)\\\"",
+        )
+        val matches = pattern.findAll(json).toList()
+        if (matches.size != 1) return null
+        return matches.single().groupValues[1]
     }
 
     fun readBoundedHealthBody(body: ResponseBody?): String? {
