@@ -42,7 +42,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 | `awg_warp` | Beta: userspace AWG/WARP без `VpnService`; automatic provisioning и Telegram MTProto/media проверены на Android 14 |
 | SOCKS5 / WebSocket frontend | Реализован как режим совместимости |
 | `direct_ws` и `tcp_fallback` | Реализованы; доступность зависит от сети |
-| Cloudflare Worker | Реализован как необязательный маршрут и bootstrap для Consumer WARP provisioning при недоступном direct API |
+| Cloudflare Worker | Реализован как необязательный Telegram-маршрут; Consumer WARP provisioning использует отдельный управляемый bootstrap Worker pool |
 | Worker Pool | Работает, но остаётся медленнее прямого соединения и не рекомендуется как основной маршрут |
 | Feedback | Отдельный экран; GitHub Issue Forms без встроенного PAT |
 | Updates | Проверка официальных GitHub Releases с SemVer и открытием официальной страницы релиза |
@@ -53,6 +53,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 - совместимый SOCKS5 frontend на том же настраиваемом порту;
 - маршруты `cf_proxy_ws`, `direct_ws`, `cf_worker_ws`, `awg_warp` и `tcp_fallback`;
 - встроенное управление WARP/AWG-профилями: automatic Consumer WARP provisioning, импорт `.conf`, выбор, проверка и удаление;
+- отдельные custom/built-in bootstrap Worker для создания Consumer WARP-профилей; они не добавляются в Telegram `cf_worker_ws` Worker Pool и встроенный pool можно полностью отключить;
 - userspace AmneziaWG/WARP route без root, Android `VpnService` и system TUN;
 - отдельные политики маршрутов для Wi-Fi, мобильной и неизвестной сети;
 - Fake TLS secrets формата `dd<secret>` и `ee<secret><domain_hex>`;
@@ -331,7 +332,7 @@ app\build\outputs\apk\debug\app-debug.apk
 - поддерживается только ABI `arm64-v8a`;
 - приложение является прокси для Telegram, а не системным VPN;
 - доступность маршрутов зависит от сети и внешней инфраструктуры;
-- Consumer WARP provisioning зависит от внешнего API; fresh install может потребовать Worker bootstrap, если direct registration недоступна;
+- Consumer WARP provisioning зависит от внешнего API; fresh install может потребовать отдельный bootstrap Worker, если direct registration недоступна. При включённом встроенном bootstrap registration-запрос может пройти через инфраструктуру проекта; эту политику можно отключить в настройках;
 - `awg_warp` в `1.11.0-beta.1` проверен на ограниченном числе устройств и сетей;
 - Worker Pool остаётся медленнее прямого соединения и не предназначен для основного сценария;
 - порт `1443` нужно изменить, если его уже использует другой локальный сервис;
