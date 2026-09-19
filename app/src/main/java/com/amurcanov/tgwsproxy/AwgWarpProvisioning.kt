@@ -48,7 +48,7 @@ class WarpProvisioningException(
 
 internal class ConsumerWarpProfileProvisioner(
     private val existingAwgBootstrapCandidates: List<ExistingAwgBootstrapCandidate> = emptyList(),
-    private val bootstrapWorkerUrls: List<String> = emptyList(),
+    private val bootstrapWorkerCandidates: List<WarpBootstrapWorkerCandidate> = emptyList(),
     private val onStage: (WarpProvisioningStage) -> Unit = {},
     private val onDiagnostic: (String, Map<String, String>) -> Unit = { _, _ -> },
 ) : WarpProfileProvisioner {
@@ -60,8 +60,6 @@ internal class ConsumerWarpProfileProvisioner(
         private const val API_HOST = "api.cloudflareclient.com"
         private const val API_VERSION = "v0a4005"
         private const val REGISTER_PATH = "/$API_VERSION/reg"
-        private const val BOOTSTRAP_PREFIX = "/warp-bootstrap"
-        private const val BOOTSTRAP_REVISION = "warp-bootstrap-v1"
         private const val API_REACH_CALL_TIMEOUT_MS = 12_000L
         private const val API_REACH_CONNECT_TIMEOUT_MS = 3_000L
         private const val BOOTSTRAP_HEALTH_TIMEOUT_MS = 5_000L
@@ -80,7 +78,7 @@ internal class ConsumerWarpProfileProvisioner(
     private var directRegistrationMayHaveBeenSent = false
 
     @Volatile
-    private var activeBootstrapBaseUrl: String? = null
+    private var activeBootstrapWorker: WarpBootstrapWorkerCandidate? = null
 
     @Volatile
     private var activeExistingAwgBootstrap: ExistingAwgBootstrapCandidate? = null
@@ -217,6 +215,8 @@ internal class ConsumerWarpProfileProvisioner(
             .connectionSpecs(listOf(ConnectionSpec.MODERN_TLS))
             .protocols(listOf(Protocol.HTTP_1_1))
             .eventListener(httpEvents)
+            .followRedirects(false)
+            .followSslRedirects(false)
             // Registration is side-effecting. Do not let OkHttp replay it after an ambiguous failure.
             .retryOnConnectionFailure(false)
             .build()
@@ -256,7 +256,7 @@ internal class ConsumerWarpProfileProvisioner(
             mapOf(
                 "api_version" to API_VERSION,
                 "client_version" to CLIENT_VERSION,
-                "bootstrap_workers" to bootstrapWorkerUrls.size.toString(),
+                "bootstrap_workers" to bootstrapWorkerCandidates.size.toString(),
             ),
         )
         val response = registerDevice(publicKey = keyPair.publicKey)
@@ -347,7 +347,7 @@ internal class ConsumerWarpProfileProvisioner(
 
     private fun performExistingAwgRegistration(publicKey: String): JSONObject? {
         activeExistingAwgBootstrap = null
-        activeBootstrapBaseUrl = null
+        activeBootstrapWorker = null
 
         for ((index, candidate) in existingAwgBootstrapCandidates.withIndex()) {
             val candidateDetails = mapOf(
@@ -417,7 +417,7 @@ internal class ConsumerWarpProfileProvisioner(
             .toString()
 
         directRegistrationMayHaveBeenSent = false
-        activeBootstrapBaseUrl = null
+        activeBootstrapWorker = null
         activeExistingAwgBootstrap = null
         try {
             val registration = executeJsonRequest(
@@ -437,23 +437,59 @@ internal class ConsumerWarpProfileProvisioner(
                 )
                 throw e
             }
-
-            val bootstrapBaseUrl = selectBootstrapWorker() ?: run {
-                diagnostic("WARP Worker bootstrap unavailable", mapOf("candidates" to bootstrapWorkerUrls.size.toString()))
-                throw e
-            }
-            diagnostic("WARP registration switching to Worker bootstrap")
-            val registration = executeJsonRequest(
-                method = "POST",
-                url = "$bootstrapBaseUrl$BOOTSTRAP_PREFIX$REGISTER_PATH",
-                body = body,
-                bearerToken = null,
-                operationName = "bootstrap registration",
+            return performWorkerRegistration(body) ?: throw e
+        } catch (e: WarpProvisioningException) {
+            if (!isRetryableWorkerFailure(e)) throw e
+            diagnostic(
+                "WARP direct registration switching to Worker bootstrap",
+                mapOf("code" to e.code),
             )
-            activeBootstrapBaseUrl = bootstrapBaseUrl
-            diagnostic("WARP provisioning bootstrap path", mapOf("path" to "worker"))
-            return registration
+            return performWorkerRegistration(body) ?: throw e
         }
+    }
+
+    private fun performWorkerRegistration(body: String): JSONObject? {
+        for (candidate in bootstrapWorkerCandidates) {
+            if (!isBootstrapWorkerHealthy(candidate)) continue
+
+            val details = bootstrapCandidateDetails(candidate)
+            try {
+                val registration = executeJsonRequest(
+                    method = "POST",
+                    url = "${candidate.url}${WarpBootstrapProtocol.PREFIX}$REGISTER_PATH",
+                    body = body,
+                    bearerToken = null,
+                    operationName = "bootstrap registration",
+                )
+                activeBootstrapWorker = candidate
+                diagnostic(
+                    "WARP bootstrap selected",
+                    details + mapOf("operation" to "registration"),
+                )
+                diagnostic(
+                    "WARP provisioning bootstrap path",
+                    mapOf("path" to "worker", "source" to candidate.source.wireValue),
+                )
+                return registration
+            } catch (e: IOException) {
+                diagnostic(
+                    "WARP bootstrap candidate failed",
+                    details + mapOf("code" to "registration_network_error"),
+                )
+            } catch (e: WarpProvisioningException) {
+                if (!isRetryableWorkerFailure(e)) throw e
+                diagnostic(
+                    "WARP bootstrap candidate failed",
+                    details + mapOf("code" to e.code),
+                )
+            }
+        }
+
+        diagnostic(
+            "WARP Worker bootstrap unavailable",
+            mapOf("candidates" to bootstrapWorkerCandidates.size.toString()),
+        )
+        return null
     }
 
     private fun enableWarp(registration: JSONObject) {
@@ -488,8 +524,6 @@ internal class ConsumerWarpProfileProvisioner(
             if (result.code != "registration_network_error" && result.code != "bootstrap_transport_init_failed") {
                 throw WarpProvisioningException(result.code.ifBlank { "registration_network_error" })
             }
-            // PATCH is idempotent for the already-created registration, so transport failure can
-            // safely fall through to direct API and then the existing Worker fallback.
             activeExistingAwgBootstrap = null
             diagnostic(
                 "WARP activation switching from existing AWG bootstrap to direct API",
@@ -497,17 +531,13 @@ internal class ConsumerWarpProfileProvisioner(
             )
         }
 
-        val bootstrapBaseUrl = activeBootstrapBaseUrl
-        if (bootstrapBaseUrl != null) {
-            executeJsonRequest(
-                method = "PATCH",
-                url = "$bootstrapBaseUrl$BOOTSTRAP_PREFIX$REGISTER_PATH/$registrationId",
-                body = body,
-                bearerToken = token,
-                operationName = "bootstrap activation",
-            )
-            diagnostic("WARP registration activated", mapOf("transport" to "worker_bootstrap"))
-            return
+        val activeWorker = activeBootstrapWorker
+        if (activeWorker != null) {
+            if (activateThroughWorkerCandidates(registrationId, token, body, activeWorker)) {
+                diagnostic("WARP registration activated", mapOf("transport" to "worker_bootstrap"))
+                return
+            }
+            throw WarpProvisioningException("bootstrap_workers_exhausted")
         }
 
         try {
@@ -520,61 +550,125 @@ internal class ConsumerWarpProfileProvisioner(
             )
             diagnostic("WARP registration activated", mapOf("transport" to "direct"))
         } catch (e: IOException) {
-            // Setting warp_enabled=true is idempotent for this already-created registration, so a
-            // network failure can safely retry the same PATCH through the Worker bootstrap.
-            val fallback = selectBootstrapWorker() ?: throw e
-            diagnostic("WARP activation switching to Worker bootstrap")
-            executeJsonRequest(
-                method = "PATCH",
-                url = "$fallback$BOOTSTRAP_PREFIX$REGISTER_PATH/$registrationId",
-                body = body,
-                bearerToken = token,
-                operationName = "bootstrap activation",
-            )
-            activeBootstrapBaseUrl = fallback
+            if (!activateThroughWorkerCandidates(registrationId, token, body, null)) throw e
+            diagnostic("WARP registration activated", mapOf("transport" to "worker_bootstrap"))
+        } catch (e: WarpProvisioningException) {
+            if (!isRetryableWorkerFailure(e)) throw e
+            if (!activateThroughWorkerCandidates(registrationId, token, body, null)) throw e
             diagnostic("WARP registration activated", mapOf("transport" to "worker_bootstrap"))
         }
     }
 
-    private fun selectBootstrapWorker(): String? {
-        val candidates = bootstrapWorkerUrls
-            .asSequence()
-            .map(String::trim)
-            .filter { it.startsWith("https://", ignoreCase = true) }
-            .map { it.trimEnd('/') }
-            .distinct()
-            .toList()
+    private fun activateThroughWorkerCandidates(
+        registrationId: String,
+        token: String,
+        body: String,
+        preferred: WarpBootstrapWorkerCandidate?,
+    ): Boolean {
+        val candidates = buildList {
+            if (preferred != null) add(preferred)
+            bootstrapWorkerCandidates.forEach { candidate ->
+                if (candidate != preferred) add(candidate)
+            }
+        }
 
-        for ((index, baseUrl) in candidates.withIndex()) {
+        for (candidate in candidates) {
+            if (!isBootstrapWorkerHealthy(candidate)) continue
+            val details = bootstrapCandidateDetails(candidate)
             try {
-                val request = Request.Builder()
-                    .url("$baseUrl$BOOTSTRAP_PREFIX/health")
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .get()
-                    .build()
-                bootstrapHealthClient.newCall(request).execute().use { response ->
-                    val revision = response.header("X-Tgws-Warp-Bootstrap-Revision").orEmpty()
-                    diagnostic(
-                        "WARP Worker bootstrap health response",
-                        mapOf(
-                            "candidate" to (index + 1).toString(),
-                            "status" to response.code.toString(),
-                            "revision_ok" to (revision == BOOTSTRAP_REVISION).toString(),
-                        ),
-                    )
-                    if (response.isSuccessful && revision == BOOTSTRAP_REVISION) {
-                        return baseUrl
-                    }
-                }
+                executeJsonRequest(
+                    method = "PATCH",
+                    url = "${candidate.url}${WarpBootstrapProtocol.PREFIX}$REGISTER_PATH/$registrationId",
+                    body = body,
+                    bearerToken = token,
+                    operationName = "bootstrap activation",
+                )
+                activeBootstrapWorker = candidate
+                diagnostic(
+                    "WARP bootstrap selected",
+                    details + mapOf("operation" to "activation"),
+                )
+                return true
             } catch (e: IOException) {
                 diagnostic(
-                    "WARP Worker bootstrap health failed",
-                    mapOf("candidate" to (index + 1).toString(), "cause" to safeCauseName(e)),
+                    "WARP bootstrap candidate failed",
+                    details + mapOf("code" to "activation_network_error"),
+                )
+            } catch (e: WarpProvisioningException) {
+                if (!isRetryableWorkerFailure(e)) throw e
+                diagnostic(
+                    "WARP bootstrap candidate failed",
+                    details + mapOf("code" to e.code),
                 )
             }
         }
-        return null
+        return false
+    }
+
+    private fun isBootstrapWorkerHealthy(candidate: WarpBootstrapWorkerCandidate): Boolean {
+        val details = bootstrapCandidateDetails(candidate)
+        return try {
+            val request = Request.Builder()
+                .url("${candidate.url}${WarpBootstrapProtocol.HEALTH_PATH}")
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            bootstrapHealthClient.newCall(request).execute().use { response ->
+                val body = WarpBootstrapProtocol.readBoundedHealthBody(response.body)
+                val result = if (body == null) {
+                    ProvisioningWorkerHealthCheckResult(
+                        ok = false,
+                        errorCode = "health_response_too_large_or_empty",
+                        httpStatus = response.code,
+                    )
+                } else {
+                    WarpBootstrapProtocol.validateHealthResponse(
+                        httpStatus = response.code,
+                        headerRevision = response.header("X-Tgws-Warp-Bootstrap-Revision"),
+                        bodyText = body,
+                    )
+                }
+                diagnostic(
+                    "WARP bootstrap candidate",
+                    details + mapOf(
+                        "health" to if (result.ok) "ok" else "failed",
+                        "code" to (result.errorCode ?: "ok"),
+                        "status" to (result.httpStatus?.toString() ?: "none"),
+                    ),
+                )
+                result.ok
+            }
+        } catch (e: IOException) {
+            diagnostic(
+                "WARP bootstrap candidate",
+                details + mapOf(
+                    "health" to "failed",
+                    "code" to "health_network_error",
+                    "cause" to safeCauseName(e),
+                ),
+            )
+            false
+        } catch (_: IllegalArgumentException) {
+            diagnostic(
+                "WARP bootstrap candidate",
+                details + mapOf("health" to "failed", "code" to "worker_url_invalid"),
+            )
+            false
+        }
+    }
+
+    private fun bootstrapCandidateDetails(candidate: WarpBootstrapWorkerCandidate): Map<String, String> {
+        return mapOf(
+            "source" to candidate.source.wireValue,
+            "index" to candidate.sourceIndex.toString(),
+            "host" to ProvisioningWorkerUrlValidator.safeHost(candidate.url),
+        )
+    }
+
+    private fun isRetryableWorkerFailure(error: WarpProvisioningException): Boolean {
+        return error.code == "registration_rate_limited" ||
+            error.code == "registration_server_error"
     }
 
     private fun executeJsonRequest(
@@ -673,7 +767,7 @@ internal class ConsumerWarpProfileProvisioner(
         val request = call.request()
         val bootstrap = request.url.host != API_HOST
         return when {
-            request.url.encodedPath.endsWith("$BOOTSTRAP_PREFIX/health") -> "bootstrap_health"
+            request.url.encodedPath.endsWith(WarpBootstrapProtocol.HEALTH_PATH) -> "bootstrap_health"
             bootstrap && request.method == "PATCH" -> "bootstrap_activation"
             bootstrap && request.method == "POST" -> "bootstrap_registration"
             request.url.encodedPath == "/" -> "reachability"
@@ -722,10 +816,24 @@ class AwgWarpProfileManager(
         onStage: (WarpProvisioningStage) -> Unit,
     ): Result<AwgWarpProfileMetadata> = runCatching {
         val bootstrapCandidates = prepareExistingAwgBootstrapCandidates()
+        val bootstrapSettings = WarpProvisioningBootstrapSettingsRepository(appContext).load()
+        val workerCandidates = WarpBootstrapWorkerCandidates.resolve(
+            settings = bootstrapSettings,
+            builtInUrls = BuiltInWarpProvisioningWorkers.endpoints,
+        )
+        AppLogger.i(
+            appContext,
+            AppLogCategory.NETWORK,
+            "WARP bootstrap policy",
+            mapOf(
+                "custom_enabled" to bootstrapSettings.customWorkers.count { it.enabled }.toString(),
+                "built_in_enabled" to bootstrapSettings.useBuiltInWorkers.toString(),
+            ),
+        )
         val provisioned = try {
             val provider = ConsumerWarpProfileProvisioner(
                 existingAwgBootstrapCandidates = bootstrapCandidates,
-                bootstrapWorkerUrls = WarpBootstrapWorkerCandidates.load(appContext),
+                bootstrapWorkerCandidates = workerCandidates,
                 onStage = onStage,
                 onDiagnostic = { message, details ->
                     AppLogger.i(appContext, AppLogCategory.NETWORK, message, details)
