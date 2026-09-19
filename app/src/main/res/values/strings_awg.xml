@@ -11,6 +11,8 @@
     <string name="awg_warp_config_mtproto_only">AWG/WARP is used only by the TGWSProxy MTProto route. It does not create a system VPN.</string>
 
     <string name="awg_warp_default_profile_name">WARP profile</string>
+    <string name="awg_warp_generated_profile_name_prefix">WARP</string>
+    <string name="awg_warp_generated_profile_name_format">WARP %1$d</string>
     <string name="awg_warp_imported_profile_name">Imported AWG profile</string>
     <string name="awg_warp_legacy_profile_name">Imported legacy profile</string>
     <string name="awg_warp_profiles_title">WARP / AmneziaWG</string>
