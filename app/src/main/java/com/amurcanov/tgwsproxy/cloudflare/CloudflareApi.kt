@@ -188,9 +188,10 @@ class CloudflareWorkerDeploymentClient(
             .build()
         httpClient.newCall(request).execute().use { response ->
             val payload = response.body?.string().orEmpty()
-            if (response.code != 404) {
-                requireCloudflareResult(response.code, response.isSuccessful, payload)
+            if (response.code == 404 || (response.isSuccessful && payload.isBlank())) {
+                return@use
             }
+            requireCloudflareResult(response.code, response.isSuccessful, payload)
         }
     }
 
