@@ -3,6 +3,9 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- WARP/AWG provisioning now has a dedicated bootstrap Worker policy independent from the Telegram `cf_worker_ws` Worker Pool, with custom endpoints tried before the optional built-in pool.
+- Added settings to disable built-in provisioning Workers completely and to add, validate, enable/disable, check and delete custom HTTPS bootstrap endpoints.
+- Bootstrap health now identifies `service=warp-bootstrap` and revision `warp-bootstrap-v1`; redirects, credentials, query strings and arbitrary endpoint paths are rejected.
 - Consumer WARP provisioning now prefers an already full-duplex-validated saved AWG/WARP profile as a bootstrap transport to the fixed Cloudflare Consumer API, with the selected working profile tried first, then other working profiles, direct API, and Worker fallback.
 - Every new automatic profile still generates a new local WireGuard keypair and independent registration; provisioning no longer clones a stored Consumer registration when fresh registration fails.
 - The native existing-AWG bootstrap is restricted to the fixed `api.cloudflareclient.com` reachability, registration, and activation operations and has no direct-socket fallback.
