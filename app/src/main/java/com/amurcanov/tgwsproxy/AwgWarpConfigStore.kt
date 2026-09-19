@@ -60,7 +60,11 @@ class AwgWarpProfileRepository(
             prefix = prefix,
             existingNames = listProfiles().map { it.metadata.name },
         )
-        return context.getString(R.string.awg_warp_generated_profile_name_format, nextIndex)
+        return context.getString(
+            R.string.awg_warp_generated_profile_name_format,
+            prefix,
+            nextIndex,
+        )
     }
 
     fun selectedProfileId(): String? {
