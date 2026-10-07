@@ -45,21 +45,25 @@ class BootCompletedReceiver : BroadcastReceiver() {
         )
 
         val prefs = appContext.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
+        val autostartEnabled = AutostartPreferences(prefs).isEnabled()
+        if (!autostartEnabled) {
+            AppLogger.i(
+                context = appContext,
+                category = AppLogCategory.APP,
+                message = "BOOT_AUTOSTART_DISABLED",
+            )
+            return
+        }
+
         val savedConfig = ProxySavedConfigStore(prefs).load()
         when (
             BootAutostartPolicy.evaluate(
-                enabled = AutostartPreferences(prefs).isEnabled(),
+                enabled = true,
                 savedConfig = savedConfig,
                 alreadyRunning = ProxyService.isRunning.value,
             )
         ) {
-            BootAutostartDecision.DISABLED -> {
-                AppLogger.i(
-                    context = appContext,
-                    category = AppLogCategory.APP,
-                    message = "BOOT_AUTOSTART_DISABLED",
-                )
-            }
+            BootAutostartDecision.DISABLED -> Unit
 
             BootAutostartDecision.ALREADY_RUNNING -> {
                 AppLogger.i(
