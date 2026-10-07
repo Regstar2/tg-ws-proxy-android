@@ -361,6 +361,9 @@
     <string name="notification_line_latency">Задержка: %1$s</string>
     <string name="notification_line_connections">Соединения: %1$d</string>
     <string name="notification_line_last_error">Последняя ошибка: %1$s</string>
+    <string name="section_service">Служба</string>
+    <string name="autostart_on_boot_title">Автозапуск при включении устройства</string>
+    <string name="autostart_on_boot_hint">Прокси будет автоматически запускаться после загрузки Android с последней сохранённой конфигурацией.</string>
     <string name="section_notifications">Уведомления</string>
     <string name="section_notifications_hint">Android требует видимое уведомление для foreground service. TgWsProxy может сделать его компактным или минимальным, но не может полностью убрать его во время работы прокси.</string>
     <string name="notification_display_mode_label">Уведомление сервиса</string>
