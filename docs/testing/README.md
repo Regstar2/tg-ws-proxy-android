@@ -101,6 +101,18 @@ Automation contract: [../development/github-automation.md](../development/github
 - [ ] Stop/start the proxy after a failed route attempt
 - [ ] Verify the local listener is usable after reconnect/restart
 
+## Boot autostart
+
+- [ ] Leave **Autostart on boot** disabled, reboot the device, and verify that the proxy service does not start.
+- [ ] Start the proxy once with a valid configuration, enable **Autostart on boot**, then reboot without manually opening the app.
+- [ ] After `BOOT_COMPLETED`, verify that the existing foreground notification appears and the saved local proxy port is reachable.
+- [ ] Open the app and verify that the UI reports the already-running `ProxyService`.
+- [ ] Stop the proxy manually, verify that the autostart setting remains enabled, reboot again, and verify that the proxy starts.
+- [ ] For SOCKS5, remove/clear the saved runtime configuration in a test setup and verify that boot start is skipped without a crash or restart loop.
+- [ ] Verify that repeated boot delivery does not create a second proxy runtime.
+- [ ] Disable autostart, reboot again, and verify that no proxy service is started.
+- [ ] Review `TgWsProxy` logcat for privacy-safe `BOOT_*` events only; no domains, keys, tokens, or private runtime configuration should be logged.
+
 ## Release smoke (before tagging)
 
 Release process: [../releases/release.md](../releases/release.md).  
