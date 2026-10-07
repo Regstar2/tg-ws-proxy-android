@@ -32,8 +32,8 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.0` (`versionCode 54`)  
-**Стадия:** stable release candidate; перед тегом требуется финальная проверка signed APK на устройстве
+**Версия исходников:** `1.11.1` (`versionCode 57`)  
+**Стадия:** stable patch release candidate; автозапуск после reboot проверен на реальном устройстве
 
 | Область | Статус |
 |---|---|
@@ -57,7 +57,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 - отдельные политики маршрутов для Wi-Fi, мобильной и неизвестной сети;
 - Fake TLS secrets формата `dd<secret>` и `ee<secret><domain_hex>`;
 - необязательный passthrough probe-соединений на указанный masking domain;
-- foreground service, уведомление о состоянии и watchdog локального listener;
+- foreground service, уведомление о состоянии, watchdog локального listener и опциональный автозапуск прокси после загрузки Android;
 - диагностика маршрутов, runtime status, экспорт отчёта и настраиваемое логирование;
 - отдельные экраны обратной связи и проверки обновлений;
 - русский и английский интерфейс.
@@ -279,7 +279,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.0
+.\scripts\release.ps1 -Version v1.11.1
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
