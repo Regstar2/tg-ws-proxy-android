@@ -361,6 +361,9 @@
     <string name="notification_line_latency">Latency: %1$s</string>
     <string name="notification_line_connections">Connections: %1$d</string>
     <string name="notification_line_last_error">Last error: %1$s</string>
+    <string name="section_service">Service</string>
+    <string name="autostart_on_boot_title">Start automatically when device turns on</string>
+    <string name="autostart_on_boot_hint">The proxy will start automatically after Android finishes booting using the last saved configuration.</string>
     <string name="section_notifications">Notifications</string>
     <string name="section_notifications_hint">Android requires a visible notification for foreground services. TgWsProxy can make it compact or minimal, but cannot fully remove it while the proxy is running.</string>
     <string name="notification_display_mode_label">Service notification</string>
