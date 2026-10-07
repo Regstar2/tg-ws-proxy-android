@@ -25,8 +25,7 @@
 - [ ] `dist\TgWsProxy-Android-v1.11.1-arm64-v8a.apk` exists.
 - [ ] matching `.sha256` exists.
 - [ ] APK reports `versionName 1.11.1` / `versionCode 57`.
-- [ ] upgrade over signed `v1.10.14` succeeds without uninstall/data loss.
-- [ ] upgrade over signed `v1.11.1-beta.1` succeeds without uninstall/data loss.
+- [ ] upgrade over signed `v1.11.0` succeeds without uninstall/data loss.
 
 ## Boot autostart
 
