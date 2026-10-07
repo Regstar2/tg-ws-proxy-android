@@ -22,7 +22,7 @@
    ```powershell
    .\scripts\release.ps1 -Version v1.11.1
    ```
-3. Установить signed APK поверх `v1.10.14` и отдельно поверх `v1.11.1-beta.1`; uninstall не использовать как способ обхода проверки подписи.
+3. Установить signed APK поверх `v1.11.0` с той же release-подписью; uninstall не использовать как способ обхода проверки подписи.
 4. Проверить MTProto/CF, `awg_warp`, сообщения/media, reconnect, Wi-Fi ↔ mobile и boot autostart с последней сохранённой конфигурацией.
 5. Проверить custom provisioning Worker и поведение переключателя встроенных Worker.
 6. Просмотреть экспорт diagnostics/logs на наличие секретов.
