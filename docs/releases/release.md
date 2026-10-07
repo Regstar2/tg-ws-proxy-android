@@ -1,16 +1,16 @@
 # Release workflow
 
-Актуальный release target: **v1.11.0 stable**.
+Актуальный release target: **v1.11.1 stable**.
 
 ## Метаданные
 
-- `versionName 1.11.0`
-- `versionCode 54`
-- tag: `v1.11.0`
-- APK: `TgWsProxy-Android-v1.11.0-arm64-v8a.apk`
-- full RU notes: [v1.11.0.md](v1.11.0.md)
-- full EN notes: [v1.11.0_EN.md](v1.11.0_EN.md)
-- GitHub Release body: [RELEASE_NOTES_v1.11.0.md](RELEASE_NOTES_v1.11.0.md)
+- `versionName 1.11.1`
+- `versionCode 57`
+- tag: `v1.11.1`
+- APK: `TgWsProxy-Android-v1.11.1-arm64-v8a.apk`
+- full RU notes: [v1.11.1.md](v1.11.1.md)
+- full EN notes: [v1.11.1_EN.md](v1.11.1_EN.md)
+- GitHub Release body: [RELEASE_NOTES_v1.11.1.md](RELEASE_NOTES_v1.11.1.md)
 
 ## Перед тегом
 
@@ -20,10 +20,10 @@
    ```
 2. Собрать подписанный release:
    ```powershell
-   .\scripts\release.ps1 -Version v1.11.0
+   .\scripts\release.ps1 -Version v1.11.1
    ```
-3. Установить signed APK поверх `v1.10.14` и отдельно поверх `v1.11.0-beta.1`; uninstall не использовать как способ обхода проверки подписи.
-4. Проверить MTProto/CF, `awg_warp`, создание WARP-профиля, сообщения/media, reconnect и Wi-Fi ↔ mobile.
+3. Установить signed APK поверх `v1.11.0` с той же release-подписью; uninstall не использовать как способ обхода проверки подписи.
+4. Проверить MTProto/CF, `awg_warp`, сообщения/media, reconnect, Wi-Fi ↔ mobile и boot autostart с последней сохранённой конфигурацией.
 5. Проверить custom provisioning Worker и поведение переключателя встроенных Worker.
 6. Просмотреть экспорт diagnostics/logs на наличие секретов.
 7. Зафиксировать результат в [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
@@ -32,7 +32,7 @@
 
 `.\scripts\ci.ps1` проверяет release metadata/localization/private-file audit, release preflight, Go module/tests, Android unit tests, debug APK build и packaged-resource audit.
 
-`.\scripts\release.ps1 -Version v1.11.0` дополнительно:
+`.\scripts\release.ps1 -Version v1.11.1` дополнительно:
 
 - требует release signing material вне Git;
 - собирает release APK;
@@ -42,12 +42,12 @@
 
 ## Публикация
 
-`.github/workflows/release.yml` запускается для существующего tag `v1.11.0`. Workflow:
+`.github/workflows/release.yml` запускается для существующего tag `v1.11.1`. Workflow:
 
 1. checkout exact tag;
 2. повторно запускает `scripts/ci.ps1`;
 3. восстанавливает release keystore из GitHub Actions secrets во временный каталог hosted runner;
-4. запускает `scripts/release.ps1 -Version v1.11.0`;
+4. запускает `scripts/release.ps1 -Version v1.11.1`;
 5. проверяет наличие одного APK и одного `.sha256`;
 6. создаёт GitHub Release только если предыдущие шаги завершились успешно.
 

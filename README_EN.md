@@ -32,8 +32,8 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Source version:** `1.11.0` (`versionCode 54`)  
-**Stage:** stable release candidate; final signed-APK device acceptance is required before tagging
+**Source version:** `1.11.1` (`versionCode 57`)  
+**Stage:** stable patch release candidate; boot autostart has been verified on a physical device
 
 | Area | Status |
 |---|---|
@@ -57,7 +57,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 - separate route policies for Wi-Fi, mobile data, and unknown networks;
 - Fake TLS secrets in `dd<secret>` and `ee<secret><domain_hex>` formats;
 - optional probe passthrough to a configured masking domain;
-- foreground service, status notification, and a local listener watchdog;
+- foreground service, status notification, local listener watchdog, and optional proxy autostart after Android boot;
 - route diagnostics, runtime status, report export, and configurable logging;
 - dedicated Feedback and Updates screens;
 - English and Russian UI.
@@ -279,7 +279,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.0
+.\scripts\release.ps1 -Version v1.11.1
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -314,7 +314,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.0` release notes | [docs/releases/v1.11.0_EN.md](docs/releases/v1.11.0_EN.md) |
+| `1.11.1` release notes | [docs/releases/v1.11.1_EN.md](docs/releases/v1.11.1_EN.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 

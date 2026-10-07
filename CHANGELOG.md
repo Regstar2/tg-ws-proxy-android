@@ -4,6 +4,13 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
+## 1.11.1 - 2026-10-07
+- Added an opt-in **Autostart on boot** setting that restores the existing `ProxyService` from the last saved configuration after Android finishes booting.
+- Added a non-exported `BOOT_COMPLETED` receiver using the existing foreground-service notification path; the app UI is not opened automatically.
+- Boot autostart validates saved frontend state, skips invalid SOCKS5 configuration, avoids duplicate runtime startup, and records privacy-safe `BOOT_*` diagnostics.
+- Added unit coverage for autostart persistence, boot-start decisions, saved proxy startup configuration, and repeated boot delivery.
+- Verified reboot autostart on a physical Xiaomi/HyperOS device. HyperOS requires the user to grant the app its separate background/autostart permission.
+
 ## 1.11.0 - 2026-09-19
 - Promoted the userspace `awg_warp` backend to the stable channel. Telegram traffic can use AmneziaWG/WARP inside the app without Android `VpnService`, root, or a system TUN interface.
 - Added in-app Consumer WARP profile creation, multi-profile storage, explicit profile selection, manual `.conf` import, profile details, deletion, and safe private-key handling.
