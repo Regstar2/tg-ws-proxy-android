@@ -51,12 +51,8 @@ class ProxyService : Service() {
         )
         private val LEGACY_NOTIFICATION_IDS = listOf(1, 2)
 
-        private const val PREFS = "ProxyPrefs"
+        private const val PREFS = PROXY_PREFS_NAME
         private const val KEY_NOTIFICATION_CHANNELS_MIGRATED = "notification_channels_v3_migrated"
-        private const val KEY_LAST_PORT = "last_proxy_port"
-        private const val KEY_LAST_PORT_DEFAULT_MIGRATED = "last_proxy_port_default_1443_migrated"
-        private const val KEY_LAST_IPS = "last_runtime_ips"
-        private const val KEY_LAST_POOL = "last_proxy_pool"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning
@@ -118,39 +114,28 @@ class ProxyService : Service() {
         poolSize: Int,
         frontendType: LocalProxyFrontendType,
     ) {
-        lastFrontendType = frontendType
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-        lastPort = port
-        lastIps = ips
-        lastPoolSize = poolSize
-        editor
-            .putInt(KEY_LAST_PORT, port)
-            .putBoolean(KEY_LAST_PORT_DEFAULT_MIGRATED, true)
-            .putString(KEY_LAST_IPS, ips)
-            .putInt(KEY_LAST_POOL, poolSize)
-        editor.apply()
-        LocalProxyFrontendRepository(prefs).save(frontendType)
+        val config = ProxySavedConfig(
+            port = port,
+            runtimeConfig = ips,
+            poolSize = poolSize,
+            frontendType = frontendType,
+        )
+        ProxySavedConfigStore(getSharedPreferences(PREFS, Context.MODE_PRIVATE)).save(config)
+        applyLastConfig(config)
     }
 
     private fun loadLastConfig() {
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val savedPort = prefs.getInt(KEY_LAST_PORT, DEFAULT_LOCAL_PROXY_PORT)
-        val portMigrationDone = prefs.getBoolean(KEY_LAST_PORT_DEFAULT_MIGRATED, false)
-        lastPort = if (!portMigrationDone && savedPort == LEGACY_DEFAULT_LOCAL_PROXY_PORT) {
-            DEFAULT_LOCAL_PROXY_PORT
-        } else {
-            savedPort
-        }
-        lastIps = prefs.getString(KEY_LAST_IPS, "").orEmpty()
-        lastPoolSize = prefs.getInt(KEY_LAST_POOL, 4)
-        lastFrontendType = LocalProxyFrontendRepository(prefs).load()
-        if (savedPort != lastPort || !portMigrationDone) {
-            prefs.edit()
-                .putInt(KEY_LAST_PORT, lastPort)
-                .putBoolean(KEY_LAST_PORT_DEFAULT_MIGRATED, true)
-                .apply()
-        }
+        val config = ProxySavedConfigStore(
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE),
+        ).load()
+        applyLastConfig(config)
+    }
+
+    private fun applyLastConfig(config: ProxySavedConfig) {
+        lastPort = config.port
+        lastIps = config.runtimeConfig
+        lastPoolSize = config.poolSize
+        lastFrontendType = config.frontendType
     }
 
     private fun startProxy(
