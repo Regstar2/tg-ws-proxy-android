@@ -335,6 +335,10 @@ private fun ProxyScreen(
     var notificationPrefs by remember {
         mutableStateOf(NotificationPreferences.load(context))
     }
+    val autostartPreferences = remember { AutostartPreferences(prefs) }
+    var autostartOnBoot by remember {
+        mutableStateOf(autostartPreferences.isEnabled())
+    }
     var showOnboarding by remember {
         mutableStateOf(!prefs.getBoolean("onboarding_completed", false))
     }
@@ -2876,6 +2880,16 @@ private fun ProxyScreen(
                             titleRes = R.string.settings_section_app_title,
                             subtitleRes = R.string.settings_section_app_subtitle,
                         )
+                SettingsSectionCard(titleRes = R.string.section_service) {
+                AutostartSettingsSection(
+                    enabled = autostartOnBoot,
+                    onEnabledChange = { enabled ->
+                        autostartOnBoot = enabled
+                        autostartPreferences.setEnabled(enabled)
+                    },
+                )
+                }
+
                 SettingsSectionCard(
                     titleRes = R.string.section_notifications,
                     subtitle = stringResource(R.string.section_notifications_hint),
