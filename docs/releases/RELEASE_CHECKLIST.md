@@ -1,9 +1,9 @@
-# Release checklist — v1.11.0 stable
+# Release checklist — v1.11.1 stable
 
 ## Metadata / documentation
 
-- [ ] `releaseVersionName = 1.11.0`, `releaseVersionCode = 54`.
-- [ ] `.\scripts\audit-release.ps1 -ExpectedVersion 1.11.0 -ExpectedVersionCode 54` passes.
+- [ ] `releaseVersionName = 1.11.1`, `releaseVersionCode = 57`.
+- [ ] `.\scripts\audit-release.ps1 -ExpectedVersion 1.11.1 -ExpectedVersionCode 57` passes.
 - [ ] README RU/EN, CHANGELOG and release notes agree with source metadata.
 - [ ] Canonical Worker guide is `docs/cloudflare-worker.md`; legacy path only redirects to it.
 - [ ] No keystore, signing secret, local log, `.env`, `local.properties` or private governance files are tracked.
@@ -16,17 +16,25 @@
 - [ ] Android unit tests pass.
 - [ ] `assembleDebug` passes.
 - [ ] packaged APK resource audit passes.
-- [ ] release preflight accepts `v1.11.0`.
+- [ ] release preflight accepts `v1.11.1`.
 
 ## Signed release artifact
 
-- [ ] `.\scripts\release.ps1 -Version v1.11.0` succeeds with the release keystore.
+- [ ] `.\scripts\release.ps1 -Version v1.11.1` succeeds with the release keystore.
 - [ ] `apksigner verify --verbose --print-certs` succeeds.
-- [ ] `dist\TgWsProxy-Android-v1.11.0-arm64-v8a.apk` exists.
+- [ ] `dist\TgWsProxy-Android-v1.11.1-arm64-v8a.apk` exists.
 - [ ] matching `.sha256` exists.
-- [ ] APK reports `versionName 1.11.0` / `versionCode 54`.
+- [ ] APK reports `versionName 1.11.1` / `versionCode 57`.
 - [ ] upgrade over signed `v1.10.14` succeeds without uninstall/data loss.
-- [ ] upgrade over signed `v1.11.0-beta.1` succeeds without uninstall/data loss.
+- [ ] upgrade over signed `v1.11.1-beta.1` succeeds without uninstall/data loss.
+
+## Boot autostart
+
+- [x] Autostart setting is disabled by default and persists when changed.
+- [x] Real reboot starts the existing `ProxyService` without opening the Activity when the setting is enabled and saved config is valid.
+- [x] Existing foreground notification path is reused.
+- [x] Xiaomi/HyperOS device smoke confirmed that the OEM background/autostart permission may need to be enabled by the user.
+- [ ] Reboot with autostart disabled leaves the proxy service stopped.
 
 ## Core Telegram runtime
 
@@ -80,6 +88,6 @@
 - [ ] All automated checks above pass.
 - [ ] Signed APK device smoke is complete.
 - [ ] Release notes contain no unverified success claims.
-- [ ] Create/push exact tag `v1.11.0`.
+- [ ] Create/push exact tag `v1.11.1`.
 - [ ] Release workflow publishes exactly APK + SHA-256.
 - [ ] Downloaded release APK can be installed and launched.
