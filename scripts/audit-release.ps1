@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ExpectedVersion = '1.11.0',
-    [int]$ExpectedVersionCode = 54
+    [string]$ExpectedVersion = '1.11.1',
+    [int]$ExpectedVersionCode = 57
 )
 
 Set-StrictMode -Version Latest
