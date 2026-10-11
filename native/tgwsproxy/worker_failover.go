@@ -9,9 +9,37 @@ import (
 
 const defaultMaxWorkerFailoverAttempts = 3
 
+type workerTransport string
+
+const (
+	workerTransportChunkRelay       workerTransport = "chunk_relay"
+	workerTransportLegacyWebSocket  workerTransport = "legacy_websocket"
+)
+
+func parseWorkerTransport(raw string) (workerTransport, bool) {
+	switch workerTransport(strings.TrimSpace(strings.ToLower(raw))) {
+	case workerTransportChunkRelay:
+		return workerTransportChunkRelay, true
+	case workerTransportLegacyWebSocket:
+		return workerTransportLegacyWebSocket, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeWorkerTransport(raw string) workerTransport {
+	transport, ok := parseWorkerTransport(raw)
+	if !ok {
+		return workerTransportChunkRelay
+	}
+	return transport
+}
+
+
 type workerFailoverCandidate struct {
 	ID     string
 	Domain string
+	Transport workerTransport
 }
 
 type workerFailoverSettings struct {
@@ -61,16 +89,24 @@ func parseWorkerFailoverCandidates(raw string) []workerFailoverCandidate {
 		if part == "" {
 			continue
 		}
-		sep := strings.Index(part, ":")
-		if sep <= 0 {
+		fields := strings.Split(part, ":")
+		if len(fields) != 2 && len(fields) != 3 {
 			continue
 		}
-		id := strings.TrimSpace(part[:sep])
-		domain := NormalizeWorkerDomain(strings.TrimSpace(part[sep+1:]))
+		id := strings.TrimSpace(fields[0])
+		domain := NormalizeWorkerDomain(strings.TrimSpace(fields[1]))
 		if id == "" || domain == "" {
 			continue
 		}
-		out = append(out, workerFailoverCandidate{ID: id, Domain: domain})
+		transport := workerTransportChunkRelay
+		if len(fields) == 3 {
+			var ok bool
+			transport, ok = parseWorkerTransport(fields[2])
+			if !ok {
+				continue // Never silently downgrade an explicitly unknown protocol.
+			}
+		}
+		out = append(out, workerFailoverCandidate{ID: id, Domain: domain, Transport: transport})
 	}
 	return out
 }
