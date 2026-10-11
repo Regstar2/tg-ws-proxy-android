@@ -152,8 +152,8 @@
     <string name="cf_worker_hint">Enter only the Worker hostname, for example example.username.workers.dev. Do not paste the full wss:// URL.</string>
     <string name="cf_worker_test">Test Worker</string>
     <string name="cf_worker_test_running">Testing Worker…</string>
-    <string name="cf_worker_test_ok">Worker check: %1$d of %2$d DC routes responded</string>
-    <string name="cf_worker_test_fail">Worker check failed</string>
+    <string name="cf_worker_test_ok">Worker Chunk Relay: %1$d of %2$d protocol checks passed (MTProto exchange unverified)</string>
+    <string name="cf_worker_test_fail">Worker Chunk Relay unavailable or incompatible</string>
     <string name="cf_worker_not_configured">Worker is not configured</string>
     <string name="cf_worker_help_link">Worker setup guide</string>
     <string name="worker_domain_empty">Enter a domain like example.username.workers.dev</string>
@@ -948,4 +948,9 @@
     <string name="mtproto_validation_port_invalid">MTProto port must be between 1 and 65535.</string>
     <string name="mtproto_validation_secret_invalid">MTProto secret must be exactly 32 hex characters (16 bytes).</string>
     <string name="mtproto_validation_fake_tls_domain_invalid">Use a valid public domain.</string>
+    <string name="worker_chunk_relay_scope">HTTPS Chunk Relay: protocol and Durable Object reachability only. Two-way MTProto traffic is not verified.</string>
+    <string name="worker_chunk_relay_step">Chunk Relay / Durable Object</string>
+    <string name="worker_protocol_incompatible">Incompatible Worker protocol: expected Chunk Relay, not legacy WebSocket</string>
+    <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay reachable; MTProto exchange not verified</string>
+    <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay unavailable or incompatible</string>
 </resources>
