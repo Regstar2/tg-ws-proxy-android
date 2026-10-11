@@ -136,6 +136,26 @@ class ChunkRelayWorkerProbeTest {
     }
 
     @Test
+    fun incompatibleRevisionAfterOpenStillClosesRemoteSession() {
+        val actions = mutableListOf<String>()
+        val probe = ChunkRelayWorkerProbe(
+            http = ChunkRelayProbeHttp { _, path, _, _ ->
+                actions += path
+                if (path.startsWith("/chunk-relay/open?")) {
+                    response(204, workerRevision = "legacy-revision")
+                } else {
+                    response(204)
+                }
+            },
+        )
+        val result = probe.check("example.workers.dev", "149.154.167.51")
+        assertFalse(result.available)
+        assertEquals("revision_mismatch", result.errorCode)
+        assertEquals(2, actions.size)
+        assertTrue(actions.last().startsWith("/chunk-relay/close?"))
+    }
+
+    @Test
     fun networkTimeoutDoesNotReportSuccessAndAttemptsCleanup() {
         val calls = mutableListOf<String>()
         val probe = ChunkRelayWorkerProbe(
