@@ -8,6 +8,11 @@ param(
     [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
     [string]$LegacyWorkerDomain,
 
+    [ValidateRange(15, 900)]
+    [int]$PhaseSeconds = 90,
+
+    [string]$TelegramPackage = 'org.telegram.messenger',
+    [switch]$LegacyOnly,
     [switch]$InstallSignedDebug,
     [string]$OutputRoot = ''
 )
@@ -33,8 +38,6 @@ if ($adbCommand) {
 }
 
 if ($InstallSignedDebug) {
-    # The debug fixture must use the original release signing certificate
-    # to update an installed release app without deleting its data.
     & (Join-Path $PSScriptRoot 'build-signed-worker-smoke.ps1') -Install
     if ($LASTEXITCODE -ne 0) {
         throw 'Signed Worker smoke APK build/install failed.'
@@ -46,15 +49,23 @@ $connected = @(
         Where-Object { $_ -match '^\S+\s+device\s*$' } |
         ForEach-Object { ($_ -split '\s+')[0] }
 )
-if ($LASTEXITCODE -ne 0) {
-    throw 'adb devices failed.'
-}
+if ($LASTEXITCODE -ne 0) { throw 'adb devices failed.' }
 if ($connected.Count -ne 1) {
     throw "Expected one authorized Android device, found $($connected.Count)."
 }
 $deviceId = $connected[0]
 $package = 'com.amurcanov.tgwsproxy'
 $receiver = "$package/$package.WorkerSmokeConfigReceiver"
+$activity = "$package/$package.MainActivity"
+
+function Invoke-CheckedAdb {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    $output = @(& $adb -s $deviceId @Arguments 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "ADB command failed: $($Arguments -join ' ') | $($output -join ' ')"
+    }
+    return $output
+}
 
 function Invoke-WorkerSmokeBroadcast {
     param(
@@ -62,130 +73,158 @@ function Invoke-WorkerSmokeBroadcast {
         [string]$Domain = '',
         [string]$Transport = ''
     )
-
     $arguments = @(
-        '-s', $deviceId, 'shell', 'am', 'broadcast', '--include-stopped-packages',
+        'shell', 'am', 'broadcast', '--include-stopped-packages',
         '-n', $receiver, '-a', "com.amurcanov.tgwsproxy.action.$Action"
     )
     if ($Action -eq 'WORKER_SMOKE_CONFIGURE') {
         $arguments += @('--es', 'domain', $Domain, '--es', 'transport', $Transport)
     }
-    $output = @(& $adb @arguments 2>&1)
-    if ($LASTEXITCODE -ne 0 -or -not ($output | Where-Object { $_ -match 'result=101' })) {
-        throw "Debug Worker fixture command $Action failed: $($output -join '; ')"
+    $output = @(Invoke-CheckedAdb -Arguments $arguments)
+    if (-not ($output | Where-Object { $_ -match 'result=101' })) {
+        throw "Debug smoke action $Action rejected: $($output -join '; ')"
     }
 }
 
+function Open-ProxyApp {
+    Invoke-CheckedAdb -Arguments @('shell','am','start','-n',$activity) | Out-Null
+}
+
 function Stop-SmokeApp {
-    & $adb -s $deviceId shell am force-stop $package
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Could not stop TgWsProxy before updating test configuration.'
+    Invoke-CheckedAdb -Arguments @('shell','am','force-stop',$package) | Out-Null
+}
+
+function Capture-SmokeLog {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+    $lines = @(Invoke-CheckedAdb -Arguments @('logcat','-d','-v','threadtime','-s','TgWsProxy:*'))
+    $lines | Set-Content -LiteralPath $Destination -Encoding UTF8
+    return $lines
+}
+
+function Get-TransportReport {
+    param(
+        [Parameter(Mandatory = $true)][string]$Transport,
+        [Parameter(Mandatory = $true)][string[]]$Lines,
+        [Parameter(Mandatory = $true)][string]$LogName
+    )
+    $closes = @($Lines | Where-Object { $_ -match 'MTProto bridge closed' })
+    $workerOnly = @($closes | Where-Object {
+        $_ -match 'actual_backend=cf_worker_ws' -and $_ -match 'fallback_used=false'
+    })
+    $bidirectional = @($workerOnly | Where-Object {
+        $_ -match 'up_bytes=[1-9][0-9]*' -and $_ -match 'down_bytes=[1-9][0-9]*'
+    })
+    $zeroDown = @($workerOnly | Where-Object { $_ -match 'down_bytes=0(?:\D|$)' })
+    $routes = @($Lines | Where-Object { $_ -match 'worker_transport=' })
+    $matchedTransport = @($routes | Where-Object {
+        $_ -match ("worker_transport=" + [regex]::Escape($Transport) + "(\s|$)")
+    })
+    $errors = @($Lines | Where-Object {
+        $_ -match 'worker_protocol_incompatible|worker_websocket_handshake_failed|worker_connect_timeout|connection timed out|broken pipe|all_workers_failed'
+    })
+    $status = if ($workerOnly.Count -eq 0) {
+        'no_worker_sessions_observed'
+    } elseif ($bidirectional.Count -eq 0) {
+        'no_bidirectional_sessions_observed'
+    } elseif ($matchedTransport.Count -eq 0) {
+        'two_way_bytes_transport_not_verified'
+    } else {
+        'two_way_bytes_observed_media_unverified'
+    }
+    return [ordered]@{
+        transport = $Transport
+        observedNetworkStatus = $status
+        manualTelegramTest = 'not_machine_verified'
+        bridgeCloseCount = $closes.Count
+        workerOnlyCloseCount = $workerOnly.Count
+        bidirectionalBridgeCount = $bidirectional.Count
+        zeroDownstreamCount = $zeroDown.Count
+        transportLogLines = $routes.Count
+        selectedTransportLines = $matchedTransport.Count
+        errorLogLines = $errors.Count
+        log = $LogName
     }
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $sessionDir = Join-Path $OutputRoot "issue-101-$timestamp"
 New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
-
 $report = [ordered]@{
     issue = 101
     device = $deviceId
     run = $timestamp
+    phaseSeconds = $PhaseSeconds
     phases = @()
-    note = 'Handshake and log counters do not prove successful MTProto media transfer. Inspect the Telegram UI.'
+    note = 'Two-way byte counters do NOT verify Telegram messages/media. Check Telegram UI separately.'
 }
 
 $phases = @(
-    @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain },
-    @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain }
+    @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain }
 )
+if (-not $LegacyOnly) {
+    $phases += @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain }
+}
 
-Write-Host ''
-Write-Host 'The debug fixture will temporarily select a single Worker for each phase.'
-Write-Host 'Existing Worker Pool, route policies and single-Worker settings will be restored afterward.'
-Write-Host 'Worker-only route policies are configured automatically for Wi-Fi and mobile networks.'
-Write-Host 'The signed TEST debug APK includes the ADB fixture; the release APK does not.'
-Read-Host 'When ready, press Enter'
+Write-Host "ADB device: $deviceId"
+Write-Host "Automatic test: $($phases.Count) transport phases, $PhaseSeconds seconds each."
+Write-Host 'No Enter prompts. Telegram will open; send/receive messages and large media during each timed phase.'
+Write-Host 'Application settings are restored when the run finishes, including after failures.'
+Write-Host 'The script never sends Telegram messages or uploads media itself.'
 
 try {
     foreach ($phase in $phases) {
+        $name = $phase.Name
+        Write-Host ""
+        Write-Host "==> Starting automatic $name phase ($PhaseSeconds seconds)"
         Stop-SmokeApp
-        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_CONFIGURE' `
-            -Domain $phase.Domain -Transport $phase.Name
+        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_CONFIGURE' -Domain $phase.Domain -Transport $name
+        Invoke-CheckedAdb -Arguments @('logcat','-c') | Out-Null
+        Open-ProxyApp
+        Start-Sleep -Seconds 3
+        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_START'
 
-        Write-Host ''
-        Write-Host "Configured $($phase.Label) at $($phase.Domain) in the debug app."
-        & $adb -s $deviceId shell monkey -p $package -c android.intent.category.LAUNCHER 1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not launch debug app for $($phase.Name)."
+        if (-not [string]::IsNullOrWhiteSpace($TelegramPackage)) {
+            $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
+            if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
+                $null = & $adb -s $deviceId shell monkey -p $TelegramPackage -c android.intent.category.LAUNCHER 1 2>&1
+            } else {
+                Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
+            }
         }
+        Write-Host "Use Telegram NOW for $PhaseSeconds seconds: messages, download and upload a large file."
+        Start-Sleep -Seconds $PhaseSeconds
 
-        Write-Host 'Start the proxy in the app and verify that Telegram uses its local MTProto proxy.'
-        Read-Host 'Once the proxy is running, press Enter to clear logcat and begin'
-        & $adb -s $deviceId logcat -c
-        if ($LASTEXITCODE -ne 0) {
-            throw "Unable to clear logcat for $($phase.Name)."
-        }
+        # Bring our Activity foreground before requesting service stop on Android 14+.
+        Open-ProxyApp
+        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_STOP'
+        Start-Sleep -Seconds 3
 
-        Write-Host 'Telegram test: reconnect, send/receive messages, download/upload large media.'
-        Write-Host 'Stop the proxy after testing to flush final bridge-close counters.'
-        Read-Host 'After completing the Telegram test, press Enter to capture logs'
-
-        $logPath = Join-Path $sessionDir "$($phase.Name).log"
-        $logLines = @(& $adb -s $deviceId logcat -d -v threadtime -s 'TgWsProxy:*')
-        if ($LASTEXITCODE -ne 0) {
-            throw "Unable to read logcat for $($phase.Name)."
-        }
-        $logLines | Set-Content -LiteralPath $logPath -Encoding UTF8
-
-        $closed = @($logLines | Where-Object { $_ -match 'MTProto bridge closed' })
-        $bidirectional = @($closed | Where-Object {
-            ($_ -match 'actual_backend=cf_worker_ws') -and
-            ($_ -match 'fallback_used=false') -and
-            ($_ -match 'up_bytes=[1-9][0-9]*') -and
-            ($_ -match 'down_bytes=[1-9][0-9]*')
-        })
-        $transportLines = @($logLines | Where-Object {
-            $_ -match 'worker_transport=|Worker transport=|transport=chunk_relay_http|Flowseal parity transport connected'
-        })
-
-        $observed = (Read-Host 'Telegram result for messages AND media (pass / fail / not-tested)').Trim().ToLowerInvariant()
-        if ($observed -notin @('pass', 'fail', 'not-tested')) {
-            $observed = 'not-tested'
-        }
-        $report.phases += [ordered]@{
-            transport = $phase.Name
-            bridgeCloseCount = $closed.Count
-            bidirectionalBridgeCount = $bidirectional.Count
-            transportLogLines = $transportLines.Count
-            manualTelegramTest = $observed
-            log = [System.IO.Path]::GetFileName($logPath)
-        }
-        Write-Host ("Captured {0}: bridge closes={1}; two-way Worker closes={2}" -f
-            $phase.Name, $closed.Count, $bidirectional.Count)
+        $logName = "$name.log"
+        $logPath = Join-Path $sessionDir $logName
+        $lines = @(Capture-SmokeLog -Destination $logPath)
+        $phaseReport = Get-TransportReport -Transport $name -Lines $lines -LogName $logName
+        $report.phases += $phaseReport
+        Write-Host ("{0}: {1}; Worker-only closes={2}; bidirectional={3}; down=0={4}" -f
+            $name, $phaseReport.observedNetworkStatus, $phaseReport.workerOnlyCloseCount,
+            $phaseReport.bidirectionalBridgeCount, $phaseReport.zeroDownstreamCount)
     }
 }
 finally {
-    # Restore the backed-up Worker, selection mode and route policy preferences.
     try {
         Stop-SmokeApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'
-        Write-Host 'Original Worker configuration restored.'
+        Write-Host 'Original Worker and route configuration restored.'
     }
     catch {
         Write-Warning "Automatic restore failed: $_"
-        Write-Warning 'Do not uninstall the debug APK: the original configuration backup is still present.'
-        Write-Warning 'Retry the debug receiver restore action before using your normal configuration.'
+        Write-Warning 'Keep the debug APK installed; the original settings backup is still saved.'
     }
 
-    # Always preserve the captured evidence, including when the second phase fails.
+    # Save partial evidence even if a phase fails.
     $reportPath = Join-Path $sessionDir 'result.json'
-    $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+    $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding UTF8
     $zipPath = "$sessionDir.zip"
     Compress-Archive -Path (Join-Path $sessionDir '*') -DestinationPath $zipPath -Force
-
-    Write-Host ''
-    Write-Host 'Do not publish raw diagnostic logs containing private Worker domains.'
     Write-Host "LOGS TO SHARE: $zipPath"
     Write-Host "REPORT: $reportPath"
 }
