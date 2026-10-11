@@ -3084,6 +3084,8 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				}
 			case "worker_enabled":
 				settings.Worker.Enabled = parseBoolValue(val)
+			case "worker_transport":
+				settings.Worker.Transport = normalizeWorkerTransport(val)
 			case "worker_domain":
 				settings.Worker.Domain = NormalizeWorkerDomain(val)
 				if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
