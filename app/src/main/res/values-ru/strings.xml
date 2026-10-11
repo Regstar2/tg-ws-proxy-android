@@ -64,7 +64,7 @@
     <string name="cf_worker_pool_selected">Выбранный Worker</string>
     <string name="cf_worker_pool_open">Открыть Worker Pool</string>
     <string name="cf_worker_pool_add">Добавить Worker</string>
-    <string name="cf_worker_pool_legacy_worker">Legacy Worker</string>
+    <string name="cf_worker_pool_legacy_worker">Одиночный Worker (без пула)</string>
     <string name="cf_worker_pool_no_selected">Нет</string>
     <string name="cf_worker_pool_foundation_hint">Балансировка Worker Pool пока недоступна. Для маршрутизации используется legacy single Worker ниже.</string>
     <string name="cf_worker_pool_worker_item_title">Worker 1</string>
