@@ -2278,7 +2278,7 @@ private fun ProxyScreen(
                                                 report.totalCount,
                                             )
                                         } else {
-                                            context.getString(R.string.cf_worker_test_fail)
+                                            context.getString(if (probeTransport == WorkerTransport.LEGACY_WEBSOCKET) R.string.cf_worker_test_legacy_fail else R.string.cf_worker_test_fail)
                                         }
                                         diagStatusText = status
                                         prefs.edit().putString("diag_last_status", status).apply()
@@ -2288,7 +2288,7 @@ private fun ProxyScreen(
                                 }
                             },
                             onOpenWorkerHelp = {
-                                openUrl("https://github.com/Regstar2/TgWsProxy_Android/blob/main/docs/cloudflare-worker.md")
+                                openUrl("https://github.com/Regstar2/tg-ws-proxy-android/blob/main/docs/cloudflare-worker.md")
                             },
                             manualCfDomainsText = manualCfDomainsText,
                             invalidManualCfDomains = invalidManualCfDomains,
