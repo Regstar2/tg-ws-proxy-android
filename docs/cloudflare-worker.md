@@ -20,6 +20,8 @@
 - Для Legacy WebSocket проверка подтверждает только корректный TLS/WebSocket handshake (`101` + валидный `Sec-WebSocket-Accept`); для Chunk Relay — доступность relay/DO и совместимость API. **Ни одна из этих проверок не подтверждает full-duplex MTProto, работу медиа и устойчивость Android.**
 - Legacy WebSocket **экспериментален** в Android: на прежних версиях наблюдались зависания крупных медиа-передач (#29). Используйте Worker-only и реальное устройство для проверки сообщений, загрузки и отправки больших файлов. Если не работает — верните Chunk Relay, не меняя тип автоматически.
 
+**Device acceptance (#101):** после сборки debug APK запустите `scripts/worker-issue-101-device-smoke.ps1` в PowerShell с подключённым Android. Если APK ещё не установлен, укажите `-InstallDebug`. Скрипт последовательно попросит проверить Legacy WebSocket и Chunk Relay в режиме Worker-only, очистит и сохранит `TgWsProxy` logcat отдельно для каждого режима, сформирует `result.json` и ZIP и напечатает абсолютный путь до архива. Проверка сообщений, загрузки и отправки крупных медиа выполняется в Telegram вручную; счётчик двусторонних bridge-сессий в отчёте не заменяет визуальное подтверждение.
+
 Standalone provisioning-only Worker для WARP/AWG не поддерживает ни `/apiws`, ни `/chunk-relay`, и не является Telegram Worker.
 
 ### Provisioning Worker для WARP/AWG
