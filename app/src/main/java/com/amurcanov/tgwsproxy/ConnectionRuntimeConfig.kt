@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy
 
 import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.WorkerFailoverPayload
+import com.amurcanov.tgwsproxy.worker.WorkerTransport
 
 object ConnectionRuntimeConfig {
     private val defaultDcIps = mapOf(
@@ -23,6 +24,7 @@ object ConnectionRuntimeConfig {
         manualCfDomains: List<String> = emptyList(),
         workerEnabled: Boolean,
         workerDomain: String,
+        workerTransport: WorkerTransport = WorkerTransport.CHUNK_RELAY,
         cachedCfDomains: List<String> = emptyList(),
         networkProfile: NetworkProfile? = null,
         adaptiveRouteStats: String = "",
@@ -110,6 +112,7 @@ object ConnectionRuntimeConfig {
                     effectiveMode == ConnectionMode.WorkerOnly
             }
             add("@worker_enabled=${if (workerOn) 1 else 0}")
+            add("@worker_transport=${workerTransport.prefValue}")
             if (normalizedWorker.isNotBlank()) {
                 add("@worker_domain=$normalizedWorker")
             }
