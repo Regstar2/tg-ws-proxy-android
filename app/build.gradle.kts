@@ -5,6 +5,8 @@ plugins {
 
 val releaseVersionCode = 57
 val releaseVersionName = "1.11.1"
+// Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
+val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -80,6 +82,10 @@ android {
     buildTypes {
         debug {
             versionNameSuffix = "-debug"
+            if (signedWorkerSmoke) {
+                signingConfig = signingConfigs.findByName("release")
+                    ?: error("Signed Worker smoke requires the existing release signing key")
+            }
         }
         release {
             signingConfig = signingConfigs.findByName("release")
@@ -124,7 +130,9 @@ androidComponents {
         variant.outputs.forEach { output ->
             // Debug builds intentionally stay one code above the release code so they can be
             // installed over the most recent release during pre-release Android acceptance.
-            output.versionCode.set(releaseVersionCode + 1)
+            // Same version code allows replacing the current release, then
+            // installing a future release without an Android downgrade.
+            output.versionCode.set(if (signedWorkerSmoke) releaseVersionCode else releaseVersionCode + 1)
         }
     }
 }
