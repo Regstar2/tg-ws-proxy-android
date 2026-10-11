@@ -42,6 +42,8 @@ TgWsProxy запускает локальный прокси на Android-уст
 | SOCKS5 / WebSocket frontend | Реализован как режим совместимости |
 | `direct_ws` и `tcp_fallback` | Реализованы; доступность зависит от сети |
 | Cloudflare Worker | Реализован как необязательный Telegram-маршрут; Consumer WARP provisioning использует отдельный управляемый bootstrap Worker pool |
+
+**Диагностика Telegram Worker:** проверка `Chunk Relay` подтверждает совместимость версии и достижимость relay/DO, но не полноценный двусторонний MTProto-обмен. Старый WebSocket Worker (`/apiws`) несовместим с текущим MTProto Worker-транспортом. Для подтверждения реальной работы нужен отдельный Telegram smoke-test.
 | Worker Pool | Работает, но остаётся медленнее прямого соединения и не рекомендуется как основной маршрут |
 | Feedback | Отдельный экран; GitHub Issue Forms без встроенного PAT |
 | Updates | Проверка официальных GitHub Releases с SemVer и открытием официальной страницы релиза |
