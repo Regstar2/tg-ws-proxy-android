@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,7 +14,7 @@ type workerTransport string
 
 const (
 	workerTransportChunkRelay       workerTransport = "chunk_relay"
-	workerTransportLegacyWebSocket  workerTransport = "legacy_websocket"
+	workerTransportLegacyWebSocket workerTransport = "legacy_websocket"
 )
 
 func parseWorkerTransport(raw string) (workerTransport, bool) {
@@ -36,10 +36,9 @@ func normalizeWorkerTransport(raw string) workerTransport {
 	return transport
 }
 
-
 type workerFailoverCandidate struct {
-	ID     string
-	Domain string
+	ID        string
+	Domain    string
 	Transport workerTransport
 }
 
