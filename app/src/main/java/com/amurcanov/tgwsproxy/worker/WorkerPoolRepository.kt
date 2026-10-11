@@ -44,8 +44,22 @@ class WorkerPoolRepository(
         if (index < 0) {
             return Result.failure(WorkerPoolOperationException(WorkerPoolError.SELECTED_WORKER_NOT_FOUND))
         }
+        val normalizedUrl = WorkerDomain.normalize(worker.url).ifBlank { worker.url.trim() }
+        val previous = workers[index]
+        val endpointChanged = previous.transport != worker.transport ||
+            previous.normalizedDomain() != WorkerDomain.normalize(normalizedUrl)
         val updated = worker.copy(
-            url = WorkerDomain.normalize(worker.url).ifBlank { worker.url.trim() },
+            url = normalizedUrl,
+            // Health evidence is specific to both the endpoint and its protocol.
+            state = if (endpointChanged) {
+                if (worker.enabled) WorkerHealthState.UNKNOWN else WorkerHealthState.DISABLED
+            } else worker.state,
+            lastSuccessAt = if (endpointChanged) null else worker.lastSuccessAt,
+            lastFailureAt = if (endpointChanged) null else worker.lastFailureAt,
+            latencyMs = if (endpointChanged) null else worker.latencyMs,
+            failureCount = if (endpointChanged) 0 else worker.failureCount,
+            lastErrorCode = if (endpointChanged) null else worker.lastErrorCode,
+            lastCheckedAt = if (endpointChanged) null else worker.lastCheckedAt,
             updatedAt = System.currentTimeMillis(),
         )
         workers[index] = updated
