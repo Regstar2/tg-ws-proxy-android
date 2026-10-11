@@ -71,7 +71,7 @@ class WorkerHealthCheckRunner(
         if (domain.isBlank()) {
             return invalidConfigResult(worker, maskDomains, startedAt, WorkerValidationError.EMPTY_URL)
         }
-        val networkSteps = probeWorkerEndpoint(domain)
+        val networkSteps = probeWorkerEndpoint(domain, worker.transport)
         logSteps(context, worker.id, networkSteps)
         val workerSteps = networkSteps.map { it.toWorkerStep() }
         val configStep = WorkerHealthCheckStepResult(
@@ -101,7 +101,7 @@ class WorkerHealthCheckRunner(
         return result
     }
 
-    private fun probeWorkerEndpoint(domain: String): List<RouteProbeStepResult> {
+    private fun probeWorkerEndpoint(domain: String, transport: WorkerTransport): List<RouteProbeStepResult> {
         val out = mutableListOf<RouteProbeStepResult>()
         out += steps.probeDns(domain)
         if (out.last().status != RouteProbeStatus.OK) return out
@@ -110,6 +110,29 @@ class WorkerHealthCheckRunner(
         out += steps.probeTls(domain, domain)
         if (out.last().status != RouteProbeStatus.OK) return out
 
+        if (transport == WorkerTransport.LEGACY_WEBSOCKET) {
+            val checked = LegacyWorkerProtocolProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
+            out += RouteProbeStepResult(
+                step = RouteProbeStep.WEBSOCKET_HANDSHAKE,
+                status = when {
+                    checked.compatible -> RouteProbeStatus.OK
+                    checked.errorCode == "timeout" -> RouteProbeStatus.TIMEOUT
+                    else -> RouteProbeStatus.FAIL
+                },
+                latencyMs = checked.elapsedMs,
+                error = RouteProbeError(
+                    when {
+                        checked.compatible -> RouteProbeErrorCode.NONE
+                        checked.errorCode == "timeout" -> RouteProbeErrorCode.TIMEOUT
+                        checked.errorCode == "incompatible_protocol" -> RouteProbeErrorCode.WORKER_PROTOCOL_INCOMPATIBLE
+                        else -> RouteProbeErrorCode.WEBSOCKET_HANDSHAKE_FAILED
+                    },
+                    checked.errorCode,
+                ),
+                debugDetail = checked.detail,
+            )
+            return out
+        }
         val checked = ChunkRelayWorkerProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
         out += RouteProbeStepResult(
             step = RouteProbeStep.CHUNK_RELAY,
