@@ -125,11 +125,9 @@ class WorkerHealthRepository(
         }
         val now = System.currentTimeMillis()
         val selectedBefore = poolRepository.getWorkerPoolConfig().selectedWorkerId
-        val (state, failureCount) = when (result.status) {
-            WorkerHealthCheckStatus.OK -> WorkerHealthState.HEALTHY to 0
-            WorkerHealthCheckStatus.SKIPPED -> WorkerHealthState.DISABLED to worker.failureCount
-            else -> WorkerHealthStateResolver.resolveAfterCheck(worker.failureCount, result.status)
-        }
+        val (state, failureCount) = WorkerHealthStateResolver.resolveAfterTransportCheck(
+            worker.transport, worker.failureCount, result.status,
+        )
         val updated = worker.copy(
             state = state,
             lastSuccessAt = if (result.status == WorkerHealthCheckStatus.OK) now else worker.lastSuccessAt,
