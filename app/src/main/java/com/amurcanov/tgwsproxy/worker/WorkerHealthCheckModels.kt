@@ -19,6 +19,7 @@ enum class WorkerHealthCheckStep {
     TLS_HANDSHAKE,
     HTTP_PROBE,
     WEBSOCKET_HANDSHAKE,
+    CHUNK_RELAY,
 }
 
 enum class WorkerHealthErrorCode {
@@ -30,6 +31,7 @@ enum class WorkerHealthErrorCode {
     TLS_HANDSHAKE_FAILED,
     HTTP_STATUS_ERROR,
     WEBSOCKET_HANDSHAKE_FAILED,
+    WORKER_PROTOCOL_INCOMPATIBLE,
     TIMEOUT,
     NETWORK_UNAVAILABLE,
     CANCELLED,
