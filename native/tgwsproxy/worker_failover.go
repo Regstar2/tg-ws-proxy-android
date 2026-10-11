@@ -30,10 +30,13 @@ func parseWorkerTransport(raw string) (workerTransport, bool) {
 
 func normalizeWorkerTransport(raw string) workerTransport {
 	transport, ok := parseWorkerTransport(raw)
-	if !ok {
-		return workerTransportChunkRelay
+	if ok {
+		return transport
 	}
-	return transport
+	if strings.TrimSpace(raw) == "" {
+		return workerTransportChunkRelay // Existing single-domain settings have no type.
+	}
+	return workerTransport(strings.TrimSpace(raw)) // Unknown explicit type must fail closed.
 }
 
 type workerFailoverCandidate struct {
@@ -46,6 +49,7 @@ type workerFailoverSettings struct {
 	Enabled           bool
 	SelectedID        string
 	Candidates        []workerFailoverCandidate
+	CandidatesSpecified bool
 	MaxAttempts       int
 	SkippedBackoff    int
 	SelectionStrategy string
@@ -55,7 +59,7 @@ type workerFailoverSettings struct {
 }
 
 func (s workerFailoverSettings) effectiveCandidates(fallbackDomain string) []workerFailoverCandidate {
-	if s.Enabled && len(s.Candidates) > 0 {
+	if s.Enabled && (s.CandidatesSpecified || len(s.Candidates) > 0) {
 		return s.Candidates
 	}
 	if fallbackDomain != "" {
