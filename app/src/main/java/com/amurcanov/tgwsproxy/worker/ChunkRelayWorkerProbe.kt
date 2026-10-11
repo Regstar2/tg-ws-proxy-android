@@ -73,14 +73,17 @@ internal class ChunkRelayWorkerProbe(
         expected: Int,
         alternate: Int = expected,
     ): ChunkRelayProbeResult {
-        val compatible = response.revision == REVISION && response.hubRevision == HUB_REVISION
+        val incompatibleStatus = response.status == 404 || response.status == 405 || response.status == 101
+        val compatible = !incompatibleStatus &&
+            response.revision == REVISION && response.hubRevision == HUB_REVISION
         val failure = when {
-            response.status == 404 || response.status == 405 || response.status == 101 -> "incompatible_protocol"
+            incompatibleStatus -> "incompatible_protocol"
+            response.status >= 500 ->
+                if (response.workerState == "do-quota-exhausted") "do_quota_exhausted" else "worker_server_error"
             response.revision.isNullOrBlank() || response.hubRevision.isNullOrBlank() -> "incompatible_protocol"
             !compatible -> "revision_mismatch"
             response.status == 409 -> "sequence_conflict"
             response.status == 410 -> "session_lost"
-            response.status >= 500 -> if (response.workerState == "do-quota-exhausted") "do_quota_exhausted" else "worker_server_error"
             response.status != expected && response.status != alternate -> "unexpected_http_status"
             else -> "none"
         }
