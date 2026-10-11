@@ -88,6 +88,18 @@ func TestMtProtoWorkerConnectorUsesCandidateTransportAndSafeFailover(t *testing.
     }
 }
 
+func TestWorkerTransportFailureClassification(t *testing.T) {
+    if got := classifyWorkerConnectFailure(errors.New("connection timed out")); got != "worker_connect_timeout" {
+        t.Fatalf("timeout classified as %q", got)
+    }
+    if got := classifyWorkerConnectFailure(errors.New("unsupported worker transport \"invalid\"")); got != "worker_protocol_incompatible" {
+        t.Fatalf("unsupported type classified as %q", got)
+    }
+    if got := classifyWorkerConnectFailure(&WsHandshakeError{StatusCode: 404, StatusLine: "Not Found"}); got != "worker_protocol_incompatible" {
+        t.Fatalf("HTTP 404 classified as %q", got)
+    }
+}
+
 func TestUnsupportedTransportNeverReachesNetwork(t *testing.T) {
     _, err := dialWorkerTransportContext(context.Background(), workerTransport("unknown"), "any.workers.dev", "/apiws", "test")
     if err == nil {
