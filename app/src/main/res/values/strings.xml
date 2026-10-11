@@ -667,6 +667,8 @@
     <string name="worker_failover_reason_dns_failed">DNS failed</string>
     <string name="worker_failover_reason_tls_failed">TLS failed</string>
     <string name="worker_failover_reason_websocket_failed">WebSocket failed</string>
+    <string name="worker_failover_reason_ws_handshake_failed">Worker WebSocket handshake failed</string>
+    <string name="worker_failover_reason_protocol_incompatible">Wrong Worker protocol. Select the matching Chunk Relay or Legacy WebSocket type.</string>
     <string name="worker_failover_reason_selected_worker_disabled">Selected worker disabled</string>
     <string name="worker_failover_reason_selected_worker_dead">Selected worker dead</string>
     <string name="worker_failover_reason_selected_unavailable">Selected worker unavailable</string>
