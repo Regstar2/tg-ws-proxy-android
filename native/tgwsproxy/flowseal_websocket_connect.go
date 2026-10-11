@@ -93,9 +93,7 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 
 	// The deployed Worker is authenticated by its DNS name. Do not reuse the
 	// historical insecure Flowseal test profile for production connections.
-	tlsConfig := flowsealWorkerTLSConfig(domain)
-	tlsConfig.InsecureSkipVerify = false
-	tlsConn := tls.Client(rawConn, tlsConfig)
+	tlsConn := tls.Client(rawConn, flowsealWorkerVerifiedTLSConfig(domain))
 	deadline := time.Now().Add(time.Duration(timeout * float64(time.Second)))
 	_ = tlsConn.SetDeadline(deadline)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -198,6 +196,12 @@ func flowsealValidUpgradeResponse(lines []string, keyBytes []byte) bool {
 		}
 	}
 	return false
+}
+
+func flowsealWorkerVerifiedTLSConfig(domain string) *tls.Config {
+	config := flowsealWorkerTLSConfig(domain)
+	config.InsecureSkipVerify = false
+	return config
 }
 
 func flowsealWorkerTLSConfig(domain string) *tls.Config {
