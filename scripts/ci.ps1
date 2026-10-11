@@ -62,17 +62,19 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
-$deviceSmokeScript = Join-Path $PSScriptRoot 'worker-issue-101-device-smoke.ps1'
-if (-not (Test-Path $deviceSmokeScript)) {
-    throw "Device smoke script not found: $deviceSmokeScript"
-}
-$parseTokens = $null
-$parseErrors = $null
-[System.Management.Automation.Language.Parser]::ParseFile(
-    $deviceSmokeScript, [ref]$parseTokens, [ref]$parseErrors
-) | Out-Null
-if ($parseErrors) {
-    throw "Device smoke script has PowerShell syntax errors: $($parseErrors -join '; ')"
+foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1')) {
+    $acceptanceScript = Join-Path $PSScriptRoot $acceptanceScriptName
+    if (-not (Test-Path -LiteralPath $acceptanceScript)) {
+        throw "Worker acceptance script not found: $acceptanceScript"
+    }
+    $parseTokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $acceptanceScript, [ref]$parseTokens, [ref]$parseErrors
+    ) | Out-Null
+    if ($parseErrors) {
+        throw "Worker acceptance script has PowerShell syntax errors: $($parseErrors -join '; ')"
+    }
 }
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
