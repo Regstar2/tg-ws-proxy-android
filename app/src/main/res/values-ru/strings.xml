@@ -953,4 +953,9 @@
     <string name="worker_protocol_incompatible">Несовместимый протокол Worker: требуется Chunk Relay, а не старый WebSocket</string>
     <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay доступен; обмен MTProto не проверен</string>
     <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay недоступен или несовместим</string>
+    <string name="worker_transport_label">Протокол Telegram Worker</string>
+    <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (рекомендуется)</string>
+    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws)</string>
+    <string name="worker_transport_scope">Проверки протокола не подтверждают двусторонний MTProto. Legacy WebSocket может зависать при передаче крупных медиа. Worker для WARP — отдельный тип.</string>
+    <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d из %2$d проверок подключения пройдено (обмен MTProto не проверялся)</string>
 </resources>
