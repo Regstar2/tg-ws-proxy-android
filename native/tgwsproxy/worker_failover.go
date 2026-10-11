@@ -262,7 +262,7 @@ func classifyWorkerConnectFailure(err error) string {
 	switch {
 	case strings.Contains(msg, "unsupported worker transport"), strings.Contains(msg, "missing relay revision"), strings.Contains(msg, "invalid upgrade response"):
 		return "worker_protocol_incompatible"
-	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "timed out"), strings.Contains(msg, "deadline"):
 		return "worker_connect_timeout"
 	case strings.Contains(msg, "dns"), strings.Contains(msg, "no such host"):
 		return "worker_dns_failed"
