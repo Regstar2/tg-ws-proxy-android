@@ -83,7 +83,9 @@ class WorkerHealthCheckRunner(
         val status = aggregateStatus(allSteps)
         val errorCode = primaryErrorCode(allSteps)
         val finishedAt = System.currentTimeMillis()
-        val (state, _) = WorkerHealthStateResolver.resolveAfterCheck(worker.failureCount, status)
+        val (state, _) = WorkerHealthStateResolver.resolveAfterTransportCheck(
+            worker.transport, worker.failureCount, status,
+        )
         val result = WorkerHealthCheckResult(
             workerId = worker.id,
             workerName = worker.name,
