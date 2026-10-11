@@ -32,6 +32,17 @@ func TestWorkerTransportParsingAndCompatibility(t *testing.T) {
     if normalizeWorkerTransport("") != workerTransportChunkRelay {
         t.Fatal("old single-worker settings must default to Chunk Relay")
     }
+    if normalizeWorkerTransport("unsupported") == workerTransportChunkRelay {
+        t.Fatal("unknown explicit single-worker transport silently downgraded")
+    }
+    strict := workerFailoverSettings{
+        Enabled: true,
+        CandidatesSpecified: true,
+        Candidates: parseWorkerFailoverCandidates("id:worker.workers.dev:unsupported"),
+    }
+    if got := strict.effectiveCandidates("worker.workers.dev"); len(got) != 0 {
+        t.Fatalf("invalid pool candidate silently replaced with fallback: %+v", got)
+    }
 }
 
 func TestMtProtoWorkerConnectorUsesCandidateTransportAndSafeFailover(t *testing.T) {
