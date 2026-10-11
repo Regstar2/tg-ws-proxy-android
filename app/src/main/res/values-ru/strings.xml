@@ -667,6 +667,8 @@
     <string name="worker_failover_reason_dns_failed">Ошибка DNS</string>
     <string name="worker_failover_reason_tls_failed">Ошибка TLS</string>
     <string name="worker_failover_reason_websocket_failed">Ошибка WebSocket</string>
+    <string name="worker_failover_reason_ws_handshake_failed">Не удалось установить WebSocket-соединение с Worker</string>
+    <string name="worker_failover_reason_protocol_incompatible">Неверный протокол Worker. Выберите соответствующий тип: Chunk Relay или Legacy WebSocket.</string>
     <string name="worker_failover_reason_selected_worker_disabled">Выбранный worker выключен</string>
     <string name="worker_failover_reason_selected_worker_dead">Выбранный worker мёртв</string>
     <string name="worker_failover_reason_selected_unavailable">Выбранный worker недоступен</string>
