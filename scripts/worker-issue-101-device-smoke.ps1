@@ -1,11 +1,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9.-]+\\.workers\\.dev$')]
+    [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
     [string]$ChunkRelayWorkerDomain,
 
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9.-]+\\.workers\\.dev$')]
+    [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
     [string]$LegacyWorkerDomain,
 
     [switch]$InstallDebug,
@@ -166,8 +166,8 @@ try {
 finally {
     # Restore the exact five single-Worker/pool preferences snapshotted by the
     # debug-only receiver. Route policy is never modified by this fixture.
-    Stop-SmokeApp
     try {
+        Stop-SmokeApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'
         Write-Host 'Original Worker configuration restored.'
     }
@@ -176,14 +176,15 @@ finally {
         Write-Warning 'Do not uninstall the debug APK: the original configuration backup is still present.'
         Write-Warning 'Retry the debug receiver restore action before using your normal configuration.'
     }
+
+    # Always preserve the captured evidence, including when the second phase fails.
+    $reportPath = Join-Path $sessionDir 'result.json'
+    $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+    $zipPath = "$sessionDir.zip"
+    Compress-Archive -Path (Join-Path $sessionDir '*') -DestinationPath $zipPath -Force
+
+    Write-Host ''
+    Write-Host 'Do not publish raw diagnostic logs containing private Worker domains.'
+    Write-Host "LOGS TO SHARE: $zipPath"
+    Write-Host "REPORT: $reportPath"
 }
-
-$reportPath = Join-Path $sessionDir 'result.json'
-$report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding UTF8
-$zipPath = "$sessionDir.zip"
-Compress-Archive -Path (Join-Path $sessionDir '*') -DestinationPath $zipPath -Force
-
-Write-Host ''
-Write-Host 'Do not publish raw diagnostic logs containing private Worker domains.'
-Write-Host "LOGS TO SHARE: $zipPath"
-Write-Host "REPORT: $reportPath"
