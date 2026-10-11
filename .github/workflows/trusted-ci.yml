@@ -81,11 +81,14 @@ jobs:
     name: Signed APK for issue 100
     # Release-signing secrets must never be available to forks or unrelated PRs.
     if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.number == 102 &&
-      github.event.pull_request.user.login == 'Regstar2' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'fix/issue-100-chunk-relay-diagnostics'
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.number == 102 &&
+       github.event.pull_request.user.login == 'Regstar2' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'fix/issue-100-chunk-relay-diagnostics') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref_name == 'fix/issue-100-chunk-relay-diagnostics' &&
+       github.actor == 'Regstar2')
     needs: [ci, worker-transport]
     runs-on: windows-latest
     timeout-minutes: 75
