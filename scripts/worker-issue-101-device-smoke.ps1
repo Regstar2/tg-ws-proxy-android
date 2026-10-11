@@ -101,7 +101,7 @@ $phases = @(
 Write-Host ''
 Write-Host 'The debug fixture will temporarily select a single Worker for each phase.'
 Write-Host 'Existing Worker Pool, route policies and single-Worker settings will be restored afterward.'
-Write-Host 'Select a Worker-only route policy in the application ONCE before testing.'
+Write-Host 'Worker-only route policies are configured automatically for Wi-Fi and mobile networks.'
 Write-Host 'Only the TEST debug APK has the ADB fixture; the release APK does not.'
 Read-Host 'When ready, press Enter'
 
@@ -164,8 +164,7 @@ try {
     }
 }
 finally {
-    # Restore the exact five single-Worker/pool preferences snapshotted by the
-    # debug-only receiver. Route policy is never modified by this fixture.
+    # Restore the backed-up Worker, selection mode and route policy preferences.
     try {
         Stop-SmokeApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'
