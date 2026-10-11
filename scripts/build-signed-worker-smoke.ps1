@@ -14,7 +14,7 @@ if (Test-Path -LiteralPath $loader) {
 
 foreach ($name in @('KEYSTORE_FILE', 'KEYSTORE_PASSWORD', 'KEY_PASSWORD')) {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-        throw "Missing $name: configure the ORIGINAL release key locally; never create a replacement key."
+        throw "Missing ${name}: configure the ORIGINAL release key locally; never create a replacement key."
     }
 }
 if ([string]::IsNullOrWhiteSpace($env:KEY_ALIAS)) {
