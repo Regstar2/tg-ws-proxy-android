@@ -144,6 +144,10 @@ class WorkerHealthCheckRunner(
         if (required.all { it.status == WorkerHealthCheckStatus.SKIPPED }) {
             return WorkerHealthCheckStatus.SKIPPED
         }
+        val relay = required.firstOrNull { it.step == WorkerHealthCheckStep.CHUNK_RELAY }
+        if (relay != null && relay.status != WorkerHealthCheckStatus.OK) {
+            return relay.status
+        }
         if (required.any { it.status == WorkerHealthCheckStatus.TIMEOUT }) {
             return WorkerHealthCheckStatus.TIMEOUT
         }
