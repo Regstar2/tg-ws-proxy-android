@@ -8,7 +8,7 @@ param(
     [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
     [string]$LegacyWorkerDomain,
 
-    [switch]$InstallDebug,
+    [switch]$InstallSignedDebug,
     [string]$OutputRoot = ''
 )
 
@@ -32,16 +32,12 @@ if ($adbCommand) {
     }
 }
 
-if ($InstallDebug) {
-    # install-apk.ps1 may otherwise reuse a previously copied APK.
-    # Rebuild the current branch so the debug-only ADB receiver is present.
-    & (Join-Path $PSScriptRoot 'build-apk.ps1') -Configuration Debug
+if ($InstallSignedDebug) {
+    # The debug fixture must use the original release signing certificate
+    # to update an installed release app without deleting its data.
+    & (Join-Path $PSScriptRoot 'build-signed-worker-smoke.ps1') -Install
     if ($LASTEXITCODE -ne 0) {
-        throw 'Debug APK build failed.'
-    }
-    & (Join-Path $PSScriptRoot 'install-apk.ps1') -Configuration Debug
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Debug APK installation failed.'
+        throw 'Signed Worker smoke APK build/install failed.'
     }
 }
 
@@ -108,7 +104,7 @@ Write-Host ''
 Write-Host 'The debug fixture will temporarily select a single Worker for each phase.'
 Write-Host 'Existing Worker Pool, route policies and single-Worker settings will be restored afterward.'
 Write-Host 'Worker-only route policies are configured automatically for Wi-Fi and mobile networks.'
-Write-Host 'Only the TEST debug APK has the ADB fixture; the release APK does not.'
+Write-Host 'The signed TEST debug APK includes the ADB fixture; the release APK does not.'
 Read-Host 'When ready, press Enter'
 
 try {
