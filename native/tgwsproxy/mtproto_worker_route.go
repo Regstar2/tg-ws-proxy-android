@@ -437,6 +437,10 @@ func (c *mtProtoWorkerConnector) Connect(
 		if err != nil {
 			lastErr = err
 			lastReason = classifyWorkerConnectFailure(err)
+			if logWarn != nil {
+				logWarn.Printf("MTProto Worker dial failed session_id=%s worker_transport=%s worker_host=%s reason=%s attempt=%d error=%v",
+					sessionID, transport, candidate.Domain, lastReason, i+1, err)
+			}
 			continue
 		}
 
