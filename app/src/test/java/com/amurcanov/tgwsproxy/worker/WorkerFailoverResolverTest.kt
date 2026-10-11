@@ -5,6 +5,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkerFailoverResolverTest {
+    @org.junit.Test
+    fun identifiesIncompatibleWorkerProtocolWithoutGenericUnknownError() {
+        org.junit.Assert.assertEquals(
+            WorkerFailoverReason.WORKER_PROTOCOL_INCOMPATIBLE,
+            WorkerFailoverReason.fromWire("worker_protocol_incompatible"),
+        )
+        org.junit.Assert.assertEquals(
+            WorkerFailoverReason.WORKER_WEBSOCKET_HANDSHAKE_FAILED,
+            WorkerFailoverReason.fromWire("worker_websocket_handshake_failed"),
+        )
+        org.junit.Assert.assertEquals(
+            WorkerFailoverReason.WORKER_CONNECT_TIMEOUT,
+            WorkerFailoverReason.fromWire("worker_connect_timeout"),
+        )
+    }
+
+
     private fun worker(
         id: String,
         name: String,
