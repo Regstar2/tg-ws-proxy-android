@@ -9,7 +9,8 @@ import com.amurcanov.tgwsproxy.worker.WorkerTransport
 /**
  * Debug-only ADB fixture for issue #101 device acceptance.
  *
- * Does not alter routing policy, the saved Worker list, or user credentials.
+ * Temporarily sets Worker-only routing across network profiles, preserving the
+ * original route policy, Worker list and selected single Worker for restoration.
  * The smoke script must stop the application before sending each command.
  */
 class WorkerSmokeConfigReceiver : BroadcastReceiver() {
@@ -43,6 +44,10 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                                 editor.putBoolean("value_$key", prefs.getBoolean(key, false))
                             }
                         }
+                        editor.putBoolean("exists_route_policy_defaults_version", prefs.contains("route_policy_defaults_version"))
+                        if (prefs.contains("route_policy_defaults_version")) {
+                            editor.putInt("value_route_policy_defaults_version", prefs.getInt("route_policy_defaults_version", 0))
+                        }
                         check(editor.putBoolean("snapshot_exists", true).commit()) {
                             "Could not back up Worker settings"
                         }
@@ -53,6 +58,11 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                         .putBoolean("worker_enabled", true)
                         .putBoolean("worker_pool_enabled_v1", false)
                         .putBoolean("worker_pool_migration_done_v1", true)
+                        .putString("connection_mode", ConnectionMode.WorkerOnly.prefValue)
+                        .putString("route_policy_wifi_v1", workerOnlyPolicy)
+                        .putString("route_policy_mobile_v1", workerOnlyPolicy)
+                        .putString("route_policy_unknown_v1", workerOnlyPolicy)
+                        .putInt("route_policy_defaults_version", RouteDefaultsMigration.DEFAULTS_VERSION_1800)
                         .commit()
                     ) { "Could not configure temporary Worker settings" }
                     setResultCode(RESULT_OK)
@@ -74,6 +84,14 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                             } else {
                                 editor.remove(key)
                             }
+                        }
+                        if (backup.getBoolean("exists_route_policy_defaults_version", false)) {
+                            editor.putInt(
+                                "route_policy_defaults_version",
+                                backup.getInt("value_route_policy_defaults_version", 0),
+                            )
+                        } else {
+                            editor.remove("route_policy_defaults_version")
                         }
                         check(editor.commit()) { "Could not restore original Worker settings" }
                         check(backup.edit().clear().commit()) { "Could not clear Worker backup" }
@@ -97,7 +115,12 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
         private const val RESULT_ERROR = 102
         private const val EXTRA_DOMAIN = "domain"
         private const val EXTRA_TRANSPORT = "transport"
-        private val STRING_KEYS = listOf("worker_domain", "worker_transport")
+        private val STRING_KEYS = listOf(
+            "worker_domain", "worker_transport", "connection_mode",
+            "route_policy_wifi_v1", "route_policy_mobile_v1", "route_policy_unknown_v1",
+        )
+        private val workerOnlyPolicy = "routes=worker_ws;preferred=worker_ws;" +
+            "strategy=${AutoStrategy.CF_PREFERRED.prefValue};fallback=0"
         private val BOOLEAN_KEYS = listOf(
             "worker_enabled", "worker_pool_enabled_v1", "worker_pool_migration_done_v1",
         )
