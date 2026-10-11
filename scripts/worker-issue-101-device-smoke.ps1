@@ -33,6 +33,12 @@ if ($adbCommand) {
 }
 
 if ($InstallDebug) {
+    # install-apk.ps1 may otherwise reuse a previously copied APK.
+    # Rebuild the current branch so the debug-only ADB receiver is present.
+    & (Join-Path $PSScriptRoot 'build-apk.ps1') -Configuration Debug
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Debug APK build failed.'
+    }
     & (Join-Path $PSScriptRoot 'install-apk.ps1') -Configuration Debug
     if ($LASTEXITCODE -ne 0) {
         throw 'Debug APK installation failed.'
