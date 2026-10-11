@@ -120,6 +120,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install release icon build dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # generate-icons.py is invoked via the Windows Python launcher by Gradle.
+          # Install into the same interpreter that 'py' will select.
+          py -m pip install --disable-pip-version-check -r ./scripts/requirements-ci.txt
+          if ($LASTEXITCODE -ne 0) { throw "Python dependencies install failed: $LASTEXITCODE" }
+          py -c "from PIL import Image, ImageOps; print('Pillow ready')"
+          if ($LASTEXITCODE -ne 0) { throw 'Pillow verification failed' }
+
       - name: Restore release signing key
         shell: pwsh
         env:
