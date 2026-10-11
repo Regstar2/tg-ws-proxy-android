@@ -64,7 +64,7 @@
     <string name="cf_worker_pool_selected">Selected Worker</string>
     <string name="cf_worker_pool_open">Open Worker Pool</string>
     <string name="cf_worker_pool_add">Add Worker</string>
-    <string name="cf_worker_pool_legacy_worker">Legacy Worker</string>
+    <string name="cf_worker_pool_legacy_worker">Single Worker (without pool)</string>
     <string name="cf_worker_pool_no_selected">None</string>
     <string name="cf_worker_pool_foundation_hint">Worker Pool balancing is not available yet. The legacy single Worker below is used for routing.</string>
     <string name="cf_worker_pool_worker_item_title">Worker 1</string>
