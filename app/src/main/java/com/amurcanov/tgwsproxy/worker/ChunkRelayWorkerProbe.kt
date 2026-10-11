@@ -25,10 +25,11 @@ internal class ChunkRelayWorkerProbe(
         var outcome: ChunkRelayProbeResult
         try {
             val opened = request(domain, "/chunk-relay/open?$query", "POST", deadline)
+            // Even an incompatible endpoint can create a session before returning HTTP 204.
+            openAccepted = opened.status == 204
             outcome = classify("open", opened, 204)
             protocolRecognized = outcome.compatible
             if (outcome.available) {
-                openAccepted = true
                 // Invalid sequence is deliberate: exercise the /up route without sending MTProto bytes.
                 currentStage = "up_validation"
                 val upload = request(domain, "/chunk-relay/up?$query&seq=0", "POST", deadline)
