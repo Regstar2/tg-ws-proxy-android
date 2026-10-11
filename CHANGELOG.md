@@ -3,6 +3,7 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- Fixed false-positive Telegram Worker diagnostics: legacy WebSocket `101` no longer counts as Chunk Relay availability. Connection checks, Worker Pool health and route probes now use a bounded single-DC Chunk Relay open/up-validation/down/close test, classify protocol/HTTP errors and explicitly mark two-way MTProto traffic as unverified.
 
 ## 1.11.1 - 2026-10-07
 - Added an opt-in **Autostart on boot** setting that restores the existing `ProxyService` from the last saved configuration after Android finishes booting.

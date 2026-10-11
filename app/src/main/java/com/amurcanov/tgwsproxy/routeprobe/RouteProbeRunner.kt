@@ -6,6 +6,7 @@ import com.amurcanov.tgwsproxy.CfManualDomainList
 import com.amurcanov.tgwsproxy.ConnectionRuntimeConfig
 import com.amurcanov.tgwsproxy.NetworkProfileProvider
 import com.amurcanov.tgwsproxy.WorkerDomain
+import com.amurcanov.tgwsproxy.worker.ChunkRelayWorkerProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,10 +28,10 @@ class RouteProbeRunner(
             withTimeout(config.overallTimeoutMs) {
                 buildResult(context, target, request, startedAt)
             }
-        } catch (e: CancellationException) {
-            cancelledResult(target, startedAt)
         } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
             timeoutResult(target, startedAt)
+        } catch (e: CancellationException) {
+            cancelledResult(target, startedAt)
         } catch (e: Exception) {
             failedResult(target, startedAt, RouteProbeErrorCode.UNKNOWN_ERROR, e.message ?: "exception")
         }
@@ -60,7 +61,14 @@ class RouteProbeRunner(
         }
         logSteps(target, stepResults)
         val required = requiredSteps(target)
-        val status = RouteProbeStatusAggregator.aggregate(stepResults, required)
+        val chunkRelay = stepResults.firstOrNull { it.step == RouteProbeStep.CHUNK_RELAY }
+        val status = if (target == RouteProbeTarget.WORKER_WEBSOCKET && chunkRelay != null &&
+            chunkRelay.status != RouteProbeStatus.OK
+        ) {
+            chunkRelay.status
+        } else {
+            RouteProbeStatusAggregator.aggregate(stepResults, required)
+        }
         val errorCode = RouteProbeStatusAggregator.primaryErrorCode(stepResults)
         val finishedAt = System.currentTimeMillis()
         val vpn = stepResults.any { it.error.code == RouteProbeErrorCode.VPN_DETECTED }
@@ -119,22 +127,35 @@ class RouteProbeRunner(
                 ),
             )
         }
-        val dc = 2
-        val ip = ConnectionRuntimeConfig.dcIpForTest(dc)
-        val path = "/apiws?dst=$ip&dc=$dc&media=0"
         val out = mutableListOf<RouteProbeStepResult>()
         out += steps.probeDns(domain)
-        if (out.last().status != RouteProbeStatus.OK) {
-            return out
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
         out += steps.probeTcp(domain, 443)
-        if (out.last().status != RouteProbeStatus.OK) {
-            return out
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
         out += steps.probeTls(domain, domain)
-        if (config.runWebSocketHandshake && out.last().status == RouteProbeStatus.OK) {
-            out += steps.probeWebSocket(domain, domain, path)
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
+
+        val checked = ChunkRelayWorkerProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
+        out += RouteProbeStepResult(
+            step = RouteProbeStep.CHUNK_RELAY,
+            status = when {
+                checked.available -> RouteProbeStatus.OK
+                checked.errorCode == "timeout" -> RouteProbeStatus.TIMEOUT
+                else -> RouteProbeStatus.FAIL
+            },
+            latencyMs = checked.elapsedMs,
+            error = RouteProbeError(
+                when {
+                    checked.available -> RouteProbeErrorCode.NONE
+                    checked.errorCode == "timeout" -> RouteProbeErrorCode.TIMEOUT
+                    checked.errorCode == "incompatible_protocol" || checked.errorCode == "revision_mismatch" ->
+                        RouteProbeErrorCode.WORKER_PROTOCOL_INCOMPATIBLE
+                    else -> RouteProbeErrorCode.HTTP_STATUS_ERROR
+                },
+                checked.errorCode,
+            ),
+            debugDetail = checked.detail,
+        )
         return out
     }
 
@@ -181,8 +202,13 @@ class RouteProbeRunner(
 
     private fun requiredSteps(target: RouteProbeTarget): Set<RouteProbeStep> = when (target) {
         RouteProbeTarget.CURRENT_NETWORK -> setOf(RouteProbeStep.ROUTE_BINDING)
+        RouteProbeTarget.WORKER_WEBSOCKET -> setOf(
+            RouteProbeStep.DNS_RESOLVE,
+            RouteProbeStep.TCP_CONNECT,
+            RouteProbeStep.TLS_HANDSHAKE,
+            RouteProbeStep.CHUNK_RELAY,
+        )
         RouteProbeTarget.DIRECT_WEBSOCKET,
-        RouteProbeTarget.WORKER_WEBSOCKET,
         RouteProbeTarget.CLOUDFLARE_PROXY,
         -> setOf(
             RouteProbeStep.DNS_RESOLVE,

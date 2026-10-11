@@ -629,6 +629,12 @@ private fun WorkerPoolDiagnosticsSummaryBlock(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
+                stringResource(R.string.worker_chunk_relay_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
                 stringResource(R.string.worker_pool_strategy_current),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1042,6 +1048,14 @@ private fun RouteProbeResultCard(model: RouteProbeUiModel) {
                 MetricLine(
                     stringResource(R.string.diagnostics_latency),
                     context.getString(R.string.diagnostics_latency_ms, ms),
+                )
+            }
+            if (model.target == RouteProbeTarget.WORKER_WEBSOCKET) {
+                Text(
+                    stringResource(R.string.worker_chunk_relay_scope),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             if (model.errorCode != com.amurcanov.tgwsproxy.routeprobe.RouteProbeErrorCode.NONE) {

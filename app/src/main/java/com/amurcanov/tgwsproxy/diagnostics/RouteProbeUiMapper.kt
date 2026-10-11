@@ -80,6 +80,7 @@ object RouteProbeUiMapper {
         RouteProbeStep.TLS_HANDSHAKE -> R.string.diagnostics_step_tls
         RouteProbeStep.HTTP_PROBE -> R.string.diagnostics_step_http
         RouteProbeStep.WEBSOCKET_HANDSHAKE -> R.string.diagnostics_step_websocket
+        RouteProbeStep.CHUNK_RELAY -> R.string.worker_chunk_relay_step
         RouteProbeStep.ROUTE_BINDING -> R.string.diagnostics_step_route_binding
         RouteProbeStep.TELEGRAM_PROBE -> R.string.diagnostics_step_telegram
     }
@@ -92,6 +93,7 @@ object RouteProbeUiMapper {
         RouteProbeErrorCode.TLS_HANDSHAKE_FAILED -> R.string.diagnostics_error_tls
         RouteProbeErrorCode.HTTP_STATUS_ERROR -> R.string.diagnostics_error_http
         RouteProbeErrorCode.WEBSOCKET_HANDSHAKE_FAILED -> R.string.diagnostics_error_websocket
+        RouteProbeErrorCode.WORKER_PROTOCOL_INCOMPATIBLE -> R.string.worker_protocol_incompatible
         RouteProbeErrorCode.TIMEOUT -> R.string.diagnostics_error_timeout
         RouteProbeErrorCode.NETWORK_UNAVAILABLE -> R.string.diagnostics_error_network
         RouteProbeErrorCode.VPN_DETECTED -> R.string.diagnostics_error_vpn

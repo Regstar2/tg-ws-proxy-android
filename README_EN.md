@@ -24,6 +24,8 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 ---
 
+> **Telegram Worker diagnostics:** the Chunk Relay check verifies transport revision and Worker/Durable Object reachability, not a complete bidirectional MTProto exchange. Legacy `/apiws` WebSocket Workers are incompatible with the current MTProto Worker transport. Verify real Telegram traffic separately.
+
 ## About
 
 TgWsProxy runs a local proxy on an Android device. Telegram connects through the MTProto Proxy frontend or the compatible SOCKS5 mode, and the native runtime selects an allowed route to Telegram infrastructure.

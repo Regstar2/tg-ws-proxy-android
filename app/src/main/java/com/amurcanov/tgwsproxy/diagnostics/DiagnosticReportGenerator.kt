@@ -76,6 +76,12 @@ object DiagnosticReportGenerator {
             appendLine("[Worker Selection]")
             formatWorkerSelectionSection(input)?.let { append(it) } ?: appendLine("Worker selection not configured.")
             appendLine()
+            appendLine("[Worker Transport Verification]")
+            appendLine("Selected MTProto Worker transport: HTTPS Chunk Relay (chunk-relay-mtproto-v10)")
+            appendLine("HTTP probe: protocol revision, open/up-validation/down/close, single test DC")
+            appendLine("Two-way MTProto relay: NOT VERIFIED by HTTP diagnostics")
+            appendLine("Legacy /apiws 101 does not prove Chunk Relay compatibility")
+            appendLine()
             appendLine("[Route Probes]")
             if (probes.isEmpty()) {
                 appendLine("No probe results available.")
@@ -378,6 +384,9 @@ object DiagnosticReportGenerator {
             val error = if (result.errorCode.name != "NONE") result.errorCode.name else ""
             val latency = if (result.latencyMs > 0) "${result.latencyMs} ms" else ""
             append("$name: ${result.status.name}")
+            if (result.target == com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget.WORKER_WEBSOCKET) {
+                append(" [transport=chunk_relay, check=protocol_and_do, mtproto_bidirectional=unverified]")
+            }
             if (latency.isNotBlank()) append(", $latency")
             if (error.isNotBlank()) append(", $error")
             appendLine()
@@ -386,8 +395,10 @@ object DiagnosticReportGenerator {
                     val stepError = if (step.error.code.name != "NONE") ", ${step.error.code.name}" else ""
                     appendLine(
                         "  - ${step.step.name}: ${step.status.name}" +
-                            if (step.latencyMs > 0) " (${step.latencyMs} ms)" else "" +
-                            stepError,
+                            (if (step.latencyMs > 0) " (${step.latencyMs} ms)" else "") +
+                            stepError +
+                            (if (step.step == com.amurcanov.tgwsproxy.routeprobe.RouteProbeStep.CHUNK_RELAY)
+                                " ${step.debugDetail}" else ""),
                     )
                 }
             } else if (result.errorMessageForDebug.isNotBlank()) {

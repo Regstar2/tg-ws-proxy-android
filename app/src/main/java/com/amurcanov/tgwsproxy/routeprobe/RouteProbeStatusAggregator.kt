@@ -42,6 +42,6 @@ object RouteProbeStatusAggregator {
                 it.status == RouteProbeStatus.UNKNOWN
         }
         return failed?.error?.code?.takeIf { it != RouteProbeErrorCode.NONE }
-            ?: RouteProbeErrorCode.UNKNOWN_ERROR
+            ?: if (failed == null) RouteProbeErrorCode.NONE else RouteProbeErrorCode.UNKNOWN_ERROR
     }
 }

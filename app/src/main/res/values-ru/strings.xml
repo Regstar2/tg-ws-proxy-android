@@ -152,8 +152,8 @@
     <string name="cf_worker_hint">Укажите только hostname Worker, например example.username.workers.dev. Не вставляйте полный wss:// URL.</string>
     <string name="cf_worker_test">Проверить Worker</string>
     <string name="cf_worker_test_running">Проверка Worker…</string>
-    <string name="cf_worker_test_ok">Проверка Worker: ответили %1$d из %2$d DC</string>
-    <string name="cf_worker_test_fail">Проверка Worker не удалась</string>
+    <string name="cf_worker_test_ok">Worker Chunk Relay: пройдено проверок протокола %1$d из %2$d (обмен MTProto не проверен)</string>
+    <string name="cf_worker_test_fail">Chunk Relay Worker недоступен или несовместим</string>
     <string name="cf_worker_not_configured">Worker не настроен</string>
     <string name="cf_worker_help_link">Инструкция по Worker</string>
     <string name="worker_domain_empty">Введите домен вида example.username.workers.dev</string>
@@ -948,4 +948,9 @@
     <string name="mtproto_status_failed">Ошибка MTProto runtime</string>
     <string name="mtproto_local_only_limited_hint">Локальный listener доступен, но outbound-маршрут не настроен. Сохраните SOCKS5/WS как резервный вариант.</string>
     <string name="mtproto_validation_fake_tls_domain_invalid">Укажите публичный домен.</string>
+    <string name="worker_chunk_relay_scope">HTTPS Chunk Relay: проверена совместимость протокола и доступность Durable Object. Двусторонний обмен MTProto не проверялся.</string>
+    <string name="worker_chunk_relay_step">Chunk Relay / Durable Object</string>
+    <string name="worker_protocol_incompatible">Несовместимый протокол Worker: требуется Chunk Relay, а не старый WebSocket</string>
+    <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay доступен; обмен MTProto не проверен</string>
+    <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay недоступен или несовместим</string>
 </resources>

@@ -30,6 +30,7 @@ object WorkerHealthUiMapper {
         WorkerHealthErrorCode.TLS_HANDSHAKE_FAILED -> R.string.worker_health_error_tls
         WorkerHealthErrorCode.HTTP_STATUS_ERROR -> R.string.worker_health_error_http
         WorkerHealthErrorCode.WEBSOCKET_HANDSHAKE_FAILED -> R.string.worker_health_error_websocket
+        WorkerHealthErrorCode.WORKER_PROTOCOL_INCOMPATIBLE -> R.string.worker_protocol_incompatible
         WorkerHealthErrorCode.TIMEOUT -> R.string.worker_health_status_timeout
         WorkerHealthErrorCode.NETWORK_UNAVAILABLE -> R.string.worker_health_error_network
         WorkerHealthErrorCode.CANCELLED -> R.string.worker_health_error_cancelled

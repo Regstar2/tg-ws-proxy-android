@@ -332,6 +332,21 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 3. реальное создание нового Consumer WARP-профиля через этот endpoint при недоступном direct API;
 4. отсутствие Worker в обычном Telegram Worker Pool, если deployment provisioning-only.
 
+### Проверка совместимости Telegram Worker в Android
+
+Начиная с исправления #100, «Проверить Worker» и проверки Worker Pool **не используют** старый `/apiws` handshake. Диагностика проверяет текущий транспорт HTTPS Chunk Relay `chunk-relay-mtproto-v10` и hub `relay-hub-v1`.
+
+Один запуск для **одного DC2** использует свежий случайный идентификатор сессии и не более четырёх HTTPS-запросов:
+
+1. `POST /chunk-relay/open` — ожидается HTTP 204 и оба revision header; этот шаг реально открывает TCP-соединение Worker → Telegram DC2.
+2. `POST /chunk-relay/up` с заведомо недопустимым `seq=0` и **без MTProto payload** — ожидается HTTP 400 с revision headers. Это проверка обработчика и валидации, а не передача данных.
+3. `GET /chunk-relay/down?ack=0&wait=0` — ожидается HTTP 204/200 с revision headers. Нулевое ожидание исключает длительный poll.
+4. `GET /chunk-relay/close` — завершает тестовую сессию и освобождает ресурсы. При сетевой ошибке после начала открытия также выполняется попытка закрытия.
+
+Для запросов установлен лимит времени; запросы выполняются последовательно. При несовместимом Legacy WebSocket Worker (`/apiws`, без поддерживаемых Chunk Relay revision headers) диагностика показывает несовместимый протокол, даже если старый endpoint возвращал HTTP 101. HTTP 404/405, 409/410, 5xx, Durable Object quota и сетевые тайм-ауты не отмечаются успехом.
+
+**Важно:** успешная проверка подтверждает совместимость версии, доступность Worker/DO и распознавание HTTP-операций, но не двусторонний обмен Telegram MTProto. Отдельно проверьте Telegram в режиме Worker-only: подключение, сообщения, загрузку и отправку медиа, а также `actual_backend=cf_worker_ws`, `fallback_used=false`, `down_bytes>0` в логах.
+
 В диагностике v1.10.14 должны быть видны признаки chunk-relay/RelayHub пути, а Worker должен отвечать актуальными revision headers.
 
 ## Ограничения
