@@ -14,6 +14,7 @@ data class WorkerFailoverCandidate(
     val lastFailureAt: Long?,
     val isSelectedWorker: Boolean,
     val isBackoffActive: Boolean,
+    val transport: WorkerTransport = WorkerTransport.CHUNK_RELAY,
 )
 
 enum class WorkerFailoverReason(val wireValue: String) {
@@ -87,7 +88,7 @@ data class WorkerFailoverPayload(
 ) {
     fun encodeCandidatesToken(): String {
         return candidates.joinToString("|") { candidate ->
-            "${candidate.workerId}:${candidate.domain}"
+            "${candidate.workerId}:${candidate.domain}:${candidate.transport.prefValue}"
         }
     }
 }
