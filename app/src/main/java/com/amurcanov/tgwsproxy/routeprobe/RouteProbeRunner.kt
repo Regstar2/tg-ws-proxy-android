@@ -61,7 +61,14 @@ class RouteProbeRunner(
         }
         logSteps(target, stepResults)
         val required = requiredSteps(target)
-        val status = RouteProbeStatusAggregator.aggregate(stepResults, required)
+        val chunkRelay = stepResults.firstOrNull { it.step == RouteProbeStep.CHUNK_RELAY }
+        val status = if (target == RouteProbeTarget.WORKER_WEBSOCKET && chunkRelay != null &&
+            chunkRelay.status != RouteProbeStatus.OK
+        ) {
+            chunkRelay.status
+        } else {
+            RouteProbeStatusAggregator.aggregate(stepResults, required)
+        }
         val errorCode = RouteProbeStatusAggregator.primaryErrorCode(stepResults)
         val finishedAt = System.currentTimeMillis()
         val vpn = stepResults.any { it.error.code == RouteProbeErrorCode.VPN_DETECTED }
