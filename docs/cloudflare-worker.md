@@ -1,14 +1,26 @@
 # Cloudflare Worker: Telegram relay и WARP provisioning
 
-Этот документ — актуальный гайд для `v1.11.0`. В приложении есть **два разных типа Worker**, и их нельзя смешивать.
+Этот документ описывает Telegram Worker и отдельный WARP/AWG provisioning Worker. С поддержкой #101 Telegram Worker может использовать один из двух транспортов, выбираемых явно.
 
 ## Какой Worker нужен
 
 ### Telegram Worker (`cf_worker_ws`)
 
-Этот Worker передаёт **Telegram MTProto traffic**. Для `v1.10.14+` используется HTTPS chunk relay + Durable Objects. Его домен добавляется в обычный Worker Pool приложения и может участвовать в route policy.
+Этот Worker передаёт **Telegram MTProto traffic**. По умолчанию используется HTTPS Chunk Relay + Durable Objects (проверенный baseline v1.10.14+). Начиная с поддержки #101 доступен также оригинальный Flowseal Legacy WebSocket `/apiws`. Его домен добавляется в одиночный Worker или Worker Pool приложения и может участвовать в route policy.
 
-Для такого deployment используйте `scripts/cloudflare-worker/warp-bootstrap-worker.js` вместе с `scripts/cloudflare-worker/chunk-relay-status-worker.js` и `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc`.
+Для **Chunk Relay** используйте `scripts/cloudflare-worker/warp-bootstrap-worker.js` вместе с `scripts/cloudflare-worker/chunk-relay-status-worker.js` и `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc`.
+
+Для **Legacy WebSocket** используйте оригинальную инструкцию [Flowseal CF Worker](https://github.com/Flowseal/tg-ws-proxy/blob/main/docs/RU/CfWorker.md). Этот Worker принимает WebSocket на `/apiws?dst=<telegram-ip>`, устанавливает TCP-соединение на Telegram `:443` и пересылает бинарные WebSocket messages в обе стороны. Durable Objects ему не нужны.
+
+### Выбор транспорта в Android
+
+- **Одиночный Worker, Worker Pool выключен:** Настройки → Cloudflare → Worker Pool → Legacy Worker → «Протокол Telegram Worker».
+- **Worker Pool включён:** добавьте или измените Worker и явно выберите `HTTPS Chunk Relay` или `Flowseal Legacy WebSocket` в форме редактирования. Протокол закреплён за каждым Worker; стратегия выбора и failover могут выбирать Worker разных типов только между новыми сессиями.
+- Сохранённые ранее Worker (включая мигрированные из одиночного режима) продолжают использовать **Chunk Relay**. Приложение не делает автоматическую смену протокола при ошибке.
+- Для Legacy WebSocket проверка подтверждает только корректный TLS/WebSocket handshake (`101` + валидный `Sec-WebSocket-Accept`); для Chunk Relay — доступность relay/DO и совместимость API. **Ни одна из этих проверок не подтверждает full-duplex MTProto, работу медиа и устойчивость Android.**
+- Legacy WebSocket **экспериментален** в Android: на прежних версиях наблюдались зависания крупных медиа-передач (#29). Используйте Worker-only и реальное устройство для проверки сообщений, загрузки и отправки больших файлов. Если не работает — верните Chunk Relay, не меняя тип автоматически.
+
+Standalone provisioning-only Worker для WARP/AWG не поддерживает ни `/apiws`, ни `/chunk-relay`, и не является Telegram Worker.
 
 ### Provisioning Worker для WARP/AWG
 
@@ -88,7 +100,7 @@ Worker обращается только к фиксированному upstrea
 
 ## Важно при обновлении с предыдущих версий
 
-Начиная с **v1.10.14**, MTProto Worker использует новую архитектуру HTTPS chunk relay + Durable Objects.
+Начиная с **v1.10.14**, MTProto Worker по умолчанию использует HTTPS Chunk Relay + Durable Objects. Legacy WebSocket добавлен обратно как явный режим совместимости в #101.
 
 Для работы Worker-маршрута недостаточно обновить только Android-приложение: существующие Cloudflare Worker, развёрнутые со старым кодом долгоживущего WebSocket-транспорта, необходимо обновить на актуальный код из этого репозитория.
 
@@ -99,7 +111,7 @@ Worker обращается только к фиксированному upstrea
 - `scripts/cloudflare-worker/chunk-relay-status-worker.js` — существующая реализация MTProto chunk relay;
 - `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
 
-Не используйте старую Worker-конфигурацию как замену новой схеме chunk relay для MTProto Worker v1.10.14.
+Оригинальный Flowseal Worker используйте только при явном выборе **Flowseal Legacy WebSocket**. Он не является заменой Chunk Relay с Durable Objects и не пройдёт проверку протокола Chunk Relay.
 
 ## Архитектура
 
@@ -273,7 +285,7 @@ Invoke-RestMethod "$Worker/warp-bootstrap/health"
 
 ## Несколько Telegram Worker
 
-Для `cf_worker_ws` можно развернуть **несколько одинаковых chunk-relay Worker deployment** и добавить их в обычный Telegram Worker Pool.
+Для `cf_worker_ws` можно развернуть **несколько Worker deployment** и добавить их в Telegram Worker Pool. Каждый домен должен иметь собственный явно заданный тип протокола.
 
 Практический стартовый вариант — **2–3 Telegram Worker**. Это отдельная рекомендация от встроенного provisioning pool: три встроенных project Worker используются только при создании WARP-профиля и не являются Telegram Worker.
 
@@ -293,7 +305,7 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name tgproxy-backup
 ```
 
-Все Telegram Worker должны использовать актуальный код v1.10.14+ и chunk-relay/Durable Object конфигурацию.
+Все **Chunk Relay** Worker должны использовать актуальный Chunk Relay код v1.10.14+ и Durable Object конфигурацию. **Legacy WebSocket** Worker используют отдельный upstream-код Flowseal и не требуют DO.
 
 После развёртывания добавьте их домены в обычный Telegram Worker Pool TgWsProxy и используйте поддерживаемую стратегию распределения.
 
@@ -323,7 +335,7 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 4. reconnect после разрыва соединения;
 5. создание нескольких MTProto-сессий;
 6. работу пула из нескольких Telegram Worker;
-7. отсутствие возврата на старый WebSocket Worker transport.
+7. соответствие реально используемого транспорта выбранному типу Worker, отсутствие неявного переключения протоколов.
 
 Для **provisioning Worker** отдельно проверьте:
 
@@ -343,7 +355,7 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
 3. `GET /chunk-relay/down?ack=0&wait=0` — ожидается HTTP 204/200 с revision headers. Нулевое ожидание исключает длительный poll.
 4. `GET /chunk-relay/close` — завершает тестовую сессию и освобождает ресурсы. При сетевой ошибке после начала открытия также выполняется попытка закрытия.
 
-Для запросов установлен лимит времени; запросы выполняются последовательно. При несовместимом Legacy WebSocket Worker (`/apiws`, без поддерживаемых Chunk Relay revision headers) диагностика показывает несовместимый протокол, даже если старый endpoint возвращал HTTP 101. HTTP 404/405, 409/410, 5xx, Durable Object quota и сетевые тайм-ауты не отмечаются успехом.
+Для запросов установлен лимит времени; запросы выполняются последовательно. При **выборе Chunk Relay** несовместимый Legacy WebSocket Worker (`/apiws`, без Chunk Relay revision headers) показывает несовместимый протокол, даже если его `/apiws` отвечает HTTP 101. При **выборе Legacy WebSocket** отдельно проверяется WebSocket upgrade/Accept, но не MTProto. HTTP 404/405, 409/410, 5xx, Durable Object quota и сетевые тайм-ауты не отмечаются успехом.
 
 **Важно:** успешная проверка подтверждает совместимость версии, доступность Worker/DO и распознавание HTTP-операций, но не двусторонний обмен Telegram MTProto. Отдельно проверьте Telegram в режиме Worker-only: подключение, сообщения, загрузку и отправку медиа, а также `actual_backend=cf_worker_ws`, `fallback_used=false`, `down_bytes>0` в логах.
 
