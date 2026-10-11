@@ -121,6 +121,13 @@ fun WorkerPoolSettingsScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        Text(
+            text = stringResource(R.string.worker_chunk_relay_scope),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
         if (uiState.poolEnabled) {
             WorkerPoolSummarySection(uiState.summary)
             Spacer(modifier = Modifier.height(10.dp))
