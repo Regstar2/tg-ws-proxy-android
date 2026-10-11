@@ -1044,6 +1044,14 @@ private fun RouteProbeResultCard(model: RouteProbeUiModel) {
                     context.getString(R.string.diagnostics_latency_ms, ms),
                 )
             }
+            if (model.target == RouteProbeTarget.WORKER_WEBSOCKET) {
+                Text(
+                    stringResource(R.string.worker_chunk_relay_scope),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
             if (model.errorCode != com.amurcanov.tgwsproxy.routeprobe.RouteProbeErrorCode.NONE) {
                 MetricLine(
                     stringResource(R.string.diagnostics_error_code_label),
