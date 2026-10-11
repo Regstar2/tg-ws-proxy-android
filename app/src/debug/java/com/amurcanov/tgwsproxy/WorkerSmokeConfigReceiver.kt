@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import androidx.core.content.ContextCompat
+import com.amurcanov.tgwsproxy.worker.FlowsealDcPreset
+import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.WorkerTransport
 
 /**
@@ -48,6 +51,12 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                         if (prefs.contains("route_policy_defaults_version")) {
                             editor.putInt("value_route_policy_defaults_version", prefs.getInt("route_policy_defaults_version", 0))
                         }
+                        for (key in INT_KEYS) {
+                            editor.putBoolean("exists_$key", prefs.contains(key))
+                            if (prefs.contains(key)) {
+                                editor.putInt("value_$key", prefs.getInt(key, 0))
+                            }
+                        }
                         check(editor.putBoolean("snapshot_exists", true).commit()) {
                             "Could not back up Worker settings"
                         }
@@ -67,6 +76,65 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                     ) { "Could not configure temporary Worker settings" }
                     setResultCode(RESULT_OK)
                     setResultData("configured")
+                }
+                ACTION_START -> {
+                    val saved = ProxySavedConfigStore(prefs).load()
+                    val factory = ProxyRuntimeConfigFactory(
+                        prefs = prefs,
+                        routePolicyRepository = NetworkRoutePolicyRepository(prefs),
+                        adaptiveRouteStatsRepository = AdaptiveRouteStatsRepository(prefs),
+                        cfUpstreamDomainsProvider = { emptyList() },
+                        manualCfDomainsProvider = { emptyList() },
+                        workerDomainProvider = { prefs.getString("worker_domain", "").orEmpty() },
+                        workerDestinationModeProvider = {
+                            WorkerDestinationMode.fromPref(
+                                prefs.getString(ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE, null),
+                            )
+                        },
+                        flowsealMediaFixEnabledProvider = {
+                            prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_ENABLED, false)
+                        },
+                        flowsealMediaFixDcProvider = {
+                            prefs.getInt(
+                                ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_DC,
+                                WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
+                            )
+                        },
+                        flowsealMediaFixIpProvider = {
+                            prefs.getString(
+                                ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_IP,
+                                WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
+                            ) ?: WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP
+                        },
+                        dcEntriesProvider = {
+                            FlowsealDcPreset.dcEntries(
+                                FlowsealDcPreset.loadTexts(prefs),
+                                prefs.getBoolean(FlowsealDcPreset.PREF_ENABLED, false),
+                            )
+                        },
+                        poolSizeProvider = { prefs.getInt("pool", 4) },
+                        portProvider = { saved.port },
+                    )
+                    check(backup.getBoolean("snapshot_exists", false)) { "Missing test configuration backup" }
+                    val config = factory.build(context)
+                        ?: error("Worker smoke runtime config invalid")
+                    check(config.ips.isNotBlank()) { "Worker runtime config is empty" }
+                    val startIntent = Intent(context, ProxyService::class.java).apply {
+                        action = ProxyService.ACTION_START
+                        putExtra(ProxyService.EXTRA_PORT, config.port)
+                        putExtra(ProxyService.EXTRA_IPS, config.ips)
+                        putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
+                    }
+                    ContextCompat.startForegroundService(context, startIntent)
+                    setResultCode(RESULT_OK)
+                    setResultData("start_requested")
+                }
+                ACTION_STOP -> {
+                    context.startService(Intent(context, ProxyService::class.java).apply {
+                        action = ProxyService.ACTION_STOP
+                    })
+                    setResultCode(RESULT_OK)
+                    setResultData("stop_requested")
                 }
                 ACTION_RESTORE -> {
                     if (backup.getBoolean("snapshot_exists", false)) {
@@ -93,6 +161,13 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                         } else {
                             editor.remove("route_policy_defaults_version")
                         }
+                        for (key in INT_KEYS) {
+                            if (backup.getBoolean("exists_$key", false)) {
+                                editor.putInt(key, backup.getInt("value_$key", 0))
+                            } else {
+                                editor.remove(key)
+                            }
+                        }
                         check(editor.commit()) { "Could not restore original Worker settings" }
                         check(backup.edit().clear().commit()) { "Could not clear Worker backup" }
                     }
@@ -116,14 +191,18 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
         private const val EXTRA_DOMAIN = "domain"
         private const val EXTRA_TRANSPORT = "transport"
         private val STRING_KEYS = listOf(
-            "worker_domain", "worker_transport", "connection_mode",
+            "worker_domain", "worker_transport", "connection_mode", "last_runtime_ips",
             "route_policy_wifi_v1", "route_policy_mobile_v1", "route_policy_unknown_v1",
         )
         private val workerOnlyPolicy = "routes=worker_ws;preferred=worker_ws;" +
             "strategy=${AutoStrategy.CF_PREFERRED.prefValue};fallback=0"
         private val BOOLEAN_KEYS = listOf(
             "worker_enabled", "worker_pool_enabled_v1", "worker_pool_migration_done_v1",
+            "last_proxy_port_default_1443_migrated",
         )
+        private val INT_KEYS = listOf("last_proxy_port", "last_proxy_pool")
+        const val ACTION_START = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_START"
+        const val ACTION_STOP = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_STOP"
         const val ACTION_CONFIGURE = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_CONFIGURE"
         const val ACTION_RESTORE = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_RESTORE"
     }
