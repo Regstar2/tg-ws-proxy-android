@@ -6,6 +6,28 @@ import org.junit.Test
 
 class WorkerHealthStateResolverTest {
     @Test
+    fun websocketUpgradeDoesNotMarkUnverifiedTelegramWorkerHealthy() {
+        assertEquals(
+            WorkerHealthState.UNKNOWN to 0,
+            WorkerHealthStateResolver.resolveAfterTransportCheck(
+                WorkerTransport.LEGACY_WEBSOCKET, 2, WorkerHealthCheckStatus.OK,
+            ),
+        )
+        assertEquals(
+            WorkerHealthState.HEALTHY to 0,
+            WorkerHealthStateResolver.resolveAfterTransportCheck(
+                WorkerTransport.CHUNK_RELAY, 2, WorkerHealthCheckStatus.OK,
+            ),
+        )
+        assertEquals(
+            WorkerHealthState.DEGRADED to 1,
+            WorkerHealthStateResolver.resolveAfterTransportCheck(
+                WorkerTransport.LEGACY_WEBSOCKET, 0, WorkerHealthCheckStatus.FAIL,
+            ),
+        )
+    }
+
+    @Test
     fun successResetsToHealthy() {
         val (state, failures) = WorkerHealthStateResolver.resolveAfterCheck(
             currentFailureCount = 2,
