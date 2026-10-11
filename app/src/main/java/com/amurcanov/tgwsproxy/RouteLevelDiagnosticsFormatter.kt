@@ -25,6 +25,9 @@ object RouteLevelDiagnosticsFormatter {
                 route,
             )
             RouteProbeStatus.SUCCESS -> {
+                if (result.route == RouteKind.WORKER_WS) {
+                    return context.getString(R.string.worker_chunk_relay_result_ok, route)
+                }
                 val latency = result.bestLatencyMs?.let {
                     context.getString(R.string.route_probe_line_latency_ms, it)
                 }.orEmpty()
@@ -36,7 +39,9 @@ object RouteLevelDiagnosticsFormatter {
                     latency,
                 )
             }
-            RouteProbeStatus.FAILURE -> context.getString(
+            RouteProbeStatus.FAILURE -> if (result.route == RouteKind.WORKER_WS) {
+                context.getString(R.string.worker_chunk_relay_result_fail, route)
+            } else context.getString(
                 R.string.route_probe_line_failure,
                 route,
                 result.successCount,
@@ -79,6 +84,12 @@ object RouteLevelDiagnosticsFormatter {
                         "${result.successCount}/${result.totalCount} | " +
                         "$latency | $stages |",
                 )
+            }
+            report.results.filter { it.route == RouteKind.WORKER_WS }.forEach { worker ->
+                appendLine()
+                appendLine("Worker transport: chunk_relay; check: protocol + Durable Object + single DC")
+                appendLine("Two-way MTProto relay: NOT VERIFIED")
+                worker.details.forEach { appendLine("- ${it.detail}") }
             }
             val hints = troubleshootingHints(context, report)
             if (hints.isNotEmpty()) {
