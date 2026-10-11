@@ -55,6 +55,7 @@ data class WorkerEndpoint(
     val lastCheckedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    val transport: WorkerTransport = WorkerTransport.CHUNK_RELAY,
 ) {
     fun normalizedDomain(): String = com.amurcanov.tgwsproxy.WorkerDomain.normalize(url)
 
@@ -64,6 +65,7 @@ data class WorkerEndpoint(
             url: String,
             enabled: Boolean = true,
             priority: Int = 0,
+            transport: WorkerTransport = WorkerTransport.CHUNK_RELAY,
             nowMs: Long = System.currentTimeMillis(),
         ): WorkerEndpoint {
             return WorkerEndpoint(
@@ -72,6 +74,7 @@ data class WorkerEndpoint(
                 url = url.trim(),
                 enabled = enabled,
                 priority = priority,
+                transport = transport,
                 state = if (enabled) WorkerHealthState.UNKNOWN else WorkerHealthState.DISABLED,
                 createdAt = nowMs,
                 updatedAt = nowMs,
