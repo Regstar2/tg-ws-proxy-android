@@ -1,6 +1,7 @@
 package com.amurcanov.tgwsproxy
 
 import android.util.Log
+import com.amurcanov.tgwsproxy.worker.ChunkRelayWorkerProbe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -53,10 +54,16 @@ object ConnectionDiagnostics {
                 )
             )
         }
-        val results = testDcs.map { dc ->
-            probeWorkerDc(domain, dc)
-        }
-        ConnectionProbeReport(results)
+        // One bounded real Chunk Relay check; a WebSocket 101 is not a Worker success.
+        val probe = ChunkRelayWorkerProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
+        ConnectionProbeReport(listOf(RouteProbeResult(
+            route = "worker",
+            dc = 2,
+            success = probe.available,
+            stage = if (probe.available) "chunk_relay_reachable" else probe.errorCode,
+            elapsedMs = probe.elapsedMs,
+            detail = probe.detail,
+        )))
     }
 
     suspend fun probeCfProxy(
@@ -190,12 +197,6 @@ object ConnectionDiagnostics {
             addAll(probeTcpFallback().results)
         }
         ConnectionProbeReport(merged)
-    }
-
-    private fun probeWorkerDc(domain: String, dc: Int): RouteProbeResult {
-        val ip = ConnectionRuntimeConfig.dcIpForTest(dc)
-        val path = "/apiws?dst=$ip&dc=$dc&media=0"
-        return probeWss(domain, domain, path, "worker", dc)
     }
 
     private fun probeWss(
