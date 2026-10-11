@@ -629,6 +629,12 @@ private fun WorkerPoolDiagnosticsSummaryBlock(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
+                stringResource(R.string.worker_chunk_relay_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
                 stringResource(R.string.worker_pool_strategy_current),
                 style = MaterialTheme.typography.bodySmall,
             )
