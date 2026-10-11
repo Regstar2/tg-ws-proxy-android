@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
@@ -145,6 +146,12 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 		statusCode, _ = strconv.Atoi(parts[1])
 	}
 	if statusCode == 101 {
+		expectedAccept := sha1.Sum([]byte(base64.StdEncoding.EncodeToString(keyBytes) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		if flowsealResponseHeader(responseLines, "Sec-WebSocket-Accept") != base64.StdEncoding.EncodeToString(expectedAccept[:]) ||
+			!strings.EqualFold(flowsealResponseHeader(responseLines, "Upgrade"), "websocket") {
+			_ = tlsConn.Close()
+			return nil, fmt.Errorf("worker websocket handshake failed: invalid upgrade response")
+		}
 		if logInfo != nil {
 			state := tlsConn.ConnectionState()
 			logInfo.Printf("MTProto Worker transport ready session_id=%s remote=%s tls_version=%x cipher=%x tls_record_sizing=fixed worker_revision=%s",
