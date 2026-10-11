@@ -1147,3 +1147,37 @@ private fun WorkerPoolDestinationModeSection(
         }
     }
 }
+
+private fun workerTransportLabel(transport: WorkerTransport): Int = when (transport) {
+    WorkerTransport.CHUNK_RELAY -> R.string.worker_transport_chunk_relay
+    WorkerTransport.LEGACY_WEBSOCKET -> R.string.worker_transport_legacy_websocket
+}
+
+@Composable
+private fun WorkerTransportSelector(
+    transport: WorkerTransport,
+    enabled: Boolean,
+    onChange: (WorkerTransport) -> Unit,
+) {
+    Column {
+        Text(stringResource(R.string.worker_transport_label), style = MaterialTheme.typography.labelLarge)
+        WorkerTransport.entries.forEach { option ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = transport == option,
+                    onClick = { onChange(option) },
+                    enabled = enabled,
+                )
+                Text(
+                    stringResource(workerTransportLabel(option)),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.worker_transport_scope),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
