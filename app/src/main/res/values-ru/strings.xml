@@ -948,7 +948,7 @@
     <string name="mtproto_status_failed">Ошибка MTProto runtime</string>
     <string name="mtproto_local_only_limited_hint">Локальный listener доступен, но outbound-маршрут не настроен. Сохраните SOCKS5/WS как резервный вариант.</string>
     <string name="mtproto_validation_fake_tls_domain_invalid">Укажите публичный домен.</string>
-    <string name="worker_chunk_relay_scope">HTTPS Chunk Relay: проверена совместимость протокола и доступность Durable Object. Двусторонний обмен MTProto не проверялся.</string>
+    <string name="worker_chunk_relay_scope">Worker: проверка совместимости выбранного протокола не подтверждает двусторонний обмен MTProto и работу медиа.</string>
     <string name="worker_chunk_relay_step">Chunk Relay / Durable Object</string>
     <string name="worker_protocol_incompatible">Несовместимый протокол Worker: требуется Chunk Relay, а не старый WebSocket</string>
     <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay доступен; обмен MTProto не проверен</string>
