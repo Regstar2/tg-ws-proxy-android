@@ -957,5 +957,6 @@
     <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (рекомендуется)</string>
     <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws)</string>
     <string name="worker_transport_scope">Проверки протокола не подтверждают двусторонний MTProto. Legacy WebSocket может зависать при передаче крупных медиа. Worker для WARP — отдельный тип.</string>
+    <string name="cf_worker_test_legacy_fail">Legacy WebSocket недоступен или несовместим</string>
     <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d из %2$d проверок подключения пройдено (обмен MTProto не проверялся)</string>
 </resources>
