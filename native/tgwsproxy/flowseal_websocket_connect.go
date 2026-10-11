@@ -3,8 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/sha1"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
