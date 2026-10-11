@@ -7,6 +7,7 @@ import com.amurcanov.tgwsproxy.AppLogger
 import com.amurcanov.tgwsproxy.ConnectionRuntimeConfig
 import com.amurcanov.tgwsproxy.WorkerDomain
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeConfig
+import com.amurcanov.tgwsproxy.routeprobe.RouteProbeError
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeErrorCode
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeNetworkSteps
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeStatus
@@ -38,10 +39,10 @@ class WorkerHealthCheckRunner(
             withTimeout(config.overallTimeoutMs) {
                 buildResult(context, worker, maskDomains, startedAt)
             }
-        } catch (e: CancellationException) {
-            cancelledResult(worker, maskDomains, startedAt)
         } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
             timeoutResult(worker, maskDomains, startedAt)
+        } catch (e: CancellationException) {
+            cancelledResult(worker, maskDomains, startedAt)
         } catch (e: Exception) {
             failedResult(
                 worker,
@@ -101,22 +102,35 @@ class WorkerHealthCheckRunner(
     }
 
     private fun probeWorkerEndpoint(domain: String): List<RouteProbeStepResult> {
-        val dc = 2
-        val ip = ConnectionRuntimeConfig.dcIpForTest(dc)
-        val path = "/apiws?dst=$ip&dc=$dc&media=0"
         val out = mutableListOf<RouteProbeStepResult>()
         out += steps.probeDns(domain)
-        if (out.last().status != RouteProbeStatus.OK) {
-            return out
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
         out += steps.probeTcp(domain, 443)
-        if (out.last().status != RouteProbeStatus.OK) {
-            return out
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
         out += steps.probeTls(domain, domain)
-        if (config.runWebSocketHandshake && out.last().status == RouteProbeStatus.OK) {
-            out += steps.probeWebSocket(domain, domain, path)
-        }
+        if (out.last().status != RouteProbeStatus.OK) return out
+
+        val checked = ChunkRelayWorkerProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
+        out += RouteProbeStepResult(
+            step = RouteProbeStep.CHUNK_RELAY,
+            status = when {
+                checked.available -> RouteProbeStatus.OK
+                checked.errorCode == "timeout" -> RouteProbeStatus.TIMEOUT
+                else -> RouteProbeStatus.FAIL
+            },
+            latencyMs = checked.elapsedMs,
+            error = RouteProbeError(
+                when {
+                    checked.available -> RouteProbeErrorCode.NONE
+                    checked.errorCode == "timeout" -> RouteProbeErrorCode.TIMEOUT
+                    checked.errorCode == "incompatible_protocol" || checked.errorCode == "revision_mismatch" ->
+                        RouteProbeErrorCode.WORKER_PROTOCOL_INCOMPATIBLE
+                    else -> RouteProbeErrorCode.HTTP_STATUS_ERROR
+                },
+                checked.errorCode,
+            ),
+            debugDetail = checked.detail,
+        )
         return out
     }
 
@@ -401,6 +415,7 @@ private fun RouteProbeStep.toWorkerHealthStep(): WorkerHealthCheckStep = when (t
     RouteProbeStep.TLS_HANDSHAKE -> WorkerHealthCheckStep.TLS_HANDSHAKE
     RouteProbeStep.HTTP_PROBE -> WorkerHealthCheckStep.HTTP_PROBE
     RouteProbeStep.WEBSOCKET_HANDSHAKE -> WorkerHealthCheckStep.WEBSOCKET_HANDSHAKE
+    RouteProbeStep.CHUNK_RELAY -> WorkerHealthCheckStep.CHUNK_RELAY
     else -> WorkerHealthCheckStep.CONFIG_VALIDATION
 }
 
@@ -410,6 +425,7 @@ private fun RouteProbeStep.toWorkerStepName(): String = when (this) {
     RouteProbeStep.TLS_HANDSHAKE -> "tls_handshake"
     RouteProbeStep.HTTP_PROBE -> "http_probe"
     RouteProbeStep.WEBSOCKET_HANDSHAKE -> "websocket_handshake"
+    RouteProbeStep.CHUNK_RELAY -> "chunk_relay"
     else -> name.lowercase()
 }
 
@@ -430,6 +446,7 @@ private fun RouteProbeErrorCode.toWorkerErrorCode(): WorkerHealthErrorCode = whe
     RouteProbeErrorCode.TLS_HANDSHAKE_FAILED -> WorkerHealthErrorCode.TLS_HANDSHAKE_FAILED
     RouteProbeErrorCode.HTTP_STATUS_ERROR -> WorkerHealthErrorCode.HTTP_STATUS_ERROR
     RouteProbeErrorCode.WEBSOCKET_HANDSHAKE_FAILED -> WorkerHealthErrorCode.WEBSOCKET_HANDSHAKE_FAILED
+    RouteProbeErrorCode.WORKER_PROTOCOL_INCOMPATIBLE -> WorkerHealthErrorCode.WORKER_PROTOCOL_INCOMPATIBLE
     RouteProbeErrorCode.TIMEOUT -> WorkerHealthErrorCode.TIMEOUT
     RouteProbeErrorCode.NETWORK_UNAVAILABLE -> WorkerHealthErrorCode.NETWORK_UNAVAILABLE
     RouteProbeErrorCode.INVALID_CONFIG -> WorkerHealthErrorCode.INVALID_WORKER_URL
