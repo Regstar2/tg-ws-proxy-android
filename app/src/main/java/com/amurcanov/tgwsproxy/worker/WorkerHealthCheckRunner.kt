@@ -171,7 +171,7 @@ class WorkerHealthCheckRunner(
                 it.status == WorkerHealthCheckStatus.INVALID_CONFIG
         }
         return failed?.errorCode?.takeIf { it != WorkerHealthErrorCode.NONE }
-            ?: WorkerHealthErrorCode.UNKNOWN_ERROR
+            ?: if (failed == null) WorkerHealthErrorCode.NONE else WorkerHealthErrorCode.UNKNOWN_ERROR
     }
 
     private fun skippedDisabled(
