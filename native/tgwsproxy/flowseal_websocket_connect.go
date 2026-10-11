@@ -14,14 +14,18 @@ import (
 	"time"
 )
 
-const workerChunkRelayExperimentEnabled = true
 
 func dialFlowsealWorkerCandidate(domain, path, logPrefix string) (mtProtoFrameSocket, error) {
 	return dialFlowsealWorkerCandidateContext(context.Background(), domain, path, logPrefix)
 }
 
 func dialFlowsealWorkerCandidateContext(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
-	if workerChunkRelayExperimentEnabled {
+	return dialWorkerTransportContext(ctx, workerTransportChunkRelay, domain, path, logPrefix)
+}
+
+func dialWorkerTransportContext(ctx context.Context, transport workerTransport, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
+	switch transport {
+	case workerTransportChunkRelay:
 		socket, err := dialMtProtoChunkRelayFrameSocket(ctx, domain, path, logPrefix)
 		if err != nil {
 			logDomainConnectFailure(logPrefix, domain, domain, err)
@@ -43,6 +47,11 @@ func dialFlowsealWorkerCandidateContext(ctx context.Context, domain, path, logPr
 			)
 		}
 		return socket, nil
+	case workerTransportLegacyWebSocket:
+		// Flowseal /apiws is an ordinary WebSocket->TCP stream, not a Chunk Relay.
+		// The caller pins this protocol for the lifetime of an MTProto session.
+	default:
+		return nil, fmt.Errorf("unsupported worker transport %q", transport)
 	}
 
 	ws, err := connectFlowsealRawWebSocketContext(ctx, domain, domain, path, 10)
