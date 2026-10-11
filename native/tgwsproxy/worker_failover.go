@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -245,8 +246,19 @@ func classifyWorkerConnectFailure(err error) string {
 	if _, ok := workerCircuitError(err); ok {
 		return "all_workers_circuit_open"
 	}
+	var handshake *WsHandshakeError
+	if errors.As(err, &handshake) {
+		switch handshake.StatusCode {
+		case 404, 405, 426:
+			return "worker_protocol_incompatible"
+		default:
+			return "worker_websocket_handshake_failed"
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "unsupported worker transport"), strings.Contains(msg, "missing relay revision"), strings.Contains(msg, "invalid upgrade response"):
+		return "worker_protocol_incompatible"
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
 		return "worker_connect_timeout"
 	case strings.Contains(msg, "dns"), strings.Contains(msg, "no such host"):
