@@ -44,6 +44,7 @@ type flowsealMediaFixConfig struct {
 type workerConfig struct {
 	Enabled         bool
 	Domain          string
+	Transport       workerTransport
 	Failover        workerFailoverSettings
 	DestinationMode string
 	MediaFix        flowsealMediaFixConfig
@@ -103,6 +104,7 @@ func setRuntimeSettings(cfg runtimeSettings) {
 	prev := getRuntimeSettings()
 	cfg.CF = normalizeCfProxyConfig(cfg.CF)
 	cfg.Worker.Domain = NormalizeWorkerDomain(cfg.Worker.Domain)
+	cfg.Worker.Transport = normalizeWorkerTransport(string(cfg.Worker.Transport))
 	cfg.MtProtoFakeTLSDomain = mtproxyfrontend.NormalizeFakeTLSDomain(cfg.MtProtoFakeTLSDomain)
 	cfg.MtProtoMaskingPassthrough = cfg.MtProtoMaskingPassthrough && cfg.MtProtoFakeTLSDomain != ""
 	cfg.CFManualDomains = tgwsroute.NormalizeCFDomains(cfg.CFManualDomains)
