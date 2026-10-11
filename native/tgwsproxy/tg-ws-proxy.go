@@ -3100,6 +3100,7 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 					settings.Worker.Failover.MaxAttempts = n
 				}
 			case "worker_failover_candidates":
+				settings.Worker.Failover.CandidatesSpecified = true
 				settings.Worker.Failover.Candidates = parseWorkerFailoverCandidates(val)
 			case "worker_failover_skipped_backoff":
 				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {
