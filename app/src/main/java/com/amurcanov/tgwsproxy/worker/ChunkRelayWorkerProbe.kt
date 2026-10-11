@@ -1,6 +1,5 @@
 package com.amurcanov.tgwsproxy.worker
 
-import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.util.UUID
@@ -19,31 +18,34 @@ internal class ChunkRelayWorkerProbe(
         val deadline = started + MAX_PROBE_MS * 1_000_000
         val sid = "diag_" + UUID.randomUUID().toString().replace("-", "")
         val query = "sid=$sid&dst=$destination"
-        var openAttempted = false
         var openAccepted = false
+        var protocolRecognized = false
+        var currentStage = "open"
         var outcome: ChunkRelayProbeResult
         try {
-            openAttempted = true
             val opened = request(domain, "/chunk-relay/open?$query", "POST", deadline)
             outcome = classify("open", opened, 204)
+            protocolRecognized = outcome.compatible
             if (outcome.available) {
                 openAccepted = true
                 // Invalid sequence is deliberate: exercise the /up route without sending MTProto bytes.
+                currentStage = "up_validation"
                 val upload = request(domain, "/chunk-relay/up?$query&seq=0", "POST", deadline)
                 outcome = classify("up_validation", upload, 400)
             }
             if (outcome.available) {
+                currentStage = "down_poll"
                 val download = request(domain, "/chunk-relay/down?$query&ack=0&wait=0", "GET", deadline)
                 outcome = classify("down_poll", download, 204, 200)
             }
         } catch (_: SocketTimeoutException) {
-            outcome = ChunkRelayProbeResult(false, false, "network", null, "timeout")
+            outcome = ChunkRelayProbeResult(protocolRecognized, false, currentStage, null, "timeout")
         } catch (_: Exception) {
-            outcome = ChunkRelayProbeResult(false, false, "network", null, "network_error")
+            outcome = ChunkRelayProbeResult(protocolRecognized, false, currentStage, null, "network_error")
         }
 
         // A timed-out open may still have created a remote session.
-        if (openAttempted && (openAccepted || outcome.errorCode == "timeout" || outcome.errorCode == "network_error")) {
+        if (openAccepted || outcome.errorCode == "timeout" || outcome.errorCode == "network_error") {
             try {
                 val closed = request(domain, "/chunk-relay/close?$query", "GET", nowNs() + CLOSE_TIMEOUT_MS * 1_000_000)
                 if (outcome.available) {
@@ -109,7 +111,7 @@ internal data class ChunkRelayProbeResult(
 ) {
     val detail: String
         get() = "transport=chunk_relay check=protocol_and_do compatible=$compatible " +
-            "reachable=$available mtproto_bidirectional=unverified " +
+            "reachable=$available stages=open,up_validation,down_poll,close mtproto_bidirectional=unverified " +
             "endpoint=/chunk-relay/$stage http_status=${httpStatus ?: "none"} error=$errorCode"
 }
 
