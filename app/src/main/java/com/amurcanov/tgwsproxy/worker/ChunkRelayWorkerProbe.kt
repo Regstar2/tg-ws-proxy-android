@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy.worker
 
 import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.Proxy
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 
@@ -129,7 +130,7 @@ internal fun interface ChunkRelayProbeHttp {
 private class HttpsChunkRelayProbeHttp : ChunkRelayProbeHttp {
     override fun request(domain: String, path: String, method: String, timeoutMs: Int): ChunkRelayProbeHttpResponse {
         require(domain.matches(Regex("[A-Za-z0-9.-]+"))) { "Invalid Worker hostname" }
-        val connection = URL("https://$domain$path").openConnection() as HttpsURLConnection
+        val connection = URL("https://$domain$path").openConnection(Proxy.NO_PROXY) as HttpsURLConnection
         try {
             connection.instanceFollowRedirects = false
             connection.requestMethod = method
