@@ -62,6 +62,19 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
+$deviceSmokeScript = Join-Path $PSScriptRoot 'worker-issue-101-device-smoke.ps1'
+if (-not (Test-Path $deviceSmokeScript)) {
+    throw "Device smoke script not found: $deviceSmokeScript"
+}
+$parseTokens = $null
+$parseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $deviceSmokeScript, [ref]$parseTokens, [ref]$parseErrors
+) | Out-Null
+if ($parseErrors) {
+    throw "Device smoke script has PowerShell syntax errors: $($parseErrors -join '; ')"
+}
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.1' -ExpectedVersionCode 57
 if ($LASTEXITCODE -ne 0) {
