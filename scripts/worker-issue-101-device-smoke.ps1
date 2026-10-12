@@ -122,8 +122,8 @@ function Get-TransportReport {
     })
     $tcpStalls = @($Lines | Where-Object { $_ -match 'MTProto Worker TCP stalled' })
     $writeFailures = @($Lines | Where-Object { $_ -match 'MTProto Worker Flowseal parity WS write failed' })
-    $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\\s)signed_dc=2(?:\\s|$)' })
-    $dc2Silent = @($dc2 | Where-Object { $_ -match 'down_bytes=0(?:\\D|$)' })
+    $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\s)signed_dc=2(?:\s|$)' })
+    $dc2Silent = @($dc2 | Where-Object { $_ -match 'down_bytes=0(?:\D|$)' })
     $dc2SilentUpBytes = [long]0
     foreach ($entry in $dc2Silent) {
         if ($entry -match 'up_bytes=([0-9]+)') {
