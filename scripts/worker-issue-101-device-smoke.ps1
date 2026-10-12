@@ -169,18 +169,33 @@ Write-Host 'No Enter prompts. Telegram will open; send/receive messages and larg
 Write-Host 'Application settings are restored when the run finishes, including after failures.'
 Write-Host 'The script never sends Telegram messages or uploads media itself.'
 
+# Capture failures and partial logcat before cleanup: a result.json with zero
+# phases must still explain WHY the acceptance test did not execute.
+$activePhase = ''
+$activeStage = 'preparation'
+$testError = $null
+$report.outcome = 'incomplete'
+$report.restoration = 'not_attempted'
+
 try {
     foreach ($phase in $phases) {
         $name = $phase.Name
+        $activePhase = $name
+        $activeStage = 'stop_previous_proxy'
         Write-Host ""
         Write-Host "==> Starting automatic $name phase ($PhaseSeconds seconds)"
         Stop-SmokeApp
+        $activeStage = 'configure_transport'
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_CONFIGURE' -Domain $phase.Domain -Transport $name
+        $activeStage = 'clear_logcat'
         Invoke-CheckedAdb -Arguments @('logcat','-c') | Out-Null
+        $activeStage = 'launch_proxy_app'
         Open-ProxyApp
         Start-Sleep -Seconds 3
+        $activeStage = 'start_proxy_service'
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_START'
 
+        $activeStage = 'launch_telegram'
         if (-not [string]::IsNullOrWhiteSpace($TelegramPackage)) {
             $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
             if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
@@ -206,31 +221,76 @@ try {
                 Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
             }
         }
+        $activeStage = 'observe_telegram'
         Write-Host "Use Telegram NOW for $PhaseSeconds seconds: messages, download and upload a large file."
         Start-Sleep -Seconds $PhaseSeconds
 
         # Bring our Activity foreground before requesting service stop on Android 14+.
+        $activeStage = 'stop_proxy_service'
         Open-ProxyApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_STOP'
         Start-Sleep -Seconds 3
 
+        $activeStage = 'capture_logcat'
         $logName = "$name.log"
         $logPath = Join-Path $sessionDir $logName
         $lines = @(Capture-SmokeLog -Destination $logPath)
         $phaseReport = Get-TransportReport -Transport $name -Lines $lines -LogName $logName
         $report.phases += $phaseReport
+        $activeStage = 'phase_completed'
+        $activePhase = ''
         Write-Host ("{0}: {1}; Worker-only closes={2}; bidirectional={3}; down=0={4}" -f
             $name, $phaseReport.observedNetworkStatus, $phaseReport.workerOnlyCloseCount,
             $phaseReport.bidirectionalBridgeCount, $phaseReport.zeroDownstreamCount)
     }
+    $report.outcome = 'completed_telegram_media_unverified'
+}
+catch {
+    $testError = $_
+    $report.outcome = 'failed_before_acceptance'
+    $report.failure = [ordered]@{
+        phase = $activePhase
+        stage = $activeStage
+        errorType = $_.Exception.GetType().FullName
+        message = $_.Exception.Message
+    }
+    $failurePath = Join-Path $sessionDir 'failure.txt'
+    @(
+        "Phase: $activePhase"
+        "Stage: $activeStage"
+        "Error: $($_.Exception.Message)"
+        "Stack: $($_.ScriptStackTrace)"
+    ) | Set-Content -LiteralPath $failurePath -Encoding UTF8
+    Write-Warning "Issue #101 smoke failed during phase '$activePhase', stage '$activeStage'."
 }
 finally {
+    # Preserve the failing stage's log BEFORE force-stop and restore, even if
+    # another ADB command raised an exception.
+    if ($null -ne $testError -and -not [string]::IsNullOrWhiteSpace($activePhase)) {
+        $partialName = "$activePhase.partial.log"
+        try {
+            $partialLogPath = Join-Path $sessionDir $partialName
+            $partialLines = @(Invoke-CheckedAdb -Arguments @(
+                'logcat','-d','-v','threadtime','-t','1500','-s',
+                'TgWsProxy:*','AndroidRuntime:*','ActivityManager:*','ActivityTaskManager:*'
+            ))
+            $partialLines | Set-Content -LiteralPath $partialLogPath -Encoding UTF8
+            $report.failure.partialLog = $partialName
+        }
+        catch {
+            $report.failure.captureError = $_.Exception.Message
+        }
+    }
+
     try {
         Stop-SmokeApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'
+        $report.restoration = 'restored'
         Write-Host 'Original Worker and route configuration restored.'
     }
     catch {
+        $report.restoration = 'failed'
+        $report.restorationError = $_.Exception.Message
         Write-Warning "Automatic restore failed: $_"
         Write-Warning 'Keep the debug APK installed; the original settings backup is still saved.'
     }
@@ -242,4 +302,7 @@ finally {
     Compress-Archive -Path (Join-Path $sessionDir '*') -DestinationPath $zipPath -Force
     Write-Host "LOGS TO SHARE: $zipPath"
     Write-Host "REPORT: $reportPath"
+}
+if ($null -ne $testError) {
+    throw $testError
 }
