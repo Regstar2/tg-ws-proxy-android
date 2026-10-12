@@ -18,6 +18,12 @@ if ([regex]::Matches($source, [regex]::Escape('[CmdletBinding()]')).Count -ne 1)
 if ($source -notmatch '\[string\]\$IPv6Address') {
     throw 'IPv6 address override missing'
 }
+if (-not $source.Contains('[string[]]$HelloProfiles') -or
+    -not $source.Contains('foreach ($helloMode in $HelloProfiles)') -or
+    -not $source.Contains("'-hello', "+'$helloMode'+")) {
+    throw 'Compact TLS Hello profile matrix is not passed to Android probe'
+}
+
 $functionAst = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
