@@ -25,6 +25,7 @@ import (
 
 type result struct {
  Network string `json:"network"`
+ HelloMode string `json:"hello_mode"`
  DialAddress string `json:"dial_address,omitempty"`
  Phase string `json:"phase"`
  Remote string `json:"remote,omitempty"`
@@ -38,15 +39,16 @@ type result struct {
 
 func main(){
  network:=flag.String("network","tcp4","tcp4 or tcp6")
+ helloMode:=flag.String("hello","default","default or compact TLS ClientHello")
  host:=flag.String("worker","","Flowseal workers.dev hostname")
  ip:=flag.String("ip","","numeric IP from host-side DNS")
  timeout:=flag.Duration("timeout",15*time.Second,"overall timeout")
  flag.Parse()
  start:=time.Now()
- r:=result{Network:*network,Phase:"validate",DialAddress:*ip}
- if (*network!="tcp4" && *network!="tcp6") || !validDomain(*host) || !validAddress(*ip,*network) || *timeout<2*time.Second || *timeout>time.Minute {
+ r:=result{Network:*network,HelloMode:*helloMode,Phase:"validate",DialAddress:*ip}
+ if (*network!="tcp4" && *network!="tcp6") || !validDomain(*host) || !validAddress(*ip,*network) || (*helloMode!="default" && *helloMode!="compact") || *timeout<2*time.Second || *timeout>time.Minute {
   r.Error="invalid arguments: .workers.dev host, -ip of matching family, 2..60s timeout required"
- }else{ probe(&r,*network,*host,*ip,*timeout) }
+ }else{ probe(&r,*network,*host,*ip,*timeout,*helloMode) }
  r.DurationMS=time.Since(start).Milliseconds()
  if err:=json.NewEncoder(os.Stdout).Encode(r);err!=nil{fmt.Fprintln(os.Stderr,err)}
 }
@@ -62,7 +64,7 @@ func validAddress(addr,network string)bool{
  return ip.To4()==nil
 }
 
-func probe(r *result,network,domain,address string,timeout time.Duration){
+func probe(r *result,network,domain,address string,timeout time.Duration,helloMode string){
  ctx,cancel:=context.WithTimeout(context.Background(),timeout);defer cancel()
  r.Phase="tcp_connect"
  raw,err:=(&net.Dialer{}).DialContext(ctx,network,net.JoinHostPort(address,"443"))
@@ -90,7 +92,7 @@ func probe(r *result,network,domain,address string,timeout time.Duration){
   r.Error="invalid RFC6455 upgrade response";return
  }
  r.Phase="send_tls_client_hello"
- hello,err:=makeTLSClientHello();if err!=nil{r.Error=err.Error();return}
+ hello,err:=makeTLSClientHelloMode(helloMode);if err!=nil{r.Error=err.Error();return}
  r.ClientHelloBytes=len(hello)
  frame,err:=maskedFrame(hello);if err!=nil{r.Error=err.Error();return}
  if _,err=conn.Write(frame);err!=nil{r.Error=err.Error();return}
@@ -119,8 +121,17 @@ func (*captureConn)SetDeadline(time.Time)error{return nil}
 func (*captureConn)SetReadDeadline(time.Time)error{return nil}
 func (*captureConn)SetWriteDeadline(time.Time)error{return nil}
 func makeTLSClientHello()([]byte,error){
+ return makeTLSClientHelloMode("default")
+}
+func makeTLSClientHelloMode(mode string)([]byte,error){
+ if mode!="default" && mode!="compact" {return nil,errors.New("invalid TLS hello mode")}
  c:=&captureConn{}
- _=tls.Client(c,&tls.Config{ServerName:"www.google.com",MinVersion:tls.VersionTLS12}).Handshake()
+ config:=&tls.Config{ServerName:"www.google.com",MinVersion:tls.VersionTLS12}
+ if mode=="compact" {
+  // X25519-only avoids Go's large hybrid PQ key share and isolates payload size.
+  config.CurvePreferences=[]tls.CurveID{tls.X25519}
+ }
+ _=tls.Client(c,config).Handshake()
  data:=c.b.Bytes()
  if len(data)<100{return nil,errors.New("TLS ClientHello generation failed")}
  return append([]byte(nil),data...),nil
