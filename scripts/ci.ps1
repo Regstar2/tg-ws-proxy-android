@@ -62,7 +62,7 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
-foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1')) {
+foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'worker-issue-101-ip-ab.ps1')) {
     $acceptanceScript = Join-Path $PSScriptRoot $acceptanceScriptName
     if (-not (Test-Path -LiteralPath $acceptanceScript)) {
         throw "Worker acceptance script not found: $acceptanceScript"
@@ -93,6 +93,13 @@ Invoke-CheckedCommand `
     -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ReportTest)
 
 & $dc2ReportTest
+
+$ipProbeMain = Join-Path $PSScriptRoot 'flowseal-ip-probe\main.go'
+$ipProbeTest = Join-Path $PSScriptRoot 'flowseal-ip-probe\main_test.go'
+Invoke-CheckedCommand `
+    -Label 'Test standalone Android Flowseal IPv4/IPv6 WebSocket probe' `
+    -FilePath $go.Source `
+    -Arguments @('test', $ipProbeMain, $ipProbeTest)
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.1' -ExpectedVersionCode 57
