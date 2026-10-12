@@ -24,3 +24,16 @@ func TestWebSocketFrameSizeLimit(t *testing.T){
  _,_,err:=readWSFrame(bufio.NewReader(bytes.NewReader(wire)))
  if err==nil{t.Fatal("oversized WS frame should be rejected")}
 }
+
+func TestCompactHelloIsSmallerAndValid(t *testing.T){
+ full,err:=makeTLSClientHelloMode("default")
+ if err!=nil{t.Fatal(err)}
+ compact,err:=makeTLSClientHelloMode("compact")
+ if err!=nil{t.Fatal(err)}
+ if len(compact)<100 || len(compact)>=len(full){
+  t.Fatalf("compact TLS hello size=%d should be smaller than default=%d",len(compact),len(full))
+ }
+ if compact[0]!=0x16 || full[0]!=0x16 {t.Fatal("TLS records missing handshake content type")}
+ if _,err=makeTLSClientHelloMode("unknown");err==nil{t.Fatal("unknown hello mode accepted")}
+ t.Logf("TLS ClientHello lengths: default=%d compact=%d",len(full),len(compact))
+}
