@@ -11,9 +11,9 @@ $windowsPowerShell = (Get-Command 'powershell.exe' -ErrorAction Stop).Source
 # A native command may write harmless diagnostics to stderr even on success.
 $okOutput = @(Invoke-WorkerSmokeNativeCommand -FilePath $windowsPowerShell -Arguments @(
     '-NoProfile', '-NonInteractive', '-Command',
-    '[Console]::Error.WriteLine("benign_stderr"); exit 0'
+    '[Console]::Error.WriteLine(424242); exit 0'
 ))
-if (-not ($okOutput | Where-Object { $_ -match 'benign_stderr' })) {
+if (-not ($okOutput | Where-Object { $_ -match '424242' })) {
     throw 'Expected to capture native stderr without aborting on exit code 0.'
 }
 
@@ -21,7 +21,7 @@ $failed = $false
 try {
     Invoke-WorkerSmokeNativeCommand -FilePath $windowsPowerShell -Arguments @(
         '-NoProfile', '-NonInteractive', '-Command',
-        '[Console]::Error.WriteLine("fatal_stderr"); exit 17'
+        '[Console]::Error.WriteLine(171717); exit 17'
     ) | Out-Null
 }
 catch {
