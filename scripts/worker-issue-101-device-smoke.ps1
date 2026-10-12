@@ -58,24 +58,11 @@ $package = 'com.amurcanov.tgwsproxy'
 $receiver = "$package/$package.WorkerSmokeConfigReceiver"
 $activity = "$package/$package.MainActivity"
 
+. (Join-Path $PSScriptRoot 'worker-issue-101-native-command.ps1')
+
 function Invoke-CheckedAdb {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    # Windows PowerShell 5.1 exposes native stderr as ErrorRecord. Some successful
-    # Android shell commands write diagnostics there; check the native exit code
-    # instead of allowing ErrorActionPreference=Stop to abort the entire smoke.
-    $priorErrorAction = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $output = @(& $adb -s $deviceId @Arguments 2>&1 | ForEach-Object { $_.ToString() })
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $priorErrorAction
-    }
-    if ($exitCode -ne 0) {
-        throw "ADB command failed (exit $exitCode): $($Arguments -join ' ') | $($output -join ' ')"
-    }
-    return $output
+    Invoke-WorkerSmokeNativeCommand -FilePath $adb -Arguments (@('-s', $deviceId) + $Arguments)
 }
 
 function Invoke-WorkerSmokeBroadcast {
