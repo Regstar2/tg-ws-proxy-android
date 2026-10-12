@@ -60,6 +60,7 @@ function Get-WorkerProbeSummary {
     $phaseProperty = $Result.PSObject.Properties['phase']
     $responseProperty = $Result.PSObject.Properties['response_bytes']
     $errorProperty = $Result.PSObject.Properties['error']
+    $pongProperty = $Result.PSObject.Properties['pong_received']
     $phase = if ($null -ne $phaseProperty -and $null -ne $phaseProperty.Value) {
         [string]$phaseProperty.Value
     } else { 'unknown' }
@@ -75,6 +76,7 @@ function Get-WorkerProbeSummary {
         status = if ($phase -eq 'upstream_reply_received' -and $responseBytes -gt 0) { 'PASS' } else { 'FAIL' }
         phase = $phase
         response_bytes = $responseBytes
+        pong_received = ($null -ne $pongProperty -and $pongProperty.Value -eq $true)
         error = $errorMessage
     }
 }
@@ -176,7 +178,7 @@ try {
             }
             $results += $result
             $summary = Get-WorkerProbeSummary -Result $result
-            Write-Host "$($family.Name)/$helloMode : $($summary.status) | phase=$($summary.phase) | response_bytes=$($summary.response_bytes) | error=$($summary.error)"
+            Write-Host "$($family.Name)/$helloMode : $($summary.status) | phase=$($summary.phase) | pong=$($summary.pong_received) | response_bytes=$($summary.response_bytes) | error=$($summary.error)"
             }
         }
     }
