@@ -20,7 +20,7 @@ if ($source -notmatch '\[string\]\$IPv6Address') {
 }
 if (-not $source.Contains('[string[]]$HelloProfiles') -or
     -not $source.Contains('foreach ($helloMode in $HelloProfiles)') -or
-    -not $source.Contains("'-hello', "+'$helloMode'+")) {
+    -not $source.Contains("'-hello', "+'$helloMode'+')) {
     throw 'Compact TLS Hello profile matrix is not passed to Android probe'
 }
 
