@@ -32,6 +32,7 @@ type result struct {
  TLSVersion string `json:"tls_version,omitempty"`
  UpgradeStatus int `json:"upgrade_status,omitempty"`
  ClientHelloBytes int `json:"client_hello_bytes,omitempty"`
+ PongReceived bool `json:"pong_received"`
  ResponseBytes int `json:"response_bytes,omitempty"`
  DurationMS int64 `json:"duration_ms"`
  Error string `json:"error,omitempty"`
@@ -91,6 +92,10 @@ func probe(r *result,network,domain,address string,timeout time.Duration,helloMo
  if resp.Header.Get("Sec-WebSocket-Accept")!=base64.StdEncoding.EncodeToString(accept[:]) || !strings.EqualFold(resp.Header.Get("Upgrade"),"websocket"){
   r.Error="invalid RFC6455 upgrade response";return
  }
+ r.Phase="send_ws_ping"
+ pingPayload:=[]byte("tgws101")
+ pingFrame,err:=maskedPing(pingPayload);if err!=nil{r.Error=err.Error();return}
+ if _,err=conn.Write(pingFrame);err!=nil{r.Error=err.Error();return}
  r.Phase="send_tls_client_hello"
  hello,err:=makeTLSClientHelloMode(helloMode);if err!=nil{r.Error=err.Error();return}
  r.ClientHelloBytes=len(hello)
@@ -103,6 +108,8 @@ func probe(r *result,network,domain,address string,timeout time.Duration,helloMo
   switch opcode {
   case 0x2,0x0:
    if len(payload)>0{r.ResponseBytes=len(payload);r.Phase="upstream_reply_received";return}
+  case 0xa:
+   if bytes.Equal(payload,pingPayload){r.PongReceived=true}
   case 0x8:r.Error="Worker closed WebSocket";return
   case 0x9:
    frame,err:=maskedPong(payload);if err!=nil{r.Error=err.Error();return}
@@ -149,6 +156,12 @@ func maskedFrame(data []byte)([]byte,error){
  buf.Write(key[:])
  for i,b:=range data{buf.WriteByte(b^key[i%4])}
  return buf.Bytes(),nil
+}
+func maskedPing(data []byte)([]byte,error){
+ frame,err:=maskedPong(data)
+ if err!=nil{return nil,err}
+ frame[0]=0x89
+ return frame,nil
 }
 func maskedPong(data []byte)([]byte,error){
  if len(data)>125{return nil,errors.New("invalid ping payload")}
