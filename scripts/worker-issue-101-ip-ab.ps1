@@ -182,6 +182,8 @@ finally {
         }
         catch { Write-Warning "Temporary probe binary cleanup failed: $_" }
     }
+    $ipv6Source = 'windows_dns'
+    if ($IPv6Address) { $ipv6Source = 'explicit_prior_device_log' }
     $report = [ordered]@{
         issue = 101
         target = 'Flowseal Legacy WebSocket'
@@ -190,7 +192,7 @@ finally {
         rounds = $Rounds
         ipv4Addresses = $ipv4
         ipv6Addresses = $ipv6
-        ipv6AddressSource = if ($IPv6Address) { 'explicit_prior_device_log' } else { 'windows_dns' }
+        ipv6AddressSource = $ipv6Source
         scope = 'Android -> Cloudflare Worker /apiws -> www.google.com:443 TLS response'
         limitation = 'Does not test Telegram DC2; failure can also indicate upstream Google connection restrictions'
         results = $results
