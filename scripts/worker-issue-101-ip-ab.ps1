@@ -13,7 +13,9 @@ param(
     [string]$IPv6Address = '',
 
     [ValidateSet('default', 'compact')]
-    [string[]]$HelloProfiles = @('default', 'compact')
+    [string[]]$HelloProfiles = @('default', 'compact'),
+
+    [switch]$CompareHost
 )
 
 Set-StrictMode -Version Latest
@@ -85,6 +87,7 @@ $out = Join-Path $root 'artifacts\worker-issue-101'
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $exe = Join-Path $out "flowseal-ip-probe-$stamp"
+$hostExe = Join-Path $out "flowseal-ip-probe-host-$stamp.exe"
 $reportPath = Join-Path $out "flowseal-ip-ab-$stamp.json"
 $remote = "/data/local/tmp/tgwsproxy-flowseal-ip-probe-101"
 
@@ -102,12 +105,22 @@ $previousGOOS = $env:GOOS
 $previousGOARCH = $env:GOARCH
 $previousCGO = $env:CGO_ENABLED
 $results = @()
+$hostResults = @()
 $uploaded = $false
 try {
     Push-Location $root
     try {
         & $go test $source $unitTest
         if ($LASTEXITCODE -ne 0) { throw 'Flowseal IP probe unit tests failed' }
+
+        if ($CompareHost) {
+            # The exact Go probe is executed on Windows as a control.
+            $env:GOOS = 'windows'
+            $env:GOARCH = 'amd64'
+            $env:CGO_ENABLED = '0'
+            & $go build -trimpath -o $hostExe $source
+            if ($LASTEXITCODE -ne 0) { throw 'Windows host-control probe compilation failed' }
+        }
 
         $env:GOOS = 'android'
         $env:GOARCH = 'arm64'
@@ -182,6 +195,43 @@ try {
             }
         }
     }
+
+    if ($CompareHost) {
+        # Compare compact TLS Hello from this PC to the same Cloudflare edge
+        # addresses; a success here distinguishes device/path-specific failure.
+        Write-Host '==> Running host control on Windows (compact Hello, each IP family)'
+        foreach ($family in $families) {
+            if ($family.Addresses.Count -eq 0) { continue }
+            $ip = $family.Addresses[0]
+            try {
+                $lines = @(Invoke-WorkerSmokeNativeCommand -FilePath $hostExe -Arguments @(
+                    '-network', $family.Name,
+                    '-worker', $WorkerDomain,
+                    '-ip', $ip,
+                    '-hello', 'compact',
+                    '-timeout', "$($TimeoutSeconds)s"
+                ))
+                $jsonLines = @($lines | Where-Object { $_.TrimStart().StartsWith('{') })
+                if ($jsonLines.Count -eq 0) {
+                    throw "No JSON from Windows probe: $($lines -join ' ')"
+                }
+                $result = $jsonLines[-1] | ConvertFrom-Json
+            }
+            catch {
+                $result = [pscustomobject]@{
+                    network = $family.Name
+                    hello_mode = 'compact'
+                    dial_address = $ip
+                    phase = 'host_execution'
+                    error = $_.Exception.Message
+                    response_bytes = 0
+                }
+            }
+            $hostResults += $result
+            $summary = Get-WorkerProbeSummary -Result $result
+            Write-Host "Host $($family.Name)/compact: $($summary.status) | phase=$($summary.phase) | pong=$($summary.pong_received) | response_bytes=$($summary.response_bytes) | error=$($summary.error)"
+        }
+    }
 }
 finally {
     if ($uploaded) {
@@ -201,12 +251,14 @@ finally {
         domain = $WorkerDomain
         rounds = $Rounds
         helloProfiles = $HelloProfiles
+        compareHost = [bool]$CompareHost
         ipv4Addresses = $ipv4
         ipv6Addresses = $ipv6
         ipv6AddressSource = $ipv6Source
         scope = 'Android -> Cloudflare Worker /apiws -> www.google.com:443 TLS response'
         limitation = 'Does not test Telegram DC2; failure can also indicate upstream Google connection restrictions'
         results = $results
+        hostResults = $hostResults
     }
     $report | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $reportPath -Encoding UTF8
     Write-Host "REPORT TO SHARE: $reportPath"
