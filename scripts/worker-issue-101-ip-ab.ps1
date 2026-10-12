@@ -10,7 +10,10 @@ param(
     [ValidateRange(2, 60)]
     [int]$TimeoutSeconds = 15,
 
-    [string]$IPv6Address = ''
+    [string]$IPv6Address = '',
+
+    [ValidateSet('default', 'compact')]
+    [string[]]$HelloProfiles = @('default', 'compact')
 )
 
 Set-StrictMode -Version Latest
@@ -86,6 +89,7 @@ $remote = "/data/local/tmp/tgwsproxy-flowseal-ip-probe-101"
 Write-Host "Testing on Android device: $device"
 Write-Host 'This test does NOT change TgWsProxy or Telegram settings.'
 Write-Host 'It tests WebSocket TCP forwarding to www.google.com, not MTProto to Telegram DC2.'
+Write-Host "TLS hello profiles: $($HelloProfiles -join ', ')"
 Write-Host "Resolved IPv4: $($ipv4 -join ', ')"
 Write-Host "IPv6 target: $($ipv6 -join ', ')"
 if ($IPv6Address) {
@@ -143,13 +147,15 @@ try {
             }
 
             $ip = $family.Addresses[($round - 1) % $family.Addresses.Count]
-            Write-Host "Round $round/$Rounds | $($family.Name) | $ip ..."
+            foreach ($helloMode in $HelloProfiles) {
+            Write-Host "Round $round/$Rounds | $($family.Name) | $ip | hello=$helloMode ..."
             try {
                 $lines = @(Invoke-WorkerSmokeNativeCommand -FilePath $adb -Arguments @(
                     '-s', $device, 'shell', $remote,
                     '-network', $family.Name,
                     '-worker', $WorkerDomain,
                     '-ip', $ip,
+                    '-hello', $helloMode,
                     '-timeout', "$($TimeoutSeconds)s"
                 ))
                 $jsonLines = @($lines | Where-Object { $_.TrimStart().StartsWith('{') })
@@ -161,6 +167,7 @@ try {
             catch {
                 $result = [pscustomobject]@{
                     network = $family.Name
+                    hello_mode = $helloMode
                     dial_address = $ip
                     phase = 'adb_execution'
                     error = $_.Exception.Message
@@ -169,7 +176,8 @@ try {
             }
             $results += $result
             $summary = Get-WorkerProbeSummary -Result $result
-            Write-Host "$($family.Name): $($summary.status) | phase=$($summary.phase) | response_bytes=$($summary.response_bytes) | error=$($summary.error)"
+            Write-Host "$($family.Name)/$helloMode : $($summary.status) | phase=$($summary.phase) | response_bytes=$($summary.response_bytes) | error=$($summary.error)"
+            }
         }
     }
 }
@@ -190,6 +198,7 @@ finally {
         device = $device
         domain = $WorkerDomain
         rounds = $Rounds
+        helloProfiles = $HelloProfiles
         ipv4Addresses = $ipv4
         ipv6Addresses = $ipv6
         ipv6AddressSource = $ipv6Source
