@@ -24,6 +24,12 @@ if (-not $source.Contains('[string[]]$HelloProfiles') -or
     throw 'Compact TLS Hello profile matrix is not passed to Android probe'
 }
 
+if (-not $source.Contains('[switch]$CompareHost') -or
+    -not $source.Contains('Windows host-control probe compilation failed') -or
+    -not $source.Contains('hostResults = $hostResults')) {
+    throw 'Optional Windows control must record results and preserve Android data'
+}
+
 $functionAst = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
