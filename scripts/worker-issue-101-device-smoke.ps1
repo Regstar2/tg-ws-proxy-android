@@ -118,10 +118,23 @@ function Get-TransportReport {
         $_ -match ("worker_transport=" + [regex]::Escape($Transport) + "(\s|$)")
     })
     $errors = @($Lines | Where-Object {
-        $_ -match 'worker_protocol_incompatible|worker_websocket_handshake_failed|worker_connect_timeout|connection timed out|broken pipe|all_workers_failed'
+        $_ -match 'worker_protocol_incompatible|worker_websocket_handshake_failed|worker_connect_timeout|connection timed out|broken pipe|all_workers_failed|MTProto Worker TCP stalled|MTProto Worker Flowseal parity WS write failed|close_reason=read_error|error=write'
     })
+    $tcpStalls = @($Lines | Where-Object { $_ -match 'MTProto Worker TCP stalled' })
+    $writeFailures = @($Lines | Where-Object { $_ -match 'MTProto Worker Flowseal parity WS write failed' })
+    $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\\s)signed_dc=2(?:\\s|$)' })
+    $dc2Silent = @($dc2 | Where-Object { $_ -match 'down_bytes=0(?:\\D|$)' })
+    $dc2SilentUpBytes = [long]0
+    foreach ($entry in $dc2Silent) {
+        if ($entry -match 'up_bytes=([0-9]+)') {
+            $dc2SilentUpBytes += [long]$Matches[1]
+        }
+    }
     $status = if ($workerOnly.Count -eq 0) {
         'no_worker_sessions_observed'
+    } elseif ($dc2.Count -ge 3 -and $dc2Silent.Count -ge 3 -and
+              (2 * $dc2Silent.Count) -ge $dc2.Count) {
+        'dc2_no_downstream_regression'
     } elseif ($bidirectional.Count -eq 0) {
         'no_bidirectional_sessions_observed'
     } elseif ($matchedTransport.Count -eq 0) {
@@ -140,6 +153,11 @@ function Get-TransportReport {
         transportLogLines = $routes.Count
         selectedTransportLines = $matchedTransport.Count
         errorLogLines = $errors.Count
+        dc2CloseCount = $dc2.Count
+        dc2ZeroDownstreamCount = $dc2Silent.Count
+        dc2ZeroDownstreamUpBytes = $dc2SilentUpBytes
+        tcpStallLogLines = $tcpStalls.Count
+        websocketWriteFailureLines = $writeFailures.Count
         log = $LogName
     }
 }
@@ -242,6 +260,9 @@ try {
         Write-Host ("{0}: {1}; Worker-only closes={2}; bidirectional={3}; down=0={4}" -f
             $name, $phaseReport.observedNetworkStatus, $phaseReport.workerOnlyCloseCount,
             $phaseReport.bidirectionalBridgeCount, $phaseReport.zeroDownstreamCount)
+        Write-Host ("DC2: {0}/{1} sessions with zero downstream; upstream bytes without response={2}; TCP stalls={3}" -f
+            $phaseReport.dc2ZeroDownstreamCount, $phaseReport.dc2CloseCount,
+            $phaseReport.dc2ZeroDownstreamUpBytes, $phaseReport.tcpStallLogLines)
     }
     $report['outcome'] = 'completed_telegram_media_unverified'
 }
