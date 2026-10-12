@@ -37,3 +37,12 @@ func TestCompactHelloIsSmallerAndValid(t *testing.T){
  if _,err=makeTLSClientHelloMode("unknown");err==nil{t.Fatal("unknown hello mode accepted")}
  t.Logf("TLS ClientHello lengths: default=%d compact=%d",len(full),len(compact))
 }
+
+func TestMaskedPingFraming(t *testing.T){
+ wire,err:=maskedPing([]byte("tgws101"));if err!=nil{t.Fatal(err)}
+ if wire[0]!=0x89 || wire[1]&0x80==0 {t.Fatalf("invalid masked ping: %x",wire[:2])}
+ opcode,payload,err:=readWSFrame(bufio.NewReader(bytes.NewReader(wire)))
+ if err!=nil || opcode!=9 || !bytes.Equal(payload,[]byte("tgws101")) {
+  t.Fatalf("ping encoding mismatch: opcode=%d payload=%q err=%v",opcode,payload,err)
+ }
+}
