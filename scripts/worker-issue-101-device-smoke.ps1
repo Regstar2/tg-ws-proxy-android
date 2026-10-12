@@ -174,8 +174,8 @@ Write-Host 'The script never sends Telegram messages or uploads media itself.'
 $activePhase = ''
 $activeStage = 'preparation'
 $testError = $null
-$report.outcome = 'incomplete'
-$report.restoration = 'not_attempted'
+$report['outcome'] = 'incomplete'
+$report['restoration'] = 'not_attempted'
 
 try {
     foreach ($phase in $phases) {
@@ -197,11 +197,11 @@ try {
 
         $activeStage = 'launch_telegram'
         if (-not [string]::IsNullOrWhiteSpace($TelegramPackage)) {
-            $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
-            if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
-                try {
-                    # am start avoids the diagnostic stderr emitted by monkey on
-                    # Windows PowerShell, and uses the real installed launch intent.
+            try {
+                # Launching Telegram is best-effort: neither package discovery nor
+                # ActivityManager errors should abort proxy data collection.
+                $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
+                if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
                     $launchOutput = @(Invoke-CheckedAdb -Arguments @(
                         'shell', 'am', 'start',
                         '-a', 'android.intent.action.MAIN',
@@ -212,13 +212,13 @@ try {
                         throw "Android did not resolve the Telegram launcher: $($launchOutput -join ' ')"
                     }
                     Write-Host "Telegram started: $TelegramPackage"
+                } else {
+                    Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
                 }
-                catch {
-                    Write-Warning "Telegram could not be opened automatically: $_"
-                    Write-Warning 'Open Telegram manually; proxy and log capture will continue.'
-                }
-            } else {
-                Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
+            }
+            catch {
+                Write-Warning "Telegram could not be opened automatically: $_"
+                Write-Warning 'Open Telegram manually; proxy and log capture will continue.'
             }
         }
         $activeStage = 'observe_telegram'
@@ -243,12 +243,12 @@ try {
             $name, $phaseReport.observedNetworkStatus, $phaseReport.workerOnlyCloseCount,
             $phaseReport.bidirectionalBridgeCount, $phaseReport.zeroDownstreamCount)
     }
-    $report.outcome = 'completed_telegram_media_unverified'
+    $report['outcome'] = 'completed_telegram_media_unverified'
 }
 catch {
     $testError = $_
-    $report.outcome = 'failed_before_acceptance'
-    $report.failure = [ordered]@{
+    $report['outcome'] = 'failed_before_acceptance'
+    $report['failure'] = [ordered]@{
         phase = $activePhase
         stage = $activeStage
         errorType = $_.Exception.GetType().FullName
@@ -275,22 +275,22 @@ finally {
                 'TgWsProxy:*','AndroidRuntime:*','ActivityManager:*','ActivityTaskManager:*'
             ))
             $partialLines | Set-Content -LiteralPath $partialLogPath -Encoding UTF8
-            $report.failure.partialLog = $partialName
+            $report['failure']['partialLog'] = $partialName
         }
         catch {
-            $report.failure.captureError = $_.Exception.Message
+            $report['failure']['captureError'] = $_.Exception.Message
         }
     }
 
     try {
         Stop-SmokeApp
         Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'
-        $report.restoration = 'restored'
+        $report['restoration'] = 'restored'
         Write-Host 'Original Worker and route configuration restored.'
     }
     catch {
-        $report.restoration = 'failed'
-        $report.restorationError = $_.Exception.Message
+        $report['restoration'] = 'failed'
+        $report['restorationError'] = $_.Exception.Message
         Write-Warning "Automatic restore failed: $_"
         Write-Warning 'Keep the debug APK installed; the original settings backup is still saved.'
     }
