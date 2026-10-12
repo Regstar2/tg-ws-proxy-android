@@ -86,6 +86,14 @@ Invoke-CheckedCommand `
 # CI is invoked by pwsh on GitHub Actions; verify both PowerShell engines.
 & $nativeAdbTest
 
+$dc2ReportTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-dc2-report-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Test DC2 zero-downstream detection under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ReportTest)
+
+& $dc2ReportTest
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.1' -ExpectedVersionCode 57
 if ($LASTEXITCODE -ne 0) {
