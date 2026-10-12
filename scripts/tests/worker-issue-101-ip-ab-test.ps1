@@ -38,9 +38,10 @@ if ($f.status -ne 'FAIL' -or $f.response_bytes -ne 0 -or $f.error -ne 'i/o timeo
     throw 'Sparse JSON failure was not handled safely'
 }
 
-$good = '{"network":"tcp6","phase":"upstream_reply_received","response_bytes":512}' | ConvertFrom-Json
+$good = '{"network":"tcp6","phase":"upstream_reply_received","response_bytes":512,"pong_received":true}' | ConvertFrom-Json
 $g = Get-WorkerProbeSummary -Result $good
-if ($g.status -ne 'PASS' -or $g.response_bytes -ne 512 -or $g.error -ne '') {
+if ($g.status -ne 'PASS' -or $g.response_bytes -ne 512 -or
+    -not $g.pong_received -or $g.error -ne '') {
     throw 'Sparse JSON success was not handled safely'
 }
 
