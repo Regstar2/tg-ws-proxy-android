@@ -60,9 +60,20 @@ $activity = "$package/$package.MainActivity"
 
 function Invoke-CheckedAdb {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $output = @(& $adb -s $deviceId @Arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw "ADB command failed: $($Arguments -join ' ') | $($output -join ' ')"
+    # Windows PowerShell 5.1 exposes native stderr as ErrorRecord. Some successful
+    # Android shell commands write diagnostics there; check the native exit code
+    # instead of allowing ErrorActionPreference=Stop to abort the entire smoke.
+    $priorErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& $adb -s $deviceId @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $priorErrorAction
+    }
+    if ($exitCode -ne 0) {
+        throw "ADB command failed (exit $exitCode): $($Arguments -join ' ') | $($output -join ' ')"
     }
     return $output
 }
@@ -186,7 +197,24 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($TelegramPackage)) {
             $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
             if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
-                $null = & $adb -s $deviceId shell monkey -p $TelegramPackage -c android.intent.category.LAUNCHER 1 2>&1
+                try {
+                    # am start avoids the diagnostic stderr emitted by monkey on
+                    # Windows PowerShell, and uses the real installed launch intent.
+                    $launchOutput = @(Invoke-CheckedAdb -Arguments @(
+                        'shell', 'am', 'start',
+                        '-a', 'android.intent.action.MAIN',
+                        '-c', 'android.intent.category.LAUNCHER',
+                        '-p', $TelegramPackage
+                    ))
+                    if (($launchOutput -join ' ') -match 'unable to resolve|Error:|SecurityException') {
+                        throw "Android did not resolve the Telegram launcher: $($launchOutput -join ' ')"
+                    }
+                    Write-Host "Telegram started: $TelegramPackage"
+                }
+                catch {
+                    Write-Warning "Telegram could not be opened automatically: $_"
+                    Write-Warning 'Open Telegram manually; proxy and log capture will continue.'
+                }
             } else {
                 Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
             }
