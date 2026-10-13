@@ -62,7 +62,7 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
-foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'worker-issue-101-ip-ab.ps1', 'tests/worker-issue-101-ip-ab-test.ps1')) {
+foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'worker-issue-101-ip-ab.ps1', 'tests/worker-issue-101-ip-ab-test.ps1', 'tests/worker-issue-101-dc2-ab-test.ps1')) {
     $acceptanceScript = Join-Path $PSScriptRoot $acceptanceScriptName
     if (-not (Test-Path -LiteralPath $acceptanceScript)) {
         throw "Worker acceptance script not found: $acceptanceScript"
@@ -93,6 +93,13 @@ Invoke-CheckedCommand `
     -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ReportTest)
 
 & $dc2ReportTest
+
+$dc2ABTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-dc2-ab-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Test DC2 Legacy A/B target selection and fixture restoration under PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ABTest)
+& $dc2ABTest
 
 $ipAbPowerShellTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-ip-ab-test.ps1'
 Invoke-CheckedCommand `
