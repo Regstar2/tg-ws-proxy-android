@@ -108,6 +108,13 @@ Invoke-CheckedCommand `
     -FilePath $go.Source `
     -Arguments @('test', $ipProbeMain, $ipProbeTest)
 
+$node = Get-Command node -ErrorAction Stop
+$workerCloudflareTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-cloudflare-diagnostic.test.mjs'
+Invoke-CheckedCommand `
+    -Label 'Test independent Cloudflare Flowseal diagnostic relay and error handling' `
+    -FilePath $node.Source `
+    -Arguments @('--test', $workerCloudflareTest)
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.1' -ExpectedVersionCode 57
 if ($LASTEXITCODE -ne 0) {
