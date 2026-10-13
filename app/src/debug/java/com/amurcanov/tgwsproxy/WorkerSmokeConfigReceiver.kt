@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import androidx.core.content.ContextCompat
+import com.amurcanov.tgwsproxy.worker.DcIpTexts
 import com.amurcanov.tgwsproxy.worker.FlowsealDcPreset
 import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.WorkerTransport
@@ -32,6 +33,12 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                     val transport = intent.getStringExtra(EXTRA_TRANSPORT).orEmpty()
                     require(WorkerTransport.entries.any { it.prefValue == transport }) {
                         "Unknown Worker transport"
+                    }
+                    val dc2Target = intent.getStringExtra(EXTRA_DC2_TARGET).orEmpty()
+                    require(dc2Target.isEmpty() ||
+                        (transport == WorkerTransport.LEGACY_WEBSOCKET.prefValue &&
+                            dc2Target in DC2_AB_TARGETS)) {
+                        "DC2 comparison allows only legacy_websocket with approved DC2 targets"
                     }
                     if (!backup.getBoolean("snapshot_exists", false)) {
                         val editor = backup.edit()
@@ -61,7 +68,7 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                             "Could not back up Worker settings"
                         }
                     }
-                    check(prefs.edit()
+                    val testEditor = prefs.edit()
                         .putString("worker_domain", domain)
                         .putString("worker_transport", transport)
                         .putBoolean("worker_enabled", true)
@@ -72,8 +79,17 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
                         .putString("route_policy_mobile_v1", workerOnlyPolicy)
                         .putString("route_policy_unknown_v1", workerOnlyPolicy)
                         .putInt("route_policy_defaults_version", RouteDefaultsMigration.DEFAULTS_VERSION_1800)
-                        .commit()
-                    ) { "Could not configure temporary Worker settings" }
+                    if (dc2Target.isNotEmpty()) {
+                        // Keep logical DC2 intact: only the Worker TCP destination
+                        // is varied via the existing FLOWSEAL_DC_MAP runtime path.
+                        testEditor.putString(DcIpTexts.KEY_DC2, dc2Target)
+                            .putString(
+                                ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE,
+                                WorkerDestinationMode.FLOWSEAL_DC_MAP.prefValue,
+                            )
+                            .putBoolean(FlowsealDcPreset.PREF_ENABLED, false)
+                    }
+                    check(testEditor.commit()) { "Could not configure temporary Worker settings" }
                     setResultCode(RESULT_OK)
                     setResultData("configured")
                 }
@@ -190,15 +206,18 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
         private const val RESULT_ERROR = 102
         private const val EXTRA_DOMAIN = "domain"
         private const val EXTRA_TRANSPORT = "transport"
+        private const val EXTRA_DC2_TARGET = "dc2_target"
+        private val DC2_AB_TARGETS = setOf("149.154.167.51", "149.154.167.220")
         private val STRING_KEYS = listOf(
             "worker_domain", "worker_transport", "connection_mode", "last_runtime_ips",
             "route_policy_wifi_v1", "route_policy_mobile_v1", "route_policy_unknown_v1",
+            DcIpTexts.KEY_DC2, ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE,
         )
         private val workerOnlyPolicy = "routes=worker_ws;preferred=worker_ws;" +
             "strategy=${AutoStrategy.CF_PREFERRED.prefValue};fallback=0"
         private val BOOLEAN_KEYS = listOf(
             "worker_enabled", "worker_pool_enabled_v1", "worker_pool_migration_done_v1",
-            "last_proxy_port_default_1443_migrated",
+            "last_proxy_port_default_1443_migrated", FlowsealDcPreset.PREF_ENABLED,
         )
         private val INT_KEYS = listOf("last_proxy_port", "last_proxy_pool")
         const val ACTION_START = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_START"
