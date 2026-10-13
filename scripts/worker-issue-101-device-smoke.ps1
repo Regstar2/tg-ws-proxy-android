@@ -13,12 +13,19 @@ param(
 
     [string]$TelegramPackage = 'org.telegram.messenger',
     [switch]$LegacyOnly,
+    # Compare two physical DC2 endpoints via the same Legacy Worker.
+    # This is an on-device Telegram smoke, not a TLS ClientHello probe.
+    [switch]$LegacyDC2AB,
     [switch]$InstallSignedDebug,
     [string]$OutputRoot = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($LegacyDC2AB -and -not $LegacyOnly) {
+    throw 'Legacy DC2 A/B is exclusively a LegacyOnly device smoke; pass -LegacyOnly.'
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
@@ -69,7 +76,8 @@ function Invoke-WorkerSmokeBroadcast {
     param(
         [Parameter(Mandatory = $true)][string]$Action,
         [string]$Domain = '',
-        [string]$Transport = ''
+        [string]$Transport = '',
+        [string]$Dc2Target = ''
     )
     $arguments = @(
         'shell', 'am', 'broadcast', '--include-stopped-packages',
@@ -77,6 +85,9 @@ function Invoke-WorkerSmokeBroadcast {
     )
     if ($Action -eq 'WORKER_SMOKE_CONFIGURE') {
         $arguments += @('--es', 'domain', $Domain, '--es', 'transport', $Transport)
+        if (-not [string]::IsNullOrWhiteSpace($Dc2Target)) {
+            $arguments += @('--es', 'dc2_target', $Dc2Target)
+        }
     }
     $output = @(Invoke-CheckedAdb -Arguments $arguments)
     if (-not ($output | Where-Object { $_ -match 'result=101' })) {
@@ -172,13 +183,22 @@ $report = [ordered]@{
     phaseSeconds = $PhaseSeconds
     phases = @()
     note = 'Two-way byte counters do NOT verify Telegram messages/media. Check Telegram UI separately.'
+    comparison = if ($LegacyDC2AB) { 'legacy_dc2_dst_ab' } else { 'none' }
 }
 
-$phases = @(
-    @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain }
-)
-if (-not $LegacyOnly) {
-    $phases += @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain }
+$phases = @()
+if ($LegacyDC2AB) {
+    $phases = @(
+        @{ Name = 'legacy_dc2_51'; Label = 'Flowseal Legacy DC2 via 149.154.167.51'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.51' },
+        @{ Name = 'legacy_dc2_220'; Label = 'Flowseal Legacy DC2 via 149.154.167.220'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.220' }
+    )
+} else {
+    $phases = @(
+        @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '' }
+    )
+    if (-not $LegacyOnly) {
+        $phases += @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain; Transport = 'chunk_relay'; Dc2Target = '' }
+    }
 }
 
 Write-Host "ADB device: $deviceId"
@@ -198,13 +218,15 @@ $report['restoration'] = 'not_attempted'
 try {
     foreach ($phase in $phases) {
         $name = $phase.Name
+        $transport = $phase.Transport
+        $dc2Target = $phase.Dc2Target
         $activePhase = $name
         $activeStage = 'stop_previous_proxy'
         Write-Host ""
         Write-Host "==> Starting automatic $name phase ($PhaseSeconds seconds)"
         Stop-SmokeApp
         $activeStage = 'configure_transport'
-        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_CONFIGURE' -Domain $phase.Domain -Transport $name
+        Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_CONFIGURE' -Domain $phase.Domain -Transport $transport -Dc2Target $dc2Target
         $activeStage = 'clear_logcat'
         Invoke-CheckedAdb -Arguments @('logcat','-c') | Out-Null
         $activeStage = 'launch_proxy_app'
@@ -253,7 +275,18 @@ try {
         $logName = "$name.log"
         $logPath = Join-Path $sessionDir $logName
         $lines = @(Capture-SmokeLog -Destination $logPath)
-        $phaseReport = Get-TransportReport -Transport $name -Lines $lines -LogName $logName
+        $phaseReport = Get-TransportReport -Transport $transport -Lines $lines -LogName $logName
+        $phaseReport['name'] = $name
+        if ($LegacyDC2AB) {
+            $phaseReport['dc2ExpectedWorkerDst'] = $dc2Target
+            # Verify the actual native selected route, not just a saved UI pref.
+            $dstPattern = 'worker_dst=' + [regex]::Escape($dc2Target) + '(?:\s|$)'
+            $phaseReport['dc2ExpectedDestinationLogLines'] = @($lines | Where-Object {
+                $_ -match 'dc=2|DC2|signed_dc=2' -and $_ -match $dstPattern
+            }).Count
+            $phaseReport['dc2ExpectedDestinationObserved'] =
+                $phaseReport['dc2ExpectedDestinationLogLines'] -gt 0
+        }
         $report.phases += $phaseReport
         $activeStage = 'phase_completed'
         $activePhase = ''
@@ -263,6 +296,10 @@ try {
         Write-Host ("DC2: {0}/{1} sessions with zero downstream; upstream bytes without response={2}; TCP stalls={3}" -f
             $phaseReport.dc2ZeroDownstreamCount, $phaseReport.dc2CloseCount,
             $phaseReport.dc2ZeroDownstreamUpBytes, $phaseReport.tcpStallLogLines)
+        if ($LegacyDC2AB) {
+            Write-Host ("DC2 expected physical dst={0}; observed in native log={1}" -f
+                $dc2Target, $phaseReport.dc2ExpectedDestinationObserved)
+        }
     }
     $report['outcome'] = 'completed_telegram_media_unverified'
 }
