@@ -173,6 +173,18 @@ function Get-TransportReport {
     }
 }
 
+function Get-Dc2ABDestinationEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Lines,
+        [Parameter(Mandatory = $true)][string]$ExpectedWorkerDst
+    )
+    $dstPattern = '(?:^|\s)worker_dst=' + [regex]::Escape($ExpectedWorkerDst) + '(?:\s|$)'
+    $matched = @($Lines | Where-Object {
+        $_ -match 'dc=2|DC2|signed_dc=2' -and $_ -match $dstPattern
+    })
+    return $matched.Count
+}
+
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $sessionDir = Join-Path $OutputRoot "issue-101-$timestamp"
 New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
@@ -280,10 +292,7 @@ try {
         if ($LegacyDC2AB) {
             $phaseReport['dc2ExpectedWorkerDst'] = $dc2Target
             # Verify the actual native selected route, not just a saved UI pref.
-            $dstPattern = 'worker_dst=' + [regex]::Escape($dc2Target) + '(?:\s|$)'
-            $phaseReport['dc2ExpectedDestinationLogLines'] = @($lines | Where-Object {
-                $_ -match 'dc=2|DC2|signed_dc=2' -and $_ -match $dstPattern
-            }).Count
+            $phaseReport['dc2ExpectedDestinationLogLines'] = Get-Dc2ABDestinationEvidence -Lines $lines -ExpectedWorkerDst $dc2Target
             $phaseReport['dc2ExpectedDestinationObserved'] =
                 $phaseReport['dc2ExpectedDestinationLogLines'] -gt 0
         }
