@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
-    [string]$ChunkRelayWorkerDomain,
+    [string]$ChunkRelayWorkerDomain = '',
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-z0-9.-]+[.]workers[.]dev$')]
@@ -25,6 +24,9 @@ $ErrorActionPreference = 'Stop'
 
 if ($LegacyDC2AB -and -not $LegacyOnly) {
     throw 'Legacy DC2 A/B is exclusively a LegacyOnly device smoke; pass -LegacyOnly.'
+}
+if (-not $LegacyOnly -and [string]::IsNullOrWhiteSpace($ChunkRelayWorkerDomain)) {
+    throw 'ChunkRelayWorkerDomain is required unless -LegacyOnly is specified.'
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
