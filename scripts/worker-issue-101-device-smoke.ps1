@@ -116,12 +116,18 @@ function Get-TransportReport {
     param(
         [Parameter(Mandatory = $true)][string]$Transport,
         [Parameter(Mandatory = $true)][string[]]$Lines,
-        [Parameter(Mandatory = $true)][string]$LogName
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [string]$ExpectedWorkerDst = ''
     )
     $closes = @($Lines | Where-Object { $_ -match 'MTProto bridge closed' })
-    $workerOnly = @($closes | Where-Object {
+    $workerOnlyAll = @($closes | Where-Object {
         $_ -match 'actual_backend=cf_worker_ws' -and $_ -match 'fallback_used=false'
     })
+    $workerOnly = $workerOnlyAll
+    if ($ExpectedWorkerDst) {
+        $targetRegex = '(?:^|\s)worker_dst=' + [regex]::Escape($ExpectedWorkerDst) + '(?:\s|$)'
+        $workerOnly = @($workerOnlyAll | Where-Object { $_ -match $targetRegex })
+    }
     $bidirectional = @($workerOnly | Where-Object {
         $_ -match 'up_bytes=[1-9][0-9]*' -and $_ -match 'down_bytes=[1-9][0-9]*'
     })
@@ -161,6 +167,8 @@ function Get-TransportReport {
         manualTelegramTest = 'not_machine_verified'
         bridgeCloseCount = $closes.Count
         workerOnlyCloseCount = $workerOnly.Count
+        workerOnlyTotalCloseCount = $workerOnlyAll.Count
+        workerOnlyOtherTargetCloseCount = $workerOnlyAll.Count - $workerOnly.Count
         bidirectionalBridgeCount = $bidirectional.Count
         zeroDownstreamCount = $zeroDown.Count
         transportLogLines = $routes.Count
@@ -289,7 +297,7 @@ try {
         $logName = "$name.log"
         $logPath = Join-Path $sessionDir $logName
         $lines = @(Capture-SmokeLog -Destination $logPath)
-        $phaseReport = Get-TransportReport -Transport $transport -Lines $lines -LogName $logName
+        $phaseReport = Get-TransportReport -Transport $transport -Lines $lines -LogName $logName -ExpectedWorkerDst $dc2Target
         $phaseReport['name'] = $name
         if ($LegacyDC2AB) {
             $phaseReport['dc2ExpectedWorkerDst'] = $dc2Target
@@ -297,6 +305,9 @@ try {
             $phaseReport['dc2ExpectedDestinationLogLines'] = Get-Dc2ABDestinationEvidence -Lines $lines -ExpectedWorkerDst $dc2Target
             $phaseReport['dc2ExpectedDestinationObserved'] =
                 $phaseReport['dc2ExpectedDestinationLogLines'] -gt 0
+            if (-not $phaseReport['dc2ExpectedDestinationObserved']) {
+                $phaseReport['observedNetworkStatus'] = 'dc2_target_not_observed'
+            }
         }
         $report.phases += $phaseReport
         $activeStage = 'phase_completed'
@@ -310,6 +321,10 @@ try {
         if ($LegacyDC2AB) {
             Write-Host ("DC2 expected physical dst={0}; observed in native log={1}" -f
                 $dc2Target, $phaseReport.dc2ExpectedDestinationObserved)
+            if ($phaseReport.workerOnlyOtherTargetCloseCount -gt 0) {
+                Write-Warning ("{0} session(s) selected a different physical destination and were excluded from this phase's counters." -f
+                    $phaseReport.workerOnlyOtherTargetCloseCount)
+            }
         }
     }
     $report['outcome'] = 'completed_telegram_media_unverified'
