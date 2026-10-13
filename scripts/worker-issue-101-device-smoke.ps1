@@ -264,6 +264,11 @@ try {
                 # ActivityManager errors should abort proxy data collection.
                 $installed = @(Invoke-CheckedAdb -Arguments @('shell','pm','list','packages',$TelegramPackage))
                 if ($installed | Where-Object { $_ -eq "package:$TelegramPackage" }) {
+                    if ($LegacyDC2AB) {
+                        # Force new Telegram MTProto connections for each DC2
+                        # destination. Otherwise stale sockets can pollute A/B.
+                        Invoke-CheckedAdb -Arguments @('shell','am','force-stop',$TelegramPackage) | Out-Null
+                    }
                     $launchOutput = @(Invoke-CheckedAdb -Arguments @(
                         'shell', 'am', 'start',
                         '-a', 'android.intent.action.MAIN',
