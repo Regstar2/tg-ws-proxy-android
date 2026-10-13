@@ -66,4 +66,28 @@ if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167
     throw 'Unobserved DC2 destination must not be reported as selected'
 }
 
+$reportAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-TransportReport'
+}, $true)
+if ($null -eq $reportAst) { throw 'Missing transport report function' }
+. ([scriptblock]::Create($reportAst.Extent.Text))
+
+$closed = @(
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=0'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=400'
+    'MTProto Worker connected worker_transport=legacy_websocket'
+)
+$report51 = Get-TransportReport -Transport 'legacy_websocket' -Lines $closed -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+$report220 = Get-TransportReport -Transport 'legacy_websocket' -Lines $closed -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($report51.workerOnlyCloseCount -ne 1 -or $report51.workerOnlyOtherTargetCloseCount -ne 1 -or
+    $report51.dc2ZeroDownstreamCount -ne 1 -or $report51.bidirectionalBridgeCount -ne 0) {
+    throw 'DC2 .51 A/B report was contaminated by the other endpoint'
+}
+if ($report220.workerOnlyCloseCount -ne 1 -or $report220.workerOnlyOtherTargetCloseCount -ne 1 -or
+    $report220.dc2ZeroDownstreamCount -ne 0 -or $report220.bidirectionalBridgeCount -ne 1) {
+    throw 'DC2 .220 A/B report was contaminated by the other endpoint'
+}
+
 Write-Host 'Worker DC2 legacy A/B target selection, restoration and report checks: PASS'
