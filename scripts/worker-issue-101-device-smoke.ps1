@@ -142,6 +142,30 @@ function Get-TransportReport {
     $tcpStalls = @($Lines | Where-Object { $_ -match 'MTProto Worker TCP stalled' })
     $writeFailures = @($Lines | Where-Object { $_ -match 'MTProto Worker Flowseal parity WS write failed' })
     $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\s)signed_dc=2(?:\s|$)' })
+    # Attribute the non-MTProto warnings to DC2 sessions from this phase,
+    # instead of interpreting their HTTP bytes as valid MTProto downstream.
+    $dc2SessionIds = @{}
+    foreach ($entry in $dc2) {
+        if ($entry -match '(?:^|\s)session_id=([a-zA-Z0-9_-]+)(?:\s|$)') {
+            $dc2SessionIds[$Matches[1]] = $true
+        }
+    }
+    $dc2PlaintextSessions = @{}
+    $dc2HTTPStatuses = @{}
+    foreach ($entry in $Lines) {
+        if ($entry -notmatch 'MTProto Worker Legacy WS non-MTProto reply') { continue }
+        if ($entry -notmatch '(?:^|\s)session_id=([a-zA-Z0-9_-]+)(?:\s|$)') { continue }
+        $session = $Matches[1]
+        if (-not $dc2SessionIds.ContainsKey($session)) { continue }
+        $dc2PlaintextSessions[$session] = $true
+        if ($entry -match '(?:^|\s)http_status=([0-9]{3})(?:\s|$)') {
+            $status = $Matches[1]
+            if (-not $dc2HTTPStatuses.ContainsKey($status)) {
+                $dc2HTTPStatuses[$status] = 0
+            }
+            $dc2HTTPStatuses[$status]++
+        }
+    }
     $dc2Silent = @($dc2 | Where-Object { $_ -match 'down_bytes=0(?:\D|$)' })
     $dc2SilentUpBytes = [long]0
     foreach ($entry in $dc2Silent) {
@@ -179,6 +203,8 @@ function Get-TransportReport {
 
     $status = if ($workerOnly.Count -eq 0) {
         'no_worker_sessions_observed'
+    } elseif ($dc2PlaintextSessions.Count -gt 0) {
+        'dc2_non_mtproto_reply_detected'
     } elseif ($dc2.Count -ge 3 -and $dc2Silent.Count -ge 3 -and
               (2 * $dc2Silent.Count) -ge $dc2.Count) {
         'dc2_no_downstream_regression'
@@ -208,6 +234,8 @@ function Get-TransportReport {
         dc2ZeroDownstreamCount = $dc2Silent.Count
         dc2ZeroDownstreamUpBytes = $dc2SilentUpBytes
         dc2PositiveReplyCount = $dc2PositiveReplySizes.Count
+        dc2PlaintextReplyCount = $dc2PlaintextSessions.Count
+        dc2HTTPStatusCounts = $dc2HTTPStatuses
         dc2UniformShortReplies = [bool]$sameShortReply
         dc2UniformShortReplyBytes = if ($sameShortReply) { $shortReplyBytes } else { 0 }
         tcpStallLogLines = $tcpStalls.Count
@@ -378,6 +406,11 @@ try {
             $phaseReport.dc2ZeroDownstreamCount, $phaseReport.dc2CloseCount,
             $phaseReport.dc2ZeroDownstreamUpBytes, $phaseReport.tcpStallLogLines)
         if ($LegacyDC2AB) {
+            if ($phaseReport.observedNetworkStatus -eq 'dc2_non_mtproto_reply_detected') {
+                Write-Warning ("DC2 {0}: {1} HTTP/HTML upstream responses rejected; NOT MTProto connectivity. HTTP status counts: {2}" -f
+                    $dc2Target, $phaseReport.dc2PlaintextReplyCount,
+                    (($phaseReport.dc2HTTPStatusCounts.Keys | ForEach-Object { "$_=$($phaseReport.dc2HTTPStatusCounts[$_])" }) -join ', '))
+            }
             if ($phaseReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
                 Write-Warning ("DC2 {0}: {1} sessions received exactly {2} bytes and closed quickly; NOT proven Telegram connectivity." -f
                     $dc2Target, $phaseReport.dc2PositiveReplyCount, $phaseReport.dc2UniformShortReplyBytes)
@@ -403,10 +436,11 @@ try {
             $report['dc2ComparisonStatus'] = 'inconclusive_missing_dc2_sessions'
             Write-Warning 'A/B comparison INCONCLUSIVE: both DC2 destinations must have real MTProto traffic.'
         } elseif (@($validPhases | Where-Object {
-            $_['observedNetworkStatus'] -eq 'dc2_uniform_short_replies_unverified'
+            $_['observedNetworkStatus'] -eq 'dc2_uniform_short_replies_unverified' -or
+            $_['observedNetworkStatus'] -eq 'dc2_non_mtproto_reply_detected'
         }).Count -gt 0) {
-            $report['dc2ComparisonStatus'] = 'short_replies_not_acceptance'
-            Write-Warning 'Short, uniform downstream frames are not proof of usable Telegram connectivity.'
+            $report['dc2ComparisonStatus'] = 'non_mtproto_or_short_replies_not_acceptance'
+            Write-Warning 'HTTP/HTML or short, uniform downstream frames are not proof of usable Telegram connectivity.'
         } else {
             $report['dc2ComparisonStatus'] = 'two_phases_observed_media_unverified'
         }
