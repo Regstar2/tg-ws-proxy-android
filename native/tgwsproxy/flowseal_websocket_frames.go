@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -147,7 +148,7 @@ func (ws *flowsealRawWebSocket) Recv() ([]byte, error) {
 			continue
 		case opContinuation, opText, opBinary:
 			if fin && len(ws.frag) == 0 {
-				ws.noteRecv(len(payload))
+				ws.noteRecv(payload)
 				return payload, nil
 			}
 			ws.frag = append(ws.frag, payload...)
@@ -161,7 +162,7 @@ func (ws *flowsealRawWebSocket) Recv() ([]byte, error) {
 			}
 			message := append([]byte(nil), ws.frag...)
 			ws.frag = ws.frag[:0]
-			ws.noteRecv(len(message))
+			ws.noteRecv(message)
 			return message, nil
 		}
 	}
@@ -347,15 +348,41 @@ func writeFlowsealShapedFullCount(writer io.Writer, data []byte, chunkBytes int,
 	return total, nil
 }
 
-func (ws *flowsealRawWebSocket) noteRecv(payloadBytes int) {
+func (ws *flowsealRawWebSocket) noteRecv(payload []byte) {
+	payloadBytes := len(payload)
 	sequence := ws.recvCount.Add(1)
 	cumulative := ws.recvBytes.Add(uint64(payloadBytes))
+	if payloadType := classifyFlowsealWorkerReply(payload); payloadType != "" && logWarn != nil {
+		// A plaintext HTTP/HTML error is not an MTProto reply.
+		// Log only its category and byte count, never the contents.
+		logWarn.Printf("MTProto Worker Legacy WS non-MTProto reply session_id=%s payload_type=%s payload_bytes=%d", ws.logSessionID(), payloadType, payloadBytes)
+	}
 	if logInfo != nil && (payloadBytes >= 64*1024 || sequence <= 2) {
 		logInfo.Printf(
 			"MTProto Worker Flowseal parity WS recv session_id=%s seq=%d payload_bytes=%d cumulative_payload_bytes=%d",
 			ws.logSessionID(), sequence, payloadBytes, cumulative,
 		)
 	}
+}
+
+// classifyFlowsealWorkerReply identifies obvious plaintext responses from a
+// proxy/egress intermediary. MTProto responses are obfuscated binary; this is
+// diagnostic only and never changes or discards traffic.
+func classifyFlowsealWorkerReply(payload []byte) string {
+	trimmed := bytes.TrimLeft(payload, " \t\r\n")
+	if bytes.HasPrefix(trimmed, []byte("HTTP/1.")) {
+		return "plaintext_http"
+	}
+	prefix := trimmed
+	if len(prefix) > 32 {
+		prefix = prefix[:32]
+	}
+	lower := bytes.ToLower(prefix)
+	if bytes.HasPrefix(lower, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lower, []byte("<html")) {
+		return "plaintext_html"
+	}
+	return ""
 }
 
 func (ws *flowsealRawWebSocket) logSessionID() string {
