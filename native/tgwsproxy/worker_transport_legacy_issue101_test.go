@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"tg-ws-proxy/mtproxyfrontend"
+	"tg-ws-proxy/tgwsroute"
 )
 
 func TestFlowsealProductionTLSVerifiesWorkerHostname(t *testing.T) {
@@ -110,5 +111,60 @@ func TestFlowsealLegacyWorkerOnlyBulkFullDuplexThroughMtProtoStream(t *testing.T
 		if !bytes.Equal(reply, readBack) {
 			t.Fatalf("download %d corrupted", i)
 		}
+	}
+}
+
+func TestFlowsealLegacyDC2MediaPreservesSignedDCAndDuplexOnKnownWorkingIP(t *testing.T) {
+	withMtProtoWorkerDCMap(t, map[int]string{2: "149.154.167.51"})
+	withRuntimeSettings(t, func(settings runtimeSettings) runtimeSettings {
+		settings.Mode = modeWorkerOnly
+		settings.Worker.Enabled = true
+		settings.Worker.Domain = "legacy.workers.dev"
+		settings.Worker.Transport = workerTransportLegacyWebSocket
+		settings.Worker.DestinationMode = tgwsroute.WorkerDestinationFlowsealDCMap
+		settings.Worker.Failover = workerFailoverSettings{}
+		return settings
+	})
+
+	socket := newWorkerRelayHarnessSocket()
+	connector := &mtProtoWorkerConnector{
+		flowsealParity: true,
+		dialTransportContext: func(_ context.Context, transport workerTransport, domain, path, _ string) (mtProtoFrameSocket, error) {
+			if transport != workerTransportLegacyWebSocket || domain != "legacy.workers.dev" ||
+				!containsAll(path, "/apiws?", "dst=149.154.167.51", "dc=2", "media=1") {
+				t.Fatalf("wrong DC2 media route transport=%s domain=%s path=%s", transport, domain, path)
+			}
+			if strings.Contains(path, "149.154.167.220") || strings.Contains(path, "dc=4") {
+				t.Fatalf("unexpected DC2 media rewrite to Flowseal experimental destination: %s", path)
+			}
+			return socket, nil
+		},
+	}
+	conn, result := connector.Connect(context.Background(), mtproxyfrontend.OutboundRequest{
+		DCID: 2,
+		SignedDC: -2,
+		IsMedia: true,
+		Transport: mtproxyfrontend.TransportPaddedIntermediate,
+		RelayInit: buildTestInitWithSignedDC(t, -2),
+	})
+	if result.Err != nil || result.FallbackUsed || result.ActualBackend != mtProtoWorkerBackend {
+		t.Fatalf("Legacy DC2 media route failed: %+v", result)
+	}
+	defer conn.Close()
+
+	const uploadSize = 24 * 1024
+	upload := bytes.Repeat([]byte{0xAC}, uploadSize)
+	if n, err := conn.Write(upload); n != uploadSize || err != nil {
+		t.Fatalf("DC2 media upload bytes=%d err=%v", n, err)
+	}
+	frames := socket.sentFrames()
+	if len(frames) != 2 || !bytes.Equal(frames[1], upload) {
+		t.Fatal("Legacy DC2 media payload changed or relay-init missing")
+	}
+	download := bytes.Repeat([]byte{0xBC}, 22*1024)
+	socket.recv <- download
+	actual := make([]byte, len(download))
+	if _, err := io.ReadFull(conn, actual); err != nil || !bytes.Equal(actual, download) {
+		t.Fatalf("DC2 media download changed bytes=%d err=%v", len(actual), err)
 	}
 }
