@@ -133,4 +133,25 @@ if ($recordedReport.dc2CloseCount -ne 48 -or $recordedReport.dc2PositiveReplyCou
     throw '2026-10-14 DC2 report must be classified as short-reply failure, not healthy MTProto'
 }
 
+$httpReplies = @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed frontend=MTProto session_id=abc123 signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1200 down_bytes=309 duration_ms=120'
+    'MTProto bridge closed frontend=MTProto session_id=abc456 signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1400 down_bytes=0 duration_ms=180'
+    'MTProto bridge closed frontend=MTProto session_id=abc789 signed_dc=1 worker_dst=149.154.175.50 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=309 duration_ms=150'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc123 payload_type=plaintext_http http_status=403 payload_bytes=309 action=reject'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc123 payload_type=plaintext_http http_status=403 payload_bytes=309 action=reject'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc789 payload_type=plaintext_http http_status=502 payload_bytes=309 action=reject'
+)
+$httpReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $httpReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($httpReport.observedNetworkStatus -ne 'dc2_non_mtproto_reply_detected' -or
+    $httpReport.dc2PlaintextReplyCount -ne 1 -or
+    $httpReport.dc2HTTPStatusCounts['403'] -ne 2 -or
+    $httpReport.dc2HTTPStatusCounts.ContainsKey('502')) {
+    throw 'HTTP errors must be identified only for the matching DC2 sessions'
+}
+$otherReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $httpReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+if ($otherReport.dc2PlaintextReplyCount -ne 0 -or
+    $otherReport.observedNetworkStatus -ne 'no_worker_sessions_observed') {
+    throw 'Other destinations must not inherit DC2 HTTP failures'
+}
 Write-Host 'Worker DC2 legacy A/B target selection, restoration and report checks: PASS'
