@@ -159,8 +159,11 @@ function Get-TransportReport {
             $replyBytes = [long]$Matches[1]
             if ($replyBytes -gt 0) {
                 $dc2PositiveReplySizes += $replyBytes
-                if ($entry -notmatch '(?:^|\s)duration_ms=([0-9]+)(?:\s|$)' -or
-                    [long]$Matches[1] -gt 2000) {
+                $durationMatch = [regex]::Match(
+                    $entry, '(?:^|\s)duration_ms=([0-9]+)(?:\s|$)'
+                )
+                if (-not $durationMatch.Success -or
+                    [long]$durationMatch.Groups[1].Value -gt 2000) {
                     $allDc2RepliesClosedQuickly = $false
                 }
             }
