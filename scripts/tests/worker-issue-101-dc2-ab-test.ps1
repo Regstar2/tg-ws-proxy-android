@@ -90,4 +90,27 @@ if ($report220.workerOnlyCloseCount -ne 1 -or $report220.workerOnlyOtherTargetCl
     throw 'DC2 .220 A/B report was contaminated by the other endpoint'
 }
 
+$shortReplies = @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1200 down_bytes=309 duration_ms=120'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1400 down_bytes=309 duration_ms=190'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=5000 down_bytes=309 duration_ms=550'
+)
+$shortReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($shortReport.observedNetworkStatus -ne 'dc2_uniform_short_replies_unverified' -or
+    $shortReport.dc2UniformShortReplyBytes -ne 309 -or
+    $shortReport.dc2PositiveReplyCount -ne 3) {
+    throw "Uniform short DC2 responses must not be treated as usable MTProto: $($shortReport.observedNetworkStatus)"
+}
+$shortReplies[3] = $shortReplies[3].Replace('down_bytes=309', 'down_bytes=8192')
+$longReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($longReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
+    throw 'Meaningful mixed-size responses must not trigger uniform short reply signature'
+}
+$shortReplies[3] = $shortReplies[3].Replace('down_bytes=8192', 'down_bytes=309').Replace('duration_ms=550', 'duration_ms=3000')
+$longLivedReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($longLivedReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
+    throw 'Long-running legitimate sessions must not trigger uniform short reply signature'
+}
+
 Write-Host 'Worker DC2 legacy A/B target selection, restoration and report checks: PASS'
