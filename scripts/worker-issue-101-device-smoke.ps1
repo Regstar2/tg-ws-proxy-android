@@ -141,7 +141,14 @@ function Get-TransportReport {
     })
     $tcpStalls = @($Lines | Where-Object { $_ -match 'MTProto Worker TCP stalled' })
     $writeFailures = @($Lines | Where-Object { $_ -match 'MTProto Worker Flowseal parity WS write failed' })
-    $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\s)signed_dc=2(?:\s|$)' })
+    # Telegram marks media routes with a negative signed DC. DC2 statistics
+    # must include both +2 (ordinary) and -2 (media), without matching DC20.
+    $dc2 = @($workerOnly | Where-Object { $_ -match '(?:^|\s)signed_dc=-?2(?:\s|$)' })
+    $dc2Media = @($dc2 | Where-Object { $_ -match '(?:^|\s)signed_dc=-2(?:\s|$)' })
+    $dc2MediaBidirectional = @($dc2Media | Where-Object {
+        $_ -match 'up_bytes=[1-9][0-9]*' -and $_ -match 'down_bytes=[1-9][0-9]*'
+    })
+    $dc2MediaSilent = @($dc2Media | Where-Object { $_ -match 'down_bytes=0(?:\D|$)' })
     # Attribute the non-MTProto warnings to DC2 sessions from this phase,
     # instead of interpreting their HTTP bytes as valid MTProto downstream.
     $dc2SessionIds = @{}
@@ -231,6 +238,9 @@ function Get-TransportReport {
         selectedTransportLines = $matchedTransport.Count
         errorLogLines = $errors.Count
         dc2CloseCount = $dc2.Count
+        dc2MediaCloseCount = $dc2Media.Count
+        dc2MediaBidirectionalBridgeCount = $dc2MediaBidirectional.Count
+        dc2MediaZeroDownstreamCount = $dc2MediaSilent.Count
         dc2ZeroDownstreamCount = $dc2Silent.Count
         dc2ZeroDownstreamUpBytes = $dc2SilentUpBytes
         dc2PositiveReplyCount = $dc2PositiveReplySizes.Count
@@ -251,7 +261,9 @@ function Get-Dc2ABDestinationEvidence {
     )
     $dstPattern = '(?:^|\s)worker_dst=' + [regex]::Escape($ExpectedWorkerDst) + '(?:\s|$)'
     $matched = @($Lines | Where-Object {
-        $_ -match 'dc=2|DC2|signed_dc=2' -and $_ -match $dstPattern
+        # Count either logical DC2 sign, and reject DC20 / accidental partial matches.
+        $_ -match '(?:^|\s)(?:signed_dc=-?2|dc=2|effective_dc=2)(?:\s|$)|\bDC2(?![0-9])' -and
+            $_ -match $dstPattern
     })
     return $matched.Count
 }
@@ -405,6 +417,9 @@ try {
         Write-Host ("DC2: {0}/{1} sessions with zero downstream; upstream bytes without response={2}; TCP stalls={3}" -f
             $phaseReport.dc2ZeroDownstreamCount, $phaseReport.dc2CloseCount,
             $phaseReport.dc2ZeroDownstreamUpBytes, $phaseReport.tcpStallLogLines)
+        Write-Host ("DC2 media: {0} sessions, {1} with two-way bytes, {2} with zero downstream (Telegram UI/media acceptance remains unverified)." -f
+            $phaseReport.dc2MediaCloseCount, $phaseReport.dc2MediaBidirectionalBridgeCount,
+            $phaseReport.dc2MediaZeroDownstreamCount)
         if ($LegacyDC2AB) {
             if ($phaseReport.observedNetworkStatus -eq 'dc2_non_mtproto_reply_detected') {
                 Write-Warning ("DC2 {0}: {1} HTTP/HTML upstream responses rejected; NOT MTProto connectivity. HTTP status counts: {2}" -f
