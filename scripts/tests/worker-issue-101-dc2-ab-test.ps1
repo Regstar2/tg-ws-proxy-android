@@ -55,14 +55,18 @@ $sample = @(
     'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.51',
     'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.220',
     'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=-2 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=-2 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=20 dc=20 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=20 dc=20 worker_dst=149.154.167.220',
     'MTProto Worker route signed_dc=4 dc=4 worker_dst=149.154.167.51',
     'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.2200',
     'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.5'
 )
-if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.51') -ne 1) {
+if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.51') -ne 2) {
     throw 'DC2 .51 evidence counting should exclude other DCs and IPs'
 }
-if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.220') -ne 2) {
+if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.220') -ne 3) {
     throw 'DC2 .220 evidence counting incorrect'
 }
 if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.50') -ne 0) {
@@ -91,6 +95,33 @@ if ($report51.workerOnlyCloseCount -ne 1 -or $report51.workerOnlyOtherTargetClos
 if ($report220.workerOnlyCloseCount -ne 1 -or $report220.workerOnlyOtherTargetCloseCount -ne 1 -or
     $report220.dc2ZeroDownstreamCount -ne 0 -or $report220.bidirectionalBridgeCount -ne 1) {
     throw 'DC2 .220 A/B report was contaminated by the other endpoint'
+}
+
+# Media connections use signed_dc=-2. Without this check, a broken media
+# route can be omitted from the DC2 analysis even while ordinary DC2 works.
+$mediaSessionLines = @(
+    'MTProto Worker connected session_id=media_ok worker_transport=legacy_websocket worker_dst=149.154.167.51'
+    'MTProto bridge closed frontend=MTProto session_id=media_ok signed_dc=-2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=4096 duration_ms=5000'
+    'MTProto bridge closed frontend=MTProto session_id=media_silent signed_dc=-2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+    'MTProto bridge closed frontend=MTProto session_id=unrelated signed_dc=-2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+    'MTProto bridge closed frontend=MTProto session_id=other_dc signed_dc=-20 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+)
+$mediaReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $mediaSessionLines -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+if ($mediaReport.dc2CloseCount -ne 2 -or
+    $mediaReport.dc2MediaCloseCount -ne 2 -or
+    $mediaReport.dc2MediaBidirectionalBridgeCount -ne 1 -or
+    $mediaReport.dc2MediaZeroDownstreamCount -ne 1 -or
+    $mediaReport.dc2ZeroDownstreamCount -ne 1 -or
+    $mediaReport.bidirectionalBridgeCount -ne 1 -or
+    $mediaReport.observedNetworkStatus -ne 'two_way_bytes_observed_media_unverified') {
+    throw 'Media DC2 (-2) closures must be counted, but other DCs/destinations must not contaminate the report'
+}
+$ordinaryReport = Get-TransportReport -Transport 'legacy_websocket' -Lines @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=128 down_bytes=1024'
+) -LogName 'ordinary.log' -ExpectedWorkerDst '149.154.167.51'
+if ($ordinaryReport.dc2CloseCount -ne 1 -or $ordinaryReport.dc2MediaCloseCount -ne 0) {
+    throw 'Ordinary signed DC2 must not be reported as media traffic'
 }
 
 $shortReplies = @(
