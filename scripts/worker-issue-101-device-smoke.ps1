@@ -149,6 +149,31 @@ function Get-TransportReport {
             $dc2SilentUpBytes += [long]$Matches[1]
         }
     }
+    # A fixed, tiny first response followed by immediate disconnect is not
+    # sufficient evidence of an operational MTProto proxy. Record it as a
+    # suspected short-reply pattern, without inspecting Telegram payloads.
+    $dc2PositiveReplySizes = @()
+    $allDc2RepliesClosedQuickly = $true
+    foreach ($entry in $dc2) {
+        if ($entry -match '(?:^|\s)down_bytes=([0-9]+)(?:\s|$)') {
+            $replyBytes = [long]$Matches[1]
+            if ($replyBytes -gt 0) {
+                $dc2PositiveReplySizes += $replyBytes
+                if ($entry -notmatch '(?:^|\s)duration_ms=([0-9]+)(?:\s|$)' -or
+                    [long]$Matches[1] -gt 2000) {
+                    $allDc2RepliesClosedQuickly = $false
+                }
+            }
+        }
+    }
+    $sameShortReply = $false
+    $shortReplyBytes = [long]0
+    if ($dc2PositiveReplySizes.Count -ge 3 -and $allDc2RepliesClosedQuickly) {
+        $shortReplyBytes = [long]$dc2PositiveReplySizes[0]
+        $sameShortReply = $shortReplyBytes -le 512 -and
+            @($dc2PositiveReplySizes | Where-Object { $_ -ne $shortReplyBytes }).Count -eq 0
+    }
+
     $status = if ($workerOnly.Count -eq 0) {
         'no_worker_sessions_observed'
     } elseif ($dc2.Count -ge 3 -and $dc2Silent.Count -ge 3 -and
@@ -158,6 +183,8 @@ function Get-TransportReport {
         'no_bidirectional_sessions_observed'
     } elseif ($matchedTransport.Count -eq 0) {
         'two_way_bytes_transport_not_verified'
+    } elseif ($sameShortReply) {
+        'dc2_uniform_short_replies_unverified'
     } else {
         'two_way_bytes_observed_media_unverified'
     }
@@ -177,6 +204,9 @@ function Get-TransportReport {
         dc2CloseCount = $dc2.Count
         dc2ZeroDownstreamCount = $dc2Silent.Count
         dc2ZeroDownstreamUpBytes = $dc2SilentUpBytes
+        dc2PositiveReplyCount = $dc2PositiveReplySizes.Count
+        dc2UniformShortReplies = [bool]$sameShortReply
+        dc2UniformShortReplyBytes = if ($sameShortReply) { $shortReplyBytes } else { 0 }
         tcpStallLogLines = $tcpStalls.Count
         websocketWriteFailureLines = $writeFailures.Count
         log = $LogName
@@ -324,6 +354,13 @@ try {
             $phaseReport.dc2ZeroDownstreamCount, $phaseReport.dc2CloseCount,
             $phaseReport.dc2ZeroDownstreamUpBytes, $phaseReport.tcpStallLogLines)
         if ($LegacyDC2AB) {
+            if ($phaseReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
+                Write-Warning ("DC2 {0}: {1} sessions received exactly {2} bytes and closed quickly; NOT proven Telegram connectivity." -f
+                    $dc2Target, $phaseReport.dc2PositiveReplyCount, $phaseReport.dc2UniformShortReplyBytes)
+            }
+            if ($phaseReport.observedNetworkStatus -eq 'dc2_target_not_observed') {
+                Write-Warning ("DC2 {0}: no matching MTProto destination seen. This phase is INCONCLUSIVE; do not compare it with the other endpoint." -f $dc2Target)
+            }
             Write-Host ("DC2 expected physical dst={0}; observed in native log={1}" -f
                 $dc2Target, $phaseReport.dc2ExpectedDestinationObserved)
             if ($phaseReport.workerOnlyOtherTargetCloseCount -gt 0) {
