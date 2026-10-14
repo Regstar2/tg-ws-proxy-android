@@ -309,6 +309,27 @@ try {
                         throw "Android did not resolve the Telegram launcher: $($launchOutput -join ' ')"
                     }
                     Write-Host "Telegram started: $TelegramPackage"
+                    if ($LegacyDC2AB) {
+                        # Opening a public channel via Telegram's VIEW intent
+                        # encourages a fresh network request in BOTH A/B phases
+                        # without modifying Telegram's proxy configuration.
+                        try {
+                            $deepLink = @(Invoke-CheckedAdb -Arguments @(
+                                'shell', 'am', 'start',
+                                '-a', 'android.intent.action.VIEW',
+                                '-d', 'tg://resolve?domain=telegram',
+                                '-p', $TelegramPackage
+                            ))
+                            if (($deepLink -join ' ') -match 'unable to resolve|Error:|SecurityException') {
+                                throw "Android rejected Telegram traffic trigger: $($deepLink -join ' ')"
+                            }
+                            Write-Host 'Telegram public channel opened as A/B traffic trigger.'
+                        }
+                        catch {
+                            Write-Warning "Telegram traffic trigger unavailable: $_"
+                            Write-Warning 'Proxy smoke remains active. Open a Telegram chat manually if needed.'
+                        }
+                    }
                 } else {
                     Write-Warning "Telegram package $TelegramPackage not installed. Run passive proxy test only."
                 }
@@ -367,6 +388,24 @@ try {
                 Write-Warning ("{0} session(s) selected a different physical destination and were excluded from this phase's counters." -f
                     $phaseReport.workerOnlyOtherTargetCloseCount)
             }
+        }
+    }
+    if ($LegacyDC2AB) {
+        $validPhases = @($report.phases | Where-Object {
+            $_['dc2ExpectedDestinationObserved'] -eq $true -and
+            $_['dc2CloseCount'] -gt 0
+        })
+        $report['dc2ComparisonValid'] = $validPhases.Count -eq 2
+        if ($validPhases.Count -ne 2) {
+            $report['dc2ComparisonStatus'] = 'inconclusive_missing_dc2_sessions'
+            Write-Warning 'A/B comparison INCONCLUSIVE: both DC2 destinations must have real MTProto traffic.'
+        } elseif (@($validPhases | Where-Object {
+            $_['observedNetworkStatus'] -eq 'dc2_uniform_short_replies_unverified'
+        }).Count -gt 0) {
+            $report['dc2ComparisonStatus'] = 'short_replies_not_acceptance'
+            Write-Warning 'Short, uniform downstream frames are not proof of usable Telegram connectivity.'
+        } else {
+            $report['dc2ComparisonStatus'] = 'two_phases_observed_media_unverified'
         }
     }
     $report['outcome'] = 'completed_telegram_media_unverified'
