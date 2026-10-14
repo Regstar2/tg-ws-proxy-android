@@ -22,7 +22,10 @@ foreach ($required in @(
     "Transport = 'legacy_websocket'", "Dc2Target = '149.154.167.51'",
     "Dc2Target = '149.154.167.220'", "'--es', 'dc2_target'",
     "Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'",
-    "Get-Dc2ABDestinationEvidence -Lines"
+    "Get-Dc2ABDestinationEvidence -Lines",
+    'tg://resolve?domain=telegram', "dc2ComparisonStatus",
+    'inconclusive_missing_dc2_sessions',
+    'short_replies_not_acceptance'
 )) {
     if (-not $source.Contains($required)) { throw "DC2 A/B smoke missing: $required" }
 }
@@ -111,6 +114,23 @@ $shortReplies[3] = $shortReplies[3].Replace('down_bytes=8192', 'down_bytes=309')
 $longLivedReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
 if ($longLivedReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
     throw 'Long-running legitimate sessions must not trigger uniform short reply signature'
+}
+
+# Reproduce the actual 2026-10-14 DC2 evidence: 23 silent sessions and
+# 25 identical 309-byte short replies. Counting positive bytes alone is a
+# false success when every response closes in under 2 seconds.
+$recorded = @('MTProto Worker connected worker_transport=legacy_websocket')
+for ($i = 0; $i -lt 23; $i++) {
+    $recorded += 'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=0 duration_ms=150'
+}
+for ($i = 0; $i -lt 25; $i++) {
+    $recorded += 'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1600 down_bytes=309 duration_ms=230'
+}
+$recordedReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $recorded -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($recordedReport.dc2CloseCount -ne 48 -or $recordedReport.dc2PositiveReplyCount -ne 25 -or
+    $recordedReport.dc2ZeroDownstreamCount -ne 23 -or
+    $recordedReport.observedNetworkStatus -ne 'dc2_uniform_short_replies_unverified') {
+    throw '2026-10-14 DC2 report must be classified as short-reply failure, not healthy MTProto'
 }
 
 Write-Host 'Worker DC2 legacy A/B target selection, restoration and report checks: PASS'
