@@ -615,6 +615,7 @@
     <string name="worker_health_error">Ошибка: %1$s</string>
     <string name="worker_health_failures">Сбоев: %1$d</string>
     <string name="worker_health_status_ok">OK</string>
+    <string name="worker_health_status_compatible_unverified">WebSocket совместим · MTProto не проверен</string>
     <string name="worker_health_status_fail">Ошибка</string>
     <string name="worker_health_status_partial">Частично</string>
     <string name="worker_health_status_timeout">Таймаут</string>
