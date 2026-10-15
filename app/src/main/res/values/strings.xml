@@ -615,6 +615,7 @@
     <string name="worker_health_error">Error: %1$s</string>
     <string name="worker_health_failures">Failures: %1$d</string>
     <string name="worker_health_status_ok">OK</string>
+    <string name="worker_health_status_compatible_unverified">WebSocket compatible · MTProto not verified</string>
     <string name="worker_health_status_fail">Failed</string>
     <string name="worker_health_status_partial">Partial</string>
     <string name="worker_health_status_timeout">Timeout</string>
