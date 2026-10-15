@@ -8,6 +8,30 @@ class WorkerHealthStateResolverTest {
     @Test
     fun websocketUpgradeDoesNotMarkUnverifiedTelegramWorkerHealthy() {
         assertEquals(
+            WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED,
+            WorkerHealthStateResolver.statusAfterProbe(
+                WorkerTransport.LEGACY_WEBSOCKET, WorkerHealthCheckStatus.OK,
+            ),
+        )
+        assertEquals(
+            WorkerHealthCheckStatus.OK,
+            WorkerHealthStateResolver.statusAfterProbe(
+                WorkerTransport.CHUNK_RELAY, WorkerHealthCheckStatus.OK,
+            ),
+        )
+        assertEquals(
+            WorkerHealthCheckStatus.TIMEOUT,
+            WorkerHealthStateResolver.statusAfterProbe(
+                WorkerTransport.LEGACY_WEBSOCKET, WorkerHealthCheckStatus.TIMEOUT,
+            ),
+        )
+        assertEquals(
+            WorkerHealthState.UNKNOWN to 0,
+            WorkerHealthStateResolver.resolveAfterTransportCheck(
+                WorkerTransport.LEGACY_WEBSOCKET, 3, WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED,
+            ),
+        )
+        assertEquals(
             WorkerHealthState.UNKNOWN to 0,
             WorkerHealthStateResolver.resolveAfterTransportCheck(
                 WorkerTransport.LEGACY_WEBSOCKET, 2, WorkerHealthCheckStatus.OK,
