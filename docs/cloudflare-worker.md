@@ -17,7 +17,7 @@
 - **Одиночный Worker, Worker Pool выключен:** Настройки → Cloudflare → Worker Pool → Legacy Worker → «Протокол Telegram Worker».
 - **Worker Pool включён:** добавьте или измените Worker и явно выберите `HTTPS Chunk Relay` или `Flowseal Legacy WebSocket` в форме редактирования. Протокол закреплён за каждым Worker; стратегия выбора и failover могут выбирать Worker разных типов только между новыми сессиями.
 - Сохранённые ранее Worker (включая мигрированные из одиночного режима) продолжают использовать **Chunk Relay**. Приложение не делает автоматическую смену протокола при ошибке.
-- Для Legacy WebSocket проверка подтверждает только корректный TLS/WebSocket handshake (`101` + валидный `Sec-WebSocket-Accept`); для Chunk Relay — доступность relay/DO и совместимость API. **Ни одна из этих проверок не подтверждает full-duplex MTProto, работу медиа и устойчивость Android.**
+- Для Legacy WebSocket проверка возвращает специальный статус «WebSocket совместим · MTProto не проверен» после корректного TLS/WebSocket handshake (`101` + валидный `Sec-WebSocket-Accept`); **это не успех Telegram и не штраф к здоровью Worker**. Для Chunk Relay — доступность relay/DO и совместимость API. **Ни одна из этих проверок не подтверждает full-duplex MTProto, работу медиа и устойчивость Android.**
 - Legacy WebSocket **экспериментален** в Android: на прежних версиях наблюдались зависания крупных медиа-передач (#29). Используйте Worker-only и реальное устройство для проверки сообщений, загрузки и отправки больших файлов. Если не работает — верните Chunk Relay, не меняя тип автоматически.
 
  
