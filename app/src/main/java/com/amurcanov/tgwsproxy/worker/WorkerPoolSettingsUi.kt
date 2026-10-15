@@ -117,17 +117,6 @@ fun WorkerPoolSettingsScreen(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            stringResource(R.string.worker_screen_a_title),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            stringResource(R.string.worker_screen_a_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-        )
         WorkerPoolEnableRow(
             poolEnabled = uiState.poolEnabled,
             isProxyRunning = uiState.isProxyRunning,
@@ -244,12 +233,6 @@ fun WorkerPoolSettingsScreen(
                         onSettingsBlur = onFlowsealDestinationSettingsBlur,
                     )
                 }
-                Text(
-                    stringResource(R.string.worker_chunk_relay_scope),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-                )
             }
         }
     }
@@ -408,7 +391,26 @@ private fun WorkerPoolEnableRow(
     }
 }
 
-/** Overview for both pool and preserved single-Worker mode; no synthetic MTProto success. */
+/** Multiline label/value block: large-font and long Worker domains must never share a narrow row. */
+@Composable
+private fun WorkerOverviewValue(label: String, value: String, domain: Boolean = false) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (domain) workerScreenAReadableAddress(value) else value,
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            softWrap = true,
+        )
+    }
+}
+
+/** Concise single overview; diagnostics intentionally remain distinct from MTProto validation. */
 @Composable
 private fun WorkerPoolConnectionSection(
     uiState: WorkerPoolUiState,
@@ -440,64 +442,62 @@ private fun WorkerPoolConnectionSection(
                 modifier = Modifier.padding(top = 5.dp, bottom = 7.dp),
             )
             if (uiState.poolEnabled) {
-                com.amurcanov.tgwsproxy.MetricLine(
+                WorkerOverviewValue(
                     stringResource(R.string.worker_pool_selected_worker),
-                    selected?.name ?: uiState.summary.selectedWorkerName,
+                    selected?.name ?: stringResource(R.string.worker_pool_no_selected_worker),
                 )
                 selected?.let {
-                    com.amurcanov.tgwsproxy.MetricLine(
+                    WorkerOverviewValue(
                         stringResource(R.string.worker_transport_label),
                         stringResource(workerTransportLabel(it.endpoint.transport)),
                     )
                 }
             } else {
-                com.amurcanov.tgwsproxy.MetricLine(
+                WorkerOverviewValue(
                     stringResource(R.string.cf_worker_pool_legacy_worker),
                     if (legacyWorkerDomainText.isBlank()) stringResource(R.string.worker_pool_no_selected_worker)
                     else WorkerUrlSanitizer.maskForDisplay(legacyWorkerDomainText, uiState.maskDomains),
+                    domain = true,
                 )
-                com.amurcanov.tgwsproxy.MetricLine(
+                WorkerOverviewValue(
                     stringResource(R.string.worker_transport_label),
                     stringResource(workerTransportLabel(legacyWorkerTransport)),
                 )
             }
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.route_runtime_configured_mode),
-                RouteDisplayNames.modeLabel(context, uiState.runtime.configuredMode),
-            )
+            if (uiState.runtime.configuredMode.isNotBlank()) {
+                WorkerOverviewValue(
+                    stringResource(R.string.route_runtime_configured_mode),
+                    RouteDisplayNames.modeLabel(context, uiState.runtime.configuredMode),
+                )
+            }
             if (uiState.isProxyRunning) {
-                com.amurcanov.tgwsproxy.MetricLine(
+                WorkerOverviewValue(
                     stringResource(R.string.route_runtime_active_route),
-                    RouteDisplayNames.routeLabel(context, uiState.runtime.activeRoute),
+                    RouteDisplayNames.currentRouteLabel(context, uiState.runtime.activeRoute, true),
                 )
                 if (showActualRuntime) {
-                    com.amurcanov.tgwsproxy.MetricLine(
+                    WorkerOverviewValue(
                         stringResource(R.string.worker_pool_runtime_worker),
                         uiState.summary.runtimeWorkerName,
                     )
                     active?.let {
-                        com.amurcanov.tgwsproxy.MetricLine(
+                        WorkerOverviewValue(
                             stringResource(R.string.worker_screen_a_actual_transport),
                             stringResource(workerTransportLabel(it.endpoint.transport)),
                         )
                     }
                 }
-            }
-            uiState.runtime.failoverReason.takeIf { it.isNotBlank() }?.let {
-                com.amurcanov.tgwsproxy.MetricLine(
-                    stringResource(R.string.worker_pool_last_failover_reason), it,
-                )
+                uiState.runtime.failoverReason.takeIf { it.isNotBlank() }?.let {
+                    WorkerOverviewValue(stringResource(R.string.worker_pool_last_failover_reason), it)
+                }
             }
             Text(
-                stringResource(R.string.worker_screen_a_diagnostic_caution),
+                stringResource(R.string.worker_screen_a_diagnostic_brief),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp),
             )
-            OutlinedButton(
-                onClick = onOpenDiagnostics,
-                modifier = Modifier.padding(top = 8.dp),
-            ) {
+            OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.padding(top = 8.dp)) {
                 Text(stringResource(R.string.worker_pool_open_diagnostics))
             }
         }
@@ -515,57 +515,45 @@ private fun WorkerPoolStrategySection(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.worker_pool_strategy_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                TextButton(onClick = onToggleExpanded) {
-                    Text(
-                        if (expanded) {
-                            stringResource(R.string.worker_pool_details_hide)
-                        } else {
-                            stringResource(R.string.worker_pool_details)
-                        },
-                    )
-                }
-            }
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_strategy_current),
+            Text(
+                stringResource(R.string.worker_pool_strategy_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
                 stringResource(strategy.labelRes),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 4.dp),
             )
             Text(
                 stringResource(strategy.descriptionRes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 2.dp),
             )
+            TextButton(onClick = onToggleExpanded) {
+                Text(
+                    stringResource(if (expanded) R.string.worker_pool_details_hide else R.string.worker_screen_a_change_strategy),
+                )
+            }
             AnimatedVisibility(visible = expanded) {
                 Column {
                     WorkerSelectionStrategy.entries.forEach { entry ->
                         val selected = entry == strategy.strategy
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.Top,
                         ) {
                             RadioButton(
                                 selected = selected,
                                 enabled = !isProxyRunning,
                                 onClick = { if (!selected) onStrategyChange(entry) },
                             )
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(modifier = Modifier.weight(1f).padding(top = 7.dp)) {
                                 Text(stringResource(WorkerSelectionUiMapper.strategyLabelRes(entry)))
                                 Text(
                                     stringResource(WorkerSelectionUiMapper.strategyDescriptionRes(entry)),
@@ -697,7 +685,7 @@ private fun WorkerPoolItemCardPolished(
                         color = MaterialTheme.colorScheme.primary,
                     )
                     Text(
-                        item.maskedUrl,
+                        workerScreenAReadableAddress(item.maskedUrl),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
@@ -1161,7 +1149,7 @@ private fun WorkerPoolDestinationModeSection(
                         onClick = { if (!isProxyRunning) onDestinationModeChange(mode) },
                         enabled = !isProxyRunning,
                     )
-                    Column(modifier = Modifier.padding(start = 4.dp)) {
+                    Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
                         Text(
                             when (mode) {
                                 WorkerDestinationMode.PRESERVE_ORIGINAL_DST ->
