@@ -71,10 +71,11 @@ func TestFlowsealLegacyWorkerOnlyBulkFullDuplexThroughMtProtoStream(t *testing.T
 			return socket, nil
 		},
 	}
+	relayInit := buildTestInitWithSignedDC(t, 2)
 	conn, result := connector.Connect(context.Background(), mtproxyfrontend.OutboundRequest{
 		DCID: 2,
 		Transport: mtproxyfrontend.TransportAbridged,
-		RelayInit: buildTestInitWithSignedDC(t, 2),
+		RelayInit: relayInit,
 	})
 	if result.Err != nil {
 		t.Fatalf("connect: %v", result.Err)
@@ -83,21 +84,28 @@ func TestFlowsealLegacyWorkerOnlyBulkFullDuplexThroughMtProtoStream(t *testing.T
 	if dialCount != 1 || result.ActualBackend != mtProtoWorkerBackend || result.FallbackUsed {
 		t.Fatalf("incorrect route selection: count=%d result=%+v", dialCount, result)
 	}
-	// More than the previously problematic 7 * 64 KiB burst, including media-sized payloads.
+	// More than the problematic 7 * 64 KiB burst. Each TCP read contains
+	// one complete obfuscated MTProto abridged packet, not arbitrary bytes.
 	const count = 24
+	const packetBytes = 65536
+	plain := make([]byte, 0, count*packetBytes)
 	for i := 0; i < count; i++ {
-		payload := bytes.Repeat([]byte{byte(i)}, 65536)
+		plain = append(plain, legacyAbridgedTestPacket(packetBytes-4, byte(i))...)
+	}
+	encrypted := xorWithStreamForTest(t, relayInit[8:40], relayInit[40:56], plain, true)
+	for i := 0; i < count; i++ {
+		payload := encrypted[i*packetBytes : (i+1)*packetBytes]
 		if n, err := conn.Write(payload); err != nil || n != len(payload) {
 			t.Fatalf("upload %d: n=%d err=%v", i, n, err)
 		}
 	}
 	got := socket.sentFrames()
 	if len(got) != count+1 {
-		t.Fatalf("forwarded frames=%d want=%d", len(got), count+1)
+		t.Fatalf("forwarded packets=%d want=%d", len(got), count+1)
 	}
 	for i := 0; i < count; i++ {
-		if !bytes.Equal(got[i+1], bytes.Repeat([]byte{byte(i)}, 65536)) {
-			t.Fatalf("MTProto payload %d changed", i)
+		if !bytes.Equal(got[i+1], encrypted[i*packetBytes:(i+1)*packetBytes]) {
+			t.Fatalf("MTProto packet %d changed", i)
 		}
 	}
 
@@ -153,18 +161,81 @@ func TestFlowsealLegacyDC2MediaPreservesSignedDCAndDuplexOnKnownWorkingIP(t *tes
 	defer conn.Close()
 
 	const uploadSize = 24 * 1024
-	upload := bytes.Repeat([]byte{0xAC}, uploadSize)
+	relayInit := buildTestInitWithSignedDC(t, -2)
+	plainUpload := legacyAbridgedTestPacket(uploadSize-4, 0xAC)
+	upload := xorWithStreamForTest(t, relayInit[8:40], relayInit[40:56], plainUpload, true)
 	if n, err := conn.Write(upload); n != uploadSize || err != nil {
 		t.Fatalf("DC2 media upload bytes=%d err=%v", n, err)
 	}
 	frames := socket.sentFrames()
 	if len(frames) != 2 || !bytes.Equal(frames[1], upload) {
-		t.Fatal("Legacy DC2 media payload changed or relay-init missing")
+		t.Fatal("Legacy DC2 media packet changed or relay-init missing")
 	}
 	download := bytes.Repeat([]byte{0xBC}, 22*1024)
 	socket.recv <- download
 	actual := make([]byte, len(download))
 	if _, err := io.ReadFull(conn, actual); err != nil || !bytes.Equal(actual, download) {
 		t.Fatalf("DC2 media download changed bytes=%d err=%v", len(actual), err)
+	}
+}
+
+
+// legacyAbridgedTestPacket creates a complete plaintext MTProto abridged
+// packet; payloadBytes must be divisible by four.
+func legacyAbridgedTestPacket(payloadBytes int, fill byte) []byte {
+	if payloadBytes < 4 || payloadBytes%4 != 0 {
+		panic("invalid test abridged payload length")
+	}
+	lengthWords := payloadBytes / 4
+	packet := []byte{0x7f, byte(lengthWords), byte(lengthWords >> 8), byte(lengthWords >> 16)}
+	return append(packet, bytes.Repeat([]byte{fill}, payloadBytes)...)
+}
+
+func TestFlowsealLegacyWorkerReassemblesObfuscatedPacketsNotTCPReads(t *testing.T) {
+	relayInit := buildTestInitWithSignedDC(t, 2)
+	plain := append([]byte{1, 0x11, 0x11, 0x11, 0x11}, []byte{2, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22}...)
+	plain = append(plain, []byte{1, 0x33, 0x33, 0x33, 0x33}...)
+	encrypted := xorWithStreamForTest(t, relayInit[8:40], relayInit[40:56], plain, true)
+
+	legacySocket := newWorkerRelayHarnessSocket()
+	legacyConn, err := mtProtoLegacyWorkerWebSocketConn(legacySocket, relayInit, "legacy.workers.dev")
+	if err != nil {
+		t.Fatalf("Legacy connect: %v", err)
+	}
+	defer legacyConn.Close()
+
+	if n, err := legacyConn.Write(encrypted[:3]); n != 3 || err != nil {
+		t.Fatalf("partial MTProto write: n=%d err=%v", n, err)
+	}
+	if got := legacySocket.sentFrames(); len(got) != 1 {
+		t.Fatalf("premature partial packet send, frames=%d", len(got))
+	}
+	if n, err := legacyConn.Write(encrypted[3:6]); n != 3 || err != nil {
+		t.Fatalf("packet completion write: n=%d err=%v", n, err)
+	}
+	if got := legacySocket.sentFrames(); len(got) != 2 || !bytes.Equal(got[1], encrypted[:5]) {
+		t.Fatalf("first packet boundary lost, frames=%d", len(got))
+	}
+	if n, err := legacyConn.Write(encrypted[6:]); n != len(encrypted)-6 || err != nil {
+		t.Fatalf("coalesced packet write: n=%d err=%v", n, err)
+	}
+	got := legacySocket.sentFrames()
+	if len(got) != 4 || !bytes.Equal(got[2], encrypted[5:14]) || !bytes.Equal(got[3], encrypted[14:]) {
+		t.Fatalf("Legacy packet boundaries not preserved, frames=%d", len(got))
+	}
+
+	// Chunk Relay retains the existing TCP-read framing behavior.
+	chunkSocket := newWorkerRelayHarnessSocket()
+	chunkConn, err := mtProtoWorkerWebSocketConn(chunkSocket, relayInit, "chunk.workers.dev")
+	if err != nil {
+		t.Fatalf("Chunk Relay connect: %v", err)
+	}
+	defer chunkConn.Close()
+	if n, err := chunkConn.Write(encrypted[:3]); n != 3 || err != nil {
+		t.Fatalf("Chunk Relay payload write: n=%d err=%v", n, err)
+	}
+	chunkFrames := chunkSocket.sentFrames()
+	if len(chunkFrames) != 2 || !bytes.Equal(chunkFrames[1], encrypted[:3]) {
+		t.Fatalf("Chunk Relay framing unexpectedly changed, frames=%d", len(chunkFrames))
 	}
 }
