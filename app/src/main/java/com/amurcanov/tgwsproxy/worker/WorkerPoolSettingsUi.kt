@@ -903,7 +903,7 @@ private fun WorkerEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(titleRes)) },
+        title = { Text(stringResource(titleRes), style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -1020,7 +1020,7 @@ private fun WorkerImportDialog(
         urls.all { WorkerEndpointValidator.validate(it, it) == null }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.worker_screen_a_import)) },
+        title = { Text(stringResource(R.string.worker_screen_a_import), style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 Text(
@@ -1181,7 +1181,10 @@ private fun WorkerPoolDestinationModeSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(stringResource(R.string.flowseal_media_fix_enabled))
+                    Text(
+                        stringResource(R.string.flowseal_media_fix_enabled),
+                        modifier = Modifier.weight(1f),
+                    )
                     Switch(
                         checked = mediaFixEnabled,
                         onCheckedChange = onMediaFixEnabledChange,
