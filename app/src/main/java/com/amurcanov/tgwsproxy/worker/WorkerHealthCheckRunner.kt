@@ -80,7 +80,9 @@ class WorkerHealthCheckRunner(
             latencyMs = 0,
         )
         val allSteps = listOf(configStep) + workerSteps
-        val status = aggregateStatus(allSteps)
+        val status = WorkerHealthStateResolver.statusAfterProbe(
+            worker.transport, aggregateStatus(allSteps),
+        )
         val errorCode = primaryErrorCode(allSteps)
         val finishedAt = System.currentTimeMillis()
         val (state, _) = WorkerHealthStateResolver.resolveAfterTransportCheck(
