@@ -839,14 +839,16 @@ private fun LegacyWorkerCard(
             )
             OutlinedTextField(
                 value = workerDomainText,
-                onValueChange = onWorkerDomainChange,
+                onValueChange = { onWorkerDomainChange(it.replace("\n", "").replace("\r", "")) },
                 enabled = !isProxyRunning,
                 label = { Text(stringResource(R.string.cf_worker_domain_label)) },
                 placeholder = { Text(stringResource(R.string.worker_domain_placeholder)) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .onFocusChanged { if (!it.isFocused) onWorkerDomainBlur() },
-                singleLine = true,
+                singleLine = false,
+                minLines = 2,
+                maxLines = 3,
             )
             WorkerTransportSelector(workerTransport, !isProxyRunning, onWorkerTransportChange)
             workerNormalizeHint?.let {
