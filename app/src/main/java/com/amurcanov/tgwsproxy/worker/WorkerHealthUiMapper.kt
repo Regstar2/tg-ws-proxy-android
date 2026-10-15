@@ -5,6 +5,7 @@ import com.amurcanov.tgwsproxy.R
 object WorkerHealthUiMapper {
     fun statusLabelRes(status: WorkerHealthCheckStatus): Int = when (status) {
         WorkerHealthCheckStatus.OK -> R.string.worker_health_status_ok
+        WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED -> R.string.worker_health_status_compatible_unverified
         WorkerHealthCheckStatus.FAIL -> R.string.worker_health_status_fail
         WorkerHealthCheckStatus.PARTIAL -> R.string.worker_health_status_partial
         WorkerHealthCheckStatus.TIMEOUT -> R.string.worker_health_status_timeout
