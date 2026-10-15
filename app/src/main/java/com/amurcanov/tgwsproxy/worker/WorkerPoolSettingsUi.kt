@@ -197,7 +197,7 @@ fun WorkerPoolSettingsScreen(
             LegacyWorkerCard(
                 workerDomainText = legacyWorkerDomainText,
                 workerEnabled = legacyWorkerEnabled,
-            workerTransport = legacyWorkerTransport,
+                workerTransport = legacyWorkerTransport,
                 workerNormalizeHint = legacyWorkerNormalizeHint,
                 isProxyRunning = uiState.isProxyRunning,
                 isDiagRunning = uiState.isDiagRunning,
