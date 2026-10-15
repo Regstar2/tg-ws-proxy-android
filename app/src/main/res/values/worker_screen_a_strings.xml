@@ -19,4 +19,13 @@
     <string name="worker_screen_a_advanced_hide">Hide additional settings</string>
     <string name="worker_screen_a_empty_hint">Add a Worker and choose HTTPS Chunk Relay or experimental Legacy WebSocket, then check its availability.</string>
     <string name="worker_screen_a_actions">Worker actions</string>
+    <string name="worker_screen_a_diagnostic_brief">Network compatibility does not confirm MTProto data exchange.</string>
+    <string name="worker_screen_a_change_strategy">Change strategy</string>
+    <string name="worker_screen_a_extra_show">Priority and enabled state</string>
+    <string name="worker_screen_a_extra_hide">Hide additional fields</string>
+    <string name="worker_screen_a_chunk_short">HTTPS Chunk Relay</string>
+    <string name="worker_screen_a_legacy_short">Legacy WebSocket (/apiws)</string>
+    <string name="worker_screen_a_legacy_warning">Experimental. An HTTP 101 response does not confirm Telegram works.</string>
+    <string name="worker_screen_a_help_show">Protocol limitations</string>
+    <string name="worker_screen_a_help_hide">Hide protocol limitations</string>
 </resources>
