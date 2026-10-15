@@ -894,6 +894,7 @@ private fun WorkerEditDialog(
     var priorityText by rememberSaveable { mutableStateOf(initialPriority.toString()) }
     var transport by rememberSaveable { mutableStateOf(initialTransport) }
     var validationError by remember { mutableStateOf<WorkerValidationError?>(null) }
+    var extraFieldsExpanded by rememberSaveable { mutableStateOf(false) }
     val normalizedUrl = remember(url) { WorkerDomain.normalize(url) }
     val duplicateUrl = normalizedUrl.isNotBlank() &&
         existingUrls.any { WorkerDomain.normalize(it).equals(normalizedUrl, ignoreCase = true) }
@@ -931,24 +932,31 @@ private fun WorkerEditDialog(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 WorkerTransportSelector(transport, !isProxyRunning, { transport = it })
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = priorityText,
-                    onValueChange = { priorityText = it.filter { ch -> ch.isDigit() || ch == '-' }; validationError = null },
-                    enabled = !isProxyRunning,
-                    label = { Text(stringResource(R.string.worker_pool_worker_priority)) },
-                    supportingText = { Text(stringResource(R.string.worker_pool_worker_priority_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.worker_pool_worker_enabled))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it }, enabled = !isProxyRunning)
+                TextButton(onClick = { extraFieldsExpanded = !extraFieldsExpanded }) {
+                    Text(stringResource(
+                        if (extraFieldsExpanded) R.string.worker_screen_a_extra_hide else R.string.worker_screen_a_extra_show,
+                    ))
+                }
+                AnimatedVisibility(visible = extraFieldsExpanded) {
+                    Column {
+                        OutlinedTextField(
+                            value = priorityText,
+                            onValueChange = { priorityText = it.filter { ch -> ch.isDigit() || ch == '-' }; validationError = null },
+                            enabled = !isProxyRunning,
+                            label = { Text(stringResource(R.string.worker_pool_worker_priority)) },
+                            supportingText = { Text(stringResource(R.string.worker_pool_worker_priority_hint)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(stringResource(R.string.worker_pool_worker_enabled))
+                            Switch(checked = enabled, onCheckedChange = { enabled = it }, enabled = !isProxyRunning)
+                        }
+                    }
                 }
                 validationError?.let { error ->
                     Text(
@@ -1223,25 +1231,47 @@ private fun WorkerTransportSelector(
     enabled: Boolean,
     onChange: (WorkerTransport) -> Unit,
 ) {
+    var helpExpanded by rememberSaveable { mutableStateOf(false) }
     Column {
         Text(stringResource(R.string.worker_transport_label), style = MaterialTheme.typography.labelLarge)
         WorkerTransport.entries.forEach { option ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 RadioButton(
                     selected = transport == option,
                     onClick = { onChange(option) },
                     enabled = enabled,
                 )
                 Text(
-                    stringResource(workerTransportLabel(option)),
+                    stringResource(
+                        if (option == WorkerTransport.CHUNK_RELAY)
+                            R.string.worker_screen_a_chunk_short
+                        else R.string.worker_screen_a_legacy_short,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
-        Text(
-            stringResource(R.string.worker_transport_scope),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (transport == WorkerTransport.LEGACY_WEBSOCKET) {
+            Text(
+                stringResource(R.string.worker_screen_a_legacy_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        TextButton(onClick = { helpExpanded = !helpExpanded }) {
+            Text(stringResource(if (helpExpanded) R.string.worker_screen_a_help_hide else R.string.worker_screen_a_help_show))
+        }
+        AnimatedVisibility(visible = helpExpanded) {
+            Text(
+                stringResource(R.string.worker_transport_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
