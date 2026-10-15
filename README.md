@@ -45,7 +45,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 | Worker Pool | Работает, но остаётся медленнее прямого соединения и не рекомендуется как основной маршрут |
 
-**Telegram Worker:** доступны два явно выбираемых транспорта — HTTPS Chunk Relay (по умолчанию) и Flowseal Legacy WebSocket (`/apiws`). Legacy WebSocket остаётся экспериментальным: успешный WebSocket handshake не подтверждает передачу MTProto или работу медиа на Android. Текущие пользовательские настройки продолжают использовать Chunk Relay, пока тип не выбран вручную. Инструкция: [Cloudflare Worker](docs/cloudflare-worker.md).
+**Telegram Worker:** доступны два явно выбираемых транспорта — HTTPS Chunk Relay (по умолчанию) и Flowseal Legacy WebSocket (`/apiws`). Legacy WebSocket — **экспериментальный режим**: некоторые провайдеры ограничивают долгоживущие WebSocket-соединения к Cloudflare, поэтому Telegram может не подключаться, а сообщения и медиа — не загружаться. Успешный WebSocket handshake не подтверждает работу MTProto на Android. Текущие пользовательские настройки продолжают использовать Chunk Relay, пока тип не выбран вручную. Инструкция: [Cloudflare Worker](docs/cloudflare-worker.md).
 | Feedback | Отдельный экран; GitHub Issue Forms без встроенного PAT |
 | Updates | Проверка официальных GitHub Releases с SemVer и открытием официальной страницы релиза |
 
