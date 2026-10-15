@@ -77,7 +77,7 @@ function init(key){
 const chunk=mk("w1","Основной Worker","primary-demo.workers.dev","chunk","good");
 const legacy=mk("w2","Резервный Flowseal","legacy-demo.workers.dev","legacy","compatible");
 const bad=mk("w3","Проблемный Worker","broken-demo.workers.dev","chunk","failed");
-s={scenario:key,pool:true,running:false,workers:[chunk,legacy],selected:"w1",actual:null,strategy:"failover",route:"auto",destination:"preserve",dcOnly:false,mediaFix:false,mediaDc:"4",mediaIp:"149.154.167.220",mask:false,legacySingle:{name:"Прежний Worker",url:"old-demo.workers.dev",proto:"chunk",enabled:true},events:["Транспортная проверка ≠ подтверждение MTProto."],lastFail:"",next:4};
+s={scenario:key,pool:true,running:false,workers:[chunk,legacy],selected:"w1",actual:null,strategy:"failover",route:"auto",destination:"preserve",dcOnly:false,mediaFix:false,mediaDc:"4",mediaIp:"149.154.167.220",mask:false,legacySingle:{name:"Прежний Worker",url:"old-demo.workers.dev",proto:"chunk",enabled:true},events:["Транспортная проверка ≠ подтверждение MTProto."],lastFail:"",next:4,advancedOpen:false};
 if(key==="empty"){s.workers=[];s.selected=null}
 if(key==="chunk"){s.workers=[chunk]}
 if(key==="legacy"){s.workers=[legacy];s.selected="w2"}
@@ -142,7 +142,7 @@ group("legacy","Flowseal Legacy WebSocket","/apiws · экспериментал
 '<div class="buttons">'+button("Проверить все Worker","checkAll",null,"",s.running||!s.workers.some(w=>w.enabled))+'</div>';
 }
 function extras(){
-return '<details class="card"><summary>Дополнительные настройки Worker</summary><div class="stack spaced">'+
+return '<details class="card" '+(s.advancedOpen?'open':'')+'><summary>Дополнительные настройки Worker</summary><div class="stack spaced">'+
 '<div class="field"><label>Режим маршрутизации MTProto (макет)</label><select data-field="route" '+(s.running?"disabled":"")+'><option value="auto" '+(s.route==="auto"?"selected":"")+'>Авто с резервным маршрутом</option><option value="worker" '+(s.route==="worker"?"selected":"")+'>Только Worker</option></select></div>'+
 '<p class="small">Эти понятные режимы — UX-предложение. В Android должны соответствовать текущей политике Wi‑Fi/мобильной сети; совпадение ещё требует проверки.</p>'+
 '<div class="field"><label>Адрес Telegram DC</label><select data-field="destination" '+(s.running?"disabled":"")+'><option value="preserve" '+(s.destination==="preserve"?"selected":"")+'>Сохранять исходный адрес</option><option value="map" '+(s.destination==="map"?"selected":"")+'>Таблица DC → IP</option><option value="media" '+(s.destination==="media"?"selected":"")+'>Экспериментальная замена media DC</option></select></div>'+
@@ -242,6 +242,7 @@ if(k==="singleProto")s.legacySingle.proto=t.value;
 if(t.dataset.draft==="proto"&&draft){draft.proto=t.value;checkDraft=false;renderDialog()}
 });
 $("scenario").addEventListener("change",e=>init(e.target.value));
+document.addEventListener("toggle",e=>{if(e.target.matches('details.card'))s.advancedOpen=e.target.open},true);
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&dialog){dialog=null;renderDialog()}});
 init("mixed");
 })();
