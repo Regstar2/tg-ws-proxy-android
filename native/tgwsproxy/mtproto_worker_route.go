@@ -445,7 +445,11 @@ func (c *mtProtoWorkerConnector) Connect(
 		}
 
 		stopCancel := context.AfterFunc(ctx, ws.Close)
-		stream, err := mtProtoWorkerWebSocketConn(ws, workerRelayInit, candidate.Domain)
+		connectStream := mtProtoWorkerWebSocketConn
+		if transport == workerTransportLegacyWebSocket {
+			connectStream = mtProtoLegacyWorkerWebSocketConn
+		}
+		stream, err := connectStream(ws, workerRelayInit, candidate.Domain)
 		stopCancel()
 		if ctx.Err() != nil {
 			ws.Close()
