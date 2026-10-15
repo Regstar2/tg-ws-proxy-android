@@ -96,7 +96,6 @@ fun WorkerPoolSettingsScreen(
     onOpenWorkerHelp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var editingWorker by remember { mutableStateOf<WorkerItemUiModel?>(null) }
     var deletingWorker by remember { mutableStateOf<WorkerItemUiModel?>(null) }
@@ -110,6 +109,7 @@ fun WorkerPoolSettingsScreen(
         totalWorkers = uiState.workers.size,
         enabledWorkers = uiState.summary.enabledCount,
         checkingAll = uiState.isCheckingAllWorkers,
+        activeRoute = uiState.runtime.activeRoute,
     )
 
     LaunchedEffect(Unit) {
@@ -188,6 +188,7 @@ fun WorkerPoolSettingsScreen(
                         item = item,
                         isChecking = uiState.checkingWorkerIds.contains(item.id),
                         isCheckingAll = uiState.isCheckingAllWorkers,
+                        showActualRuntime = presentation.showActualRuntime,
                         onSelect = { onSelectWorker(item.id) },
                         onEdit = {
                             WorkerPoolUiLogger.workerEditOpened(item.id)
@@ -446,7 +447,7 @@ private fun WorkerPoolConnectionSection(
             } else {
                 com.amurcanov.tgwsproxy.MetricLine(
                     stringResource(R.string.cf_worker_pool_legacy_worker),
-                    legacyWorkerDomainText.ifBlank { stringResource(R.string.worker_pool_no_selected_worker) },
+                    if (legacyWorkerDomainText.isBlank()) stringResource(R.string.worker_pool_no_selected_worker) else legacyWorkerDomainText,
                 )
                 com.amurcanov.tgwsproxy.MetricLine(
                     stringResource(R.string.worker_transport_label),
@@ -491,85 +492,6 @@ private fun WorkerPoolConnectionSection(
                 modifier = Modifier.padding(top = 8.dp),
             ) {
                 Text(stringResource(R.string.worker_pool_open_diagnostics))
-            }
-        }
-    }
-}
-
-@Composable
-private fun WorkerPoolSummarySection(summary: WorkerPoolSummaryUiModel) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-        ),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Text(
-                stringResource(R.string.worker_pool_summary_title),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_enable),
-                stringResource(summary.poolEnabledLabelRes),
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_strategy_current),
-                stringResource(summary.strategyLabelRes),
-            )
-            Text(
-                stringResource(R.string.worker_pool_workers_total, summary.totalCount),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                stringResource(R.string.worker_pool_workers_enabled_count, summary.enabledCount),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (summary.healthyCount > 0) {
-                Text(
-                    stringResource(R.string.worker_pool_workers_healthy_count, summary.healthyCount),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (summary.degradedCount > 0) {
-                Text(
-                    stringResource(R.string.worker_pool_workers_degraded_count, summary.degradedCount),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (summary.deadCount > 0) {
-                Text(
-                    stringResource(R.string.worker_pool_workers_dead_count, summary.deadCount),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (summary.unknownCount > 0) {
-                Text(
-                    stringResource(R.string.worker_pool_workers_unknown_count, summary.unknownCount),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_selected_worker),
-                summary.selectedWorkerName,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_runtime_worker),
-                summary.runtimeWorkerName,
-            )
-            summary.lastCheckTimeLabel?.let { checked ->
-                Text(
-                    stringResource(R.string.worker_pool_last_checked, checked),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            summary.lastFailoverReasonLabel?.let { reason ->
-                com.amurcanov.tgwsproxy.MetricLine(
-                    stringResource(R.string.worker_pool_last_failover_reason),
-                    reason,
-                )
             }
         }
     }
@@ -647,65 +569,6 @@ private fun WorkerPoolStrategySection(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WorkerPoolRuntimeSection(runtime: WorkerRuntimeUiModel, context: android.content.Context) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
-        ),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Text(
-                stringResource(R.string.worker_pool_runtime_state_title),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.route_runtime_configured_mode),
-                RouteDisplayNames.modeLabel(context, runtime.configuredMode),
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.route_runtime_selected_route),
-                RouteDisplayNames.routeLabel(context, runtime.selectedRoute),
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.route_runtime_active_route),
-                RouteDisplayNames.routeLabel(context, runtime.activeRoute),
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_selected_worker),
-                runtime.selectedWorkerName,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_runtime_worker),
-                runtime.runtimeWorkerName,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_last_successful_worker),
-                runtime.lastSuccessfulWorkerName,
-            )
-            com.amurcanov.tgwsproxy.MetricLine(
-                stringResource(R.string.worker_pool_last_failed_worker),
-                runtime.lastFailedWorkerName,
-            )
-            if (runtime.failoverReason.isNotBlank()) {
-                com.amurcanov.tgwsproxy.MetricLine(
-                    stringResource(R.string.worker_pool_last_failover_reason),
-                    runtime.failoverReason,
-                )
-            }
-            if (runtime.failoverAttemptCount > 0) {
-                com.amurcanov.tgwsproxy.MetricLine(
-                    stringResource(R.string.worker_failover_attempts),
-                    runtime.failoverAttemptCount.toString(),
-                )
             }
         }
     }
@@ -791,37 +654,13 @@ private fun WorkerPoolEmptyState() {
     }
 }
 
-@Composable
-private fun WorkerPoolNoEnabledState(onAddWorker: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.worker_pool_no_enabled_title),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                stringResource(R.string.worker_pool_no_enabled_description),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            FilledTonalButton(onClick = onAddWorker) {
-                Text(stringResource(R.string.worker_pool_add_worker))
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkerPoolItemCardPolished(
     item: WorkerItemUiModel,
     isChecking: Boolean,
     isCheckingAll: Boolean,
+    showActualRuntime: Boolean,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -881,11 +720,6 @@ private fun WorkerPoolItemCardPolished(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.worker_pool_check_worker)) },
-                        enabled = item.canCheck && !isChecking && !isCheckingAll,
-                        onClick = { menuExpanded = false; onCheck() },
-                    )
-                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.worker_pool_edit_worker)) },
                         enabled = item.canEdit,
                         onClick = { menuExpanded = false; onEdit() },
@@ -933,7 +767,7 @@ private fun WorkerPoolItemCardPolished(
                     modifier = Modifier.padding(top = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    item.tagLabelResIds.forEach { tagRes ->
+                    item.tagLabelResIds.filter { it != R.string.worker_pool_runtime_worker || showActualRuntime }.forEach { tagRes ->
                         AssistChip(onClick = {}, label = { Text(stringResource(tagRes)) })
                     }
                 }
@@ -945,14 +779,14 @@ private fun WorkerPoolItemCardPolished(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-            item.lastCheckedLabel?.let { checked ->
+                    item.lastCheckedLabel?.let { checked ->
                 Text(
                     stringResource(R.string.worker_pool_last_checked, checked),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!item.enabled) {
+                    if (!item.enabled) {
                 Text(
                     stringResource(R.string.worker_health_skipped_disabled),
                     style = MaterialTheme.typography.bodySmall,
@@ -1166,6 +1000,7 @@ private fun WorkerImportDialog(
     var text by rememberSaveable { mutableStateOf("") }
     var transport by rememberSaveable { mutableStateOf(WorkerTransport.CHUNK_RELAY) }
     var message by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
     val urls = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
     val normalized = urls.map { WorkerDomain.normalize(it).lowercase() }
     val exists = existingUrls.map { WorkerDomain.normalize(it).lowercase() }.toSet()
@@ -1213,7 +1048,7 @@ private fun WorkerImportDialog(
                     for (url in urls) {
                         val error = onImport(WorkerDomain.normalize(url), url, transport)
                         if (error != null) {
-                            message = "Import stopped at item ${accepted + 1}: ${error.name}"
+                            message = context.getString(R.string.worker_screen_a_import_error, accepted + 1, error.name)
                             break
                         }
                         accepted++
