@@ -4,6 +4,7 @@ import com.amurcanov.tgwsproxy.routeprobe.RouteProbeConfig
 
 enum class WorkerHealthCheckStatus {
     OK,
+    COMPATIBLE_UNVERIFIED,
     FAIL,
     PARTIAL,
     TIMEOUT,

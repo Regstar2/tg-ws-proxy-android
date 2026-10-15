@@ -60,6 +60,7 @@ fun WorkerPoolSettingsScreen(
     uiState: WorkerPoolUiState,
     legacyWorkerDomainText: String,
     legacyWorkerEnabled: Boolean,
+    legacyWorkerTransport: WorkerTransport,
     legacyWorkerNormalizeHint: String?,
     existingWorkerUrls: List<String> = emptyList(),
     workerDestinationMode: WorkerDestinationMode = WorkerDestinationMode.PRESERVE_ORIGINAL_DST,
@@ -77,7 +78,7 @@ fun WorkerPoolSettingsScreen(
     onPoolEnabledChange: (Boolean) -> Unit,
     onSelectionStrategyChange: (WorkerSelectionStrategy) -> Unit,
     onSelectWorker: (String) -> Unit,
-    onAddWorker: (name: String, url: String, enabled: Boolean, priority: Int) -> WorkerValidationError?,
+    onAddWorker: (name: String, url: String, enabled: Boolean, priority: Int, transport: WorkerTransport) -> WorkerValidationError?,
     onUpdateWorker: (WorkerEndpoint) -> WorkerValidationError?,
     onDeleteWorker: (String) -> Unit,
     onSetWorkerEnabled: (String, Boolean) -> Unit,
@@ -87,6 +88,7 @@ fun WorkerPoolSettingsScreen(
     onLegacyWorkerDomainChange: (String) -> Unit,
     onLegacyWorkerDomainBlur: () -> Unit,
     onLegacyWorkerEnabledChange: (Boolean) -> Unit,
+    onLegacyWorkerTransportChange: (WorkerTransport) -> Unit,
     onTestLegacyWorker: () -> Unit,
     onOpenWorkerHelp: () -> Unit,
     modifier: Modifier = Modifier,
@@ -195,12 +197,14 @@ fun WorkerPoolSettingsScreen(
             LegacyWorkerCard(
                 workerDomainText = legacyWorkerDomainText,
                 workerEnabled = legacyWorkerEnabled,
+                workerTransport = legacyWorkerTransport,
                 workerNormalizeHint = legacyWorkerNormalizeHint,
                 isProxyRunning = uiState.isProxyRunning,
                 isDiagRunning = uiState.isDiagRunning,
                 onWorkerDomainChange = onLegacyWorkerDomainChange,
                 onWorkerDomainBlur = onLegacyWorkerDomainBlur,
                 onWorkerEnabledChange = onLegacyWorkerEnabledChange,
+                onWorkerTransportChange = onLegacyWorkerTransportChange,
                 onTestWorker = onTestLegacyWorker,
                 onOpenWorkerHelp = onOpenWorkerHelp,
             )
@@ -214,10 +218,11 @@ fun WorkerPoolSettingsScreen(
             initialUrl = "",
             initialEnabled = true,
             initialPriority = 0,
+            initialTransport = WorkerTransport.CHUNK_RELAY,
             existingUrls = existingWorkerUrls,
             onDismiss = { showAddDialog = false },
-            onSave = { name, url, enabled, priority ->
-                val error = onAddWorker(name, url, enabled, priority)
+            onSave = { name, url, enabled, priority, transport ->
+                val error = onAddWorker(name, url, enabled, priority, transport)
                 if (error == null) showAddDialog = false
                 error
             },
@@ -231,15 +236,17 @@ fun WorkerPoolSettingsScreen(
             initialUrl = item.endpoint.url,
             initialEnabled = item.enabled,
             initialPriority = item.priority,
+            initialTransport = item.endpoint.transport,
             existingUrls = existingWorkerUrls.filter { it != item.endpoint.url },
             onDismiss = { editingWorker = null },
-            onSave = { name, url, enabled, priority ->
+            onSave = { name, url, enabled, priority, transport ->
                 val error = onUpdateWorker(
                     item.endpoint.copy(
                         name = name,
                         url = url,
                         enabled = enabled,
                         priority = priority,
+                        transport = transport,
                         state = if (enabled) {
                             if (item.endpoint.state == WorkerHealthState.DISABLED) {
                                 WorkerHealthState.UNKNOWN
@@ -712,6 +719,11 @@ private fun WorkerPoolItemCardPolished(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(item.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
+                        stringResource(workerTransportLabel(item.endpoint.transport)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
                         item.maskedUrl,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -817,12 +829,14 @@ private fun WorkerPoolItemCardPolished(
 private fun LegacyWorkerCard(
     workerDomainText: String,
     workerEnabled: Boolean,
+    workerTransport: WorkerTransport,
     workerNormalizeHint: String?,
     isProxyRunning: Boolean,
     isDiagRunning: Boolean,
     onWorkerDomainChange: (String) -> Unit,
     onWorkerDomainBlur: () -> Unit,
     onWorkerEnabledChange: (Boolean) -> Unit,
+    onWorkerTransportChange: (WorkerTransport) -> Unit,
     onTestWorker: () -> Unit,
     onOpenWorkerHelp: () -> Unit,
 ) {
@@ -851,6 +865,7 @@ private fun LegacyWorkerCard(
                     .onFocusChanged { if (!it.isFocused) onWorkerDomainBlur() },
                 singleLine = true,
             )
+            WorkerTransportSelector(workerTransport, !isProxyRunning, onWorkerTransportChange)
             workerNormalizeHint?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             }
@@ -884,14 +899,16 @@ private fun WorkerEditDialog(
     initialUrl: String,
     initialEnabled: Boolean,
     initialPriority: Int,
+    initialTransport: WorkerTransport,
     existingUrls: List<String>,
     onDismiss: () -> Unit,
-    onSave: (name: String, url: String, enabled: Boolean, priority: Int) -> WorkerValidationError?,
+    onSave: (name: String, url: String, enabled: Boolean, priority: Int, transport: WorkerTransport) -> WorkerValidationError?,
 ) {
     var name by rememberSaveable { mutableStateOf(initialName) }
     var url by rememberSaveable { mutableStateOf(initialUrl) }
     var enabled by rememberSaveable { mutableStateOf(initialEnabled) }
     var priorityText by rememberSaveable { mutableStateOf(initialPriority.toString()) }
+    var transport by rememberSaveable { mutableStateOf(initialTransport) }
     var validationError by remember { mutableStateOf<WorkerValidationError?>(null) }
     val normalizedUrl = remember(url) { WorkerDomain.normalize(url) }
     val duplicateUrl = normalizedUrl.isNotBlank() &&
@@ -926,6 +943,8 @@ private fun WorkerEditDialog(
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                WorkerTransportSelector(transport, true, { transport = it })
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = priorityText,
@@ -964,7 +983,7 @@ private fun WorkerEditDialog(
                 onClick = {
                     if (duplicateUrl) return@TextButton
                     val priority = priorityText.toIntOrNull() ?: 0
-                    validationError = onSave(name.trim(), url.trim(), enabled, priority)
+                    validationError = onSave(name.trim(), url.trim(), enabled, priority, transport)
                 },
             ) {
                 Text(stringResource(R.string.worker_pool_save))
@@ -1126,5 +1145,39 @@ private fun WorkerPoolDestinationModeSection(
                 )
             }
         }
+    }
+}
+
+private fun workerTransportLabel(transport: WorkerTransport): Int = when (transport) {
+    WorkerTransport.CHUNK_RELAY -> R.string.worker_transport_chunk_relay
+    WorkerTransport.LEGACY_WEBSOCKET -> R.string.worker_transport_legacy_websocket
+}
+
+@Composable
+private fun WorkerTransportSelector(
+    transport: WorkerTransport,
+    enabled: Boolean,
+    onChange: (WorkerTransport) -> Unit,
+) {
+    Column {
+        Text(stringResource(R.string.worker_transport_label), style = MaterialTheme.typography.labelLarge)
+        WorkerTransport.entries.forEach { option ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = transport == option,
+                    onClick = { onChange(option) },
+                    enabled = enabled,
+                )
+                Text(
+                    stringResource(workerTransportLabel(option)),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.worker_transport_scope),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

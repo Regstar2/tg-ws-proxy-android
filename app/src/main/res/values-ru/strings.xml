@@ -64,7 +64,7 @@
     <string name="cf_worker_pool_selected">Выбранный Worker</string>
     <string name="cf_worker_pool_open">Открыть Worker Pool</string>
     <string name="cf_worker_pool_add">Добавить Worker</string>
-    <string name="cf_worker_pool_legacy_worker">Legacy Worker</string>
+    <string name="cf_worker_pool_legacy_worker">Одиночный Worker (без пула)</string>
     <string name="cf_worker_pool_no_selected">Нет</string>
     <string name="cf_worker_pool_foundation_hint">Балансировка Worker Pool пока недоступна. Для маршрутизации используется legacy single Worker ниже.</string>
     <string name="cf_worker_pool_worker_item_title">Worker 1</string>
@@ -615,6 +615,7 @@
     <string name="worker_health_error">Ошибка: %1$s</string>
     <string name="worker_health_failures">Сбоев: %1$d</string>
     <string name="worker_health_status_ok">OK</string>
+    <string name="worker_health_status_compatible_unverified">WebSocket совместим · MTProto не проверен</string>
     <string name="worker_health_status_fail">Ошибка</string>
     <string name="worker_health_status_partial">Частично</string>
     <string name="worker_health_status_timeout">Таймаут</string>
@@ -667,6 +668,8 @@
     <string name="worker_failover_reason_dns_failed">Ошибка DNS</string>
     <string name="worker_failover_reason_tls_failed">Ошибка TLS</string>
     <string name="worker_failover_reason_websocket_failed">Ошибка WebSocket</string>
+    <string name="worker_failover_reason_ws_handshake_failed">Не удалось установить WebSocket-соединение с Worker</string>
+    <string name="worker_failover_reason_protocol_incompatible">Неверный протокол Worker. Выберите соответствующий тип: Chunk Relay или Legacy WebSocket.</string>
     <string name="worker_failover_reason_selected_worker_disabled">Выбранный worker выключен</string>
     <string name="worker_failover_reason_selected_worker_dead">Выбранный worker мёртв</string>
     <string name="worker_failover_reason_selected_unavailable">Выбранный worker недоступен</string>
@@ -948,9 +951,15 @@
     <string name="mtproto_status_failed">Ошибка MTProto runtime</string>
     <string name="mtproto_local_only_limited_hint">Локальный listener доступен, но outbound-маршрут не настроен. Сохраните SOCKS5/WS как резервный вариант.</string>
     <string name="mtproto_validation_fake_tls_domain_invalid">Укажите публичный домен.</string>
-    <string name="worker_chunk_relay_scope">HTTPS Chunk Relay: проверена совместимость протокола и доступность Durable Object. Двусторонний обмен MTProto не проверялся.</string>
+    <string name="worker_chunk_relay_scope">Worker: проверка совместимости выбранного протокола не подтверждает двусторонний обмен MTProto и работу медиа.</string>
     <string name="worker_chunk_relay_step">Chunk Relay / Durable Object</string>
     <string name="worker_protocol_incompatible">Несовместимый протокол Worker: требуется Chunk Relay, а не старый WebSocket</string>
     <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay доступен; обмен MTProto не проверен</string>
     <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay недоступен или несовместим</string>
+    <string name="worker_transport_label">Протокол Telegram Worker</string>
+    <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (рекомендуется)</string>
+    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws) — экспериментально</string>
+    <string name="worker_transport_scope">Flowseal Legacy WebSocket — экспериментальный режим. Некоторые провайдеры ограничивают долгоживущие соединения WebSocket с Cloudflare: Telegram может не подключиться, сообщения и медиа — не загружаться. Успешная проверка WebSocket (HTTP 101) не подтверждает работу MTProto. По умолчанию используется Chunk Relay. Worker для WARP — отдельный тип.</string>
+    <string name="cf_worker_test_legacy_fail">Legacy WebSocket недоступен или несовместим</string>
+    <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d из %2$d проверок подключения пройдено (обмен MTProto не проверялся)</string>
 </resources>

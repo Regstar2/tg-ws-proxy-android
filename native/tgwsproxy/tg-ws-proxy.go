@@ -3084,6 +3084,8 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				}
 			case "worker_enabled":
 				settings.Worker.Enabled = parseBoolValue(val)
+			case "worker_transport":
+				settings.Worker.Transport = normalizeWorkerTransport(val)
 			case "worker_domain":
 				settings.Worker.Domain = NormalizeWorkerDomain(val)
 				if settings.Worker.Domain != "" && (!settings.PolicyPresent || settings.AllowWorker) {
@@ -3098,6 +3100,7 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 					settings.Worker.Failover.MaxAttempts = n
 				}
 			case "worker_failover_candidates":
+				settings.Worker.Failover.CandidatesSpecified = true
 				settings.Worker.Failover.Candidates = parseWorkerFailoverCandidates(val)
 			case "worker_failover_skipped_backoff":
 				if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n >= 0 {

@@ -65,6 +65,7 @@ import com.amurcanov.tgwsproxy.worker.DcIpTexts
 import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
 import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
+import com.amurcanov.tgwsproxy.worker.WorkerTransport
 import com.amurcanov.tgwsproxy.worker.WorkerFailoverConfigBuilder
 import com.amurcanov.tgwsproxy.worker.WorkerRuntimeFailureRecorder
 import com.amurcanov.tgwsproxy.worker.WorkerHealthRepository
@@ -407,6 +408,9 @@ private fun ProxyScreen(
     }
     var workerEnabled by remember { mutableStateOf(prefs.getBoolean("worker_enabled", false)) }
     var workerDomainText by remember { mutableStateOf(prefs.getString("worker_domain", "") ?: "") }
+    var workerTransport by remember {
+        mutableStateOf(WorkerTransport.fromPref(prefs.getString(ProxyRuntimeConfigFactory.KEY_WORKER_TRANSPORT, null)))
+    }
     var workerDestinationMode by remember {
         mutableStateOf(WorkerDestinationMode.fromPref(prefs.getString(ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE, null)))
     }
@@ -2079,6 +2083,7 @@ private fun ProxyScreen(
                             isProxyRunning = isRunning,
                             workerDomainText = workerDomainText,
                             workerEnabled = workerEnabled,
+                            workerTransport = workerTransport,
                             workerNormalizeHint = workerNormalizeHint,
                             workerPoolEnabled = workerPoolEnabled,
                             workerPoolWorkers = workerPoolWorkers,
@@ -2105,6 +2110,10 @@ private fun ProxyScreen(
                                     .putString("worker_domain", WorkerDomain.normalize(workerDomainText))
                                     .putBoolean("worker_enabled", workerEnabled)
                                     .apply()
+                            },
+                            onWorkerTransportChange = { transport ->
+                                workerTransport = transport
+                                prefs.edit().putString(ProxyRuntimeConfigFactory.KEY_WORKER_TRANSPORT, transport.prefValue).apply()
                             },
                             onWorkerEnabledChange = { enabled ->
                                 workerEnabled = enabled
@@ -2186,13 +2195,14 @@ private fun ProxyScreen(
                                 workerPoolRepository.selectWorker(id)
                                 refreshWorkerPoolState()
                             },
-                            onAddWorker = { name, url, enabled, priority ->
+                            onAddWorker = { name, url, enabled, priority, transport ->
                                 val result = workerPoolRepository.addWorker(
                                     WorkerEndpoint.create(
                                         name = name,
                                         url = url,
                                         enabled = enabled,
                                         priority = priority,
+                                        transport = transport,
                                     ),
                                 )
                                 if (result.isSuccess) {
@@ -2256,16 +2266,19 @@ private fun ProxyScreen(
                                     isDiagRunning = true
                                     diagStatusText = context.getString(R.string.diag_running)
                                     coroutineScope.launch {
-                                        val report = ConnectionDiagnostics.probeWorker(probeDomain)
+                                        val probeTransport = if (workerPoolEnabled) {
+                                            workerPoolSelectedWorker?.transport ?: WorkerTransport.CHUNK_RELAY
+                                        } else workerTransport
+                                        val report = ConnectionDiagnostics.probeWorker(probeDomain, probeTransport)
                                         ConnectionDiagnostics.logReport(report)
                                         val status = if (report.successCount > 0) {
                                             context.getString(
-                                                R.string.cf_worker_test_ok,
+                                                if (probeTransport == WorkerTransport.LEGACY_WEBSOCKET) R.string.cf_worker_test_legacy_ok else R.string.cf_worker_test_ok,
                                                 report.successCount,
                                                 report.totalCount,
                                             )
                                         } else {
-                                            context.getString(R.string.cf_worker_test_fail)
+                                            context.getString(if (probeTransport == WorkerTransport.LEGACY_WEBSOCKET) R.string.cf_worker_test_legacy_fail else R.string.cf_worker_test_fail)
                                         }
                                         diagStatusText = status
                                         prefs.edit().putString("diag_last_status", status).apply()
@@ -2275,7 +2288,7 @@ private fun ProxyScreen(
                                 }
                             },
                             onOpenWorkerHelp = {
-                                openUrl("https://github.com/Regstar2/TgWsProxy_Android/blob/main/docs/cloudflare-worker.md")
+                                openUrl("https://github.com/Regstar2/tg-ws-proxy-android/blob/main/docs/cloudflare-worker.md")
                             },
                             manualCfDomainsText = manualCfDomainsText,
                             invalidManualCfDomains = invalidManualCfDomains,

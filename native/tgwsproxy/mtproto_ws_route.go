@@ -301,11 +301,17 @@ func mtProtoWebSocketConn(ws mtProtoFrameSocket, relayInit []byte, remote string
 	return mtProtoWebSocketConnWithFraming(ws, relayInit, remote, true)
 }
 
-// mtProtoWorkerWebSocketConn mirrors Flowseal's cf_worker fallback semantics:
-// relay_init is sent first, then each transformed TCP chunk is forwarded as one
-// WebSocket message without MTProto packet-aware splitting.
+// Chunk Relay preserves its existing TCP-read WebSocket message framing.
+// This is deliberately separate from the packet-aware Legacy Worker path.
 func mtProtoWorkerWebSocketConn(ws mtProtoFrameSocket, relayInit []byte, remote string) (net.Conn, error) {
 	return mtProtoWebSocketConnWithFraming(ws, relayInit, remote, false)
+}
+
+// Flowseal's Legacy /apiws bridge uses MsgSplitter for Worker fallback:
+// assemble complete MTProto transport packets before emitting WS messages.
+// Never apply this framing to the production Chunk Relay transport.
+func mtProtoLegacyWorkerWebSocketConn(ws mtProtoFrameSocket, relayInit []byte, remote string) (net.Conn, error) {
+	return mtProtoWebSocketConnWithFraming(ws, relayInit, remote, true)
 }
 
 func mtProtoWebSocketConnWithFraming(

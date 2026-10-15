@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
 import com.amurcanov.tgwsproxy.worker.WorkerFailoverPayload
+import com.amurcanov.tgwsproxy.worker.WorkerTransport
 
 data class ProxyRuntimeStartConfig(
     val port: Int,
@@ -48,6 +49,7 @@ class ProxyRuntimeConfigFactory(
             manualCfDomains = manualCfDomainsProvider(),
             workerEnabled = prefs.getBoolean(KEY_WORKER_ENABLED, false),
             workerDomain = WorkerDomain.normalize(workerDomainProvider()),
+            workerTransport = WorkerTransport.fromPref(prefs.getString(KEY_WORKER_TRANSPORT, null)),
             workerFailover = workerFailoverPayloadProvider(),
             workerDestinationMode = workerDestinationModeProvider(),
             flowsealMediaFixEnabled = flowsealMediaFixEnabledProvider(),
@@ -74,6 +76,7 @@ class ProxyRuntimeConfigFactory(
         const val KEY_CFPROXY_PRIORITY = "cfproxy_priority"
         const val KEY_CFPROXY_ONLY = "cfproxy_only"
         const val KEY_WORKER_ENABLED = "worker_enabled"
+        const val KEY_WORKER_TRANSPORT = "worker_transport"
         const val KEY_WORKER_DESTINATION_MODE = "worker_destination_mode"
         const val KEY_FLOWSEAL_MEDIA_FIX_ENABLED = "flowseal_media_fix_enabled"
         const val KEY_FLOWSEAL_MEDIA_FIX_DC = "flowseal_media_fix_dc"

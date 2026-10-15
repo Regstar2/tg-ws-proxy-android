@@ -64,7 +64,7 @@
     <string name="cf_worker_pool_selected">Selected Worker</string>
     <string name="cf_worker_pool_open">Open Worker Pool</string>
     <string name="cf_worker_pool_add">Add Worker</string>
-    <string name="cf_worker_pool_legacy_worker">Legacy Worker</string>
+    <string name="cf_worker_pool_legacy_worker">Single Worker (without pool)</string>
     <string name="cf_worker_pool_no_selected">None</string>
     <string name="cf_worker_pool_foundation_hint">Worker Pool balancing is not available yet. The legacy single Worker below is used for routing.</string>
     <string name="cf_worker_pool_worker_item_title">Worker 1</string>
@@ -615,6 +615,7 @@
     <string name="worker_health_error">Error: %1$s</string>
     <string name="worker_health_failures">Failures: %1$d</string>
     <string name="worker_health_status_ok">OK</string>
+    <string name="worker_health_status_compatible_unverified">WebSocket compatible · MTProto not verified</string>
     <string name="worker_health_status_fail">Failed</string>
     <string name="worker_health_status_partial">Partial</string>
     <string name="worker_health_status_timeout">Timeout</string>
@@ -667,6 +668,8 @@
     <string name="worker_failover_reason_dns_failed">DNS failed</string>
     <string name="worker_failover_reason_tls_failed">TLS failed</string>
     <string name="worker_failover_reason_websocket_failed">WebSocket failed</string>
+    <string name="worker_failover_reason_ws_handshake_failed">Worker WebSocket handshake failed</string>
+    <string name="worker_failover_reason_protocol_incompatible">Wrong Worker protocol. Select the matching Chunk Relay or Legacy WebSocket type.</string>
     <string name="worker_failover_reason_selected_worker_disabled">Selected worker disabled</string>
     <string name="worker_failover_reason_selected_worker_dead">Selected worker dead</string>
     <string name="worker_failover_reason_selected_unavailable">Selected worker unavailable</string>
@@ -948,9 +951,15 @@
     <string name="mtproto_validation_port_invalid">MTProto port must be between 1 and 65535.</string>
     <string name="mtproto_validation_secret_invalid">MTProto secret must be exactly 32 hex characters (16 bytes).</string>
     <string name="mtproto_validation_fake_tls_domain_invalid">Use a valid public domain.</string>
-    <string name="worker_chunk_relay_scope">HTTPS Chunk Relay: protocol and Durable Object reachability only. Two-way MTProto traffic is not verified.</string>
+    <string name="worker_chunk_relay_scope">Worker protocol check: compatibility only. Bidirectional MTProto traffic and media transfers are not verified.</string>
     <string name="worker_chunk_relay_step">Chunk Relay / Durable Object</string>
     <string name="worker_protocol_incompatible">Incompatible Worker protocol: expected Chunk Relay, not legacy WebSocket</string>
     <string name="worker_chunk_relay_result_ok">%1$s: Chunk Relay reachable; MTProto exchange not verified</string>
     <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay unavailable or incompatible</string>
+    <string name="worker_transport_label">Telegram Worker transport</string>
+    <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (recommended)</string>
+    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws) — experimental</string>
+    <string name="worker_transport_scope">Flowseal Legacy WebSocket is experimental. Some networks restrict long-lived Cloudflare WebSocket connections: Telegram may fail to connect, or messages and media may not load. A successful WebSocket check (HTTP 101) does not verify MTProto. Chunk Relay remains the default. WARP provisioning Workers are separate.</string>
+    <string name="cf_worker_test_legacy_fail">Legacy WebSocket unavailable or incompatible</string>
+    <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d of %2$d upgrade checks passed (MTProto exchange unverified)</string>
 </resources>

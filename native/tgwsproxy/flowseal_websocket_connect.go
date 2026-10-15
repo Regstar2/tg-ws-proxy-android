@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
@@ -14,14 +15,18 @@ import (
 	"time"
 )
 
-const workerChunkRelayExperimentEnabled = true
 
 func dialFlowsealWorkerCandidate(domain, path, logPrefix string) (mtProtoFrameSocket, error) {
 	return dialFlowsealWorkerCandidateContext(context.Background(), domain, path, logPrefix)
 }
 
 func dialFlowsealWorkerCandidateContext(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
-	if workerChunkRelayExperimentEnabled {
+	return dialWorkerTransportContext(ctx, workerTransportChunkRelay, domain, path, logPrefix)
+}
+
+func dialWorkerTransportContext(ctx context.Context, transport workerTransport, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
+	switch transport {
+	case workerTransportChunkRelay:
 		socket, err := dialMtProtoChunkRelayFrameSocket(ctx, domain, path, logPrefix)
 		if err != nil {
 			logDomainConnectFailure(logPrefix, domain, domain, err)
@@ -43,6 +48,11 @@ func dialFlowsealWorkerCandidateContext(ctx context.Context, domain, path, logPr
 			)
 		}
 		return socket, nil
+	case workerTransportLegacyWebSocket:
+		// Flowseal /apiws is an ordinary WebSocket->TCP stream, not a Chunk Relay.
+		// The caller pins this protocol for the lifetime of an MTProto session.
+	default:
+		return nil, fmt.Errorf("unsupported worker transport %q", transport)
 	}
 
 	ws, err := connectFlowsealRawWebSocketContext(ctx, domain, domain, path, 10)
@@ -81,7 +91,9 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopCancel()
 
-	tlsConn := tls.Client(rawConn, flowsealWorkerTLSConfig(domain))
+	// The deployed Worker is authenticated by its DNS name. Do not reuse the
+	// historical insecure Flowseal test profile for production connections.
+	tlsConn := tls.Client(rawConn, flowsealWorkerVerifiedTLSConfig(domain))
 	deadline := time.Now().Add(time.Duration(timeout * float64(time.Second)))
 	_ = tlsConn.SetDeadline(deadline)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -136,6 +148,10 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 		statusCode, _ = strconv.Atoi(parts[1])
 	}
 	if statusCode == 101 {
+		if !flowsealValidUpgradeResponse(responseLines, keyBytes) {
+			_ = tlsConn.Close()
+			return nil, fmt.Errorf("worker websocket handshake failed: invalid upgrade response")
+		}
 		if logInfo != nil {
 			state := tlsConn.ConnectionState()
 			logInfo.Printf("MTProto Worker transport ready session_id=%s remote=%s tls_version=%x cipher=%x tls_record_sizing=fixed worker_revision=%s",
@@ -164,6 +180,28 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 		Headers:    headers,
 		Location:   headers["location"],
 	}
+}
+
+// A HTTP 101 without the RFC 6455 accept and upgrade headers is not a
+// WebSocket connection. Accepting it would misclassify arbitrary endpoints.
+func flowsealValidUpgradeResponse(lines []string, keyBytes []byte) bool {
+	expectedAccept := sha1.Sum([]byte(base64.StdEncoding.EncodeToString(keyBytes) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	if flowsealResponseHeader(lines, "Sec-WebSocket-Accept") != base64.StdEncoding.EncodeToString(expectedAccept[:]) ||
+		!strings.EqualFold(flowsealResponseHeader(lines, "Upgrade"), "websocket") {
+		return false
+	}
+	for _, token := range strings.Split(flowsealResponseHeader(lines, "Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+			return true
+		}
+	}
+	return false
+}
+
+func flowsealWorkerVerifiedTLSConfig(domain string) *tls.Config {
+	config := flowsealWorkerTLSConfig(domain)
+	config.InsecureSkipVerify = false
+	return config
 }
 
 func flowsealWorkerTLSConfig(domain string) *tls.Config {

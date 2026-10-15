@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -9,15 +10,46 @@ import (
 
 const defaultMaxWorkerFailoverAttempts = 3
 
+type workerTransport string
+
+const (
+	workerTransportChunkRelay       workerTransport = "chunk_relay"
+	workerTransportLegacyWebSocket workerTransport = "legacy_websocket"
+)
+
+func parseWorkerTransport(raw string) (workerTransport, bool) {
+	switch workerTransport(strings.TrimSpace(strings.ToLower(raw))) {
+	case workerTransportChunkRelay:
+		return workerTransportChunkRelay, true
+	case workerTransportLegacyWebSocket:
+		return workerTransportLegacyWebSocket, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeWorkerTransport(raw string) workerTransport {
+	transport, ok := parseWorkerTransport(raw)
+	if ok {
+		return transport
+	}
+	if strings.TrimSpace(raw) == "" {
+		return workerTransportChunkRelay // Existing single-domain settings have no type.
+	}
+	return workerTransport(strings.TrimSpace(raw)) // Unknown explicit type must fail closed.
+}
+
 type workerFailoverCandidate struct {
-	ID     string
-	Domain string
+	ID        string
+	Domain    string
+	Transport workerTransport
 }
 
 type workerFailoverSettings struct {
 	Enabled           bool
 	SelectedID        string
 	Candidates        []workerFailoverCandidate
+	CandidatesSpecified bool
 	MaxAttempts       int
 	SkippedBackoff    int
 	SelectionStrategy string
@@ -27,7 +59,7 @@ type workerFailoverSettings struct {
 }
 
 func (s workerFailoverSettings) effectiveCandidates(fallbackDomain string) []workerFailoverCandidate {
-	if s.Enabled && len(s.Candidates) > 0 {
+	if s.Enabled && (s.CandidatesSpecified || len(s.Candidates) > 0) {
 		return s.Candidates
 	}
 	if fallbackDomain != "" {
@@ -61,16 +93,24 @@ func parseWorkerFailoverCandidates(raw string) []workerFailoverCandidate {
 		if part == "" {
 			continue
 		}
-		sep := strings.Index(part, ":")
-		if sep <= 0 {
+		fields := strings.Split(part, ":")
+		if len(fields) != 2 && len(fields) != 3 {
 			continue
 		}
-		id := strings.TrimSpace(part[:sep])
-		domain := NormalizeWorkerDomain(strings.TrimSpace(part[sep+1:]))
+		id := strings.TrimSpace(fields[0])
+		domain := NormalizeWorkerDomain(strings.TrimSpace(fields[1]))
 		if id == "" || domain == "" {
 			continue
 		}
-		out = append(out, workerFailoverCandidate{ID: id, Domain: domain})
+		transport := workerTransportChunkRelay
+		if len(fields) == 3 {
+			var ok bool
+			transport, ok = parseWorkerTransport(fields[2])
+			if !ok {
+				continue // Never silently downgrade an explicitly unknown protocol.
+			}
+		}
+		out = append(out, workerFailoverCandidate{ID: id, Domain: domain, Transport: transport})
 	}
 	return out
 }
@@ -209,9 +249,20 @@ func classifyWorkerConnectFailure(err error) string {
 	if _, ok := workerCircuitError(err); ok {
 		return "all_workers_circuit_open"
 	}
+	var handshake *WsHandshakeError
+	if errors.As(err, &handshake) {
+		switch handshake.StatusCode {
+		case 404, 405, 426:
+			return "worker_protocol_incompatible"
+		default:
+			return "worker_websocket_handshake_failed"
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
+	case strings.Contains(msg, "unsupported worker transport"), strings.Contains(msg, "missing relay revision"), strings.Contains(msg, "invalid upgrade response"):
+		return "worker_protocol_incompatible"
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "timed out"), strings.Contains(msg, "deadline"):
 		return "worker_connect_timeout"
 	case strings.Contains(msg, "dns"), strings.Contains(msg, "no such host"):
 		return "worker_dns_failed"

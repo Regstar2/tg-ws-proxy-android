@@ -25,6 +25,7 @@ internal object WorkerCandidateMapper {
             }
             WorkerFailoverCandidate(
                 workerId = worker.id,
+                transport = worker.transport,
                 workerName = worker.name,
                 url = worker.url,
                 domain = domain,

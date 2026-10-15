@@ -62,6 +62,45 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
+foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'tests/worker-issue-101-dc2-ab-test.ps1')) {
+    $acceptanceScript = Join-Path $PSScriptRoot $acceptanceScriptName
+    if (-not (Test-Path -LiteralPath $acceptanceScript)) {
+        throw "Worker acceptance script not found: $acceptanceScript"
+    }
+    $parseTokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $acceptanceScript, [ref]$parseTokens, [ref]$parseErrors
+    ) | Out-Null
+    if ($parseErrors) {
+        throw "Worker acceptance script has PowerShell syntax errors: $($parseErrors -join '; ')"
+    }
+}
+
+$nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Test native stderr handling under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $nativeAdbTest)
+
+# CI is invoked by pwsh on GitHub Actions; verify both PowerShell engines.
+& $nativeAdbTest
+
+$dc2ReportTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-dc2-report-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Test DC2 zero-downstream detection under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ReportTest)
+
+& $dc2ReportTest
+
+$dc2ABTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-dc2-ab-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Test DC2 Legacy A/B target selection and fixture restoration under PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ABTest)
+& $dc2ABTest
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.1' -ExpectedVersionCode 57
 if ($LASTEXITCODE -ne 0) {

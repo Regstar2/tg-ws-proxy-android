@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -17,6 +19,8 @@ const (
 	flowsealMaxWebSocketMessageLen = 16 * 1024 * 1024
 	flowsealFrameWriteTimeout      = 45 * time.Second
 )
+
+var errFlowsealWorkerNonMTProtoReply = errors.New("worker_non_mtproto_plaintext_reply")
 
 // flowsealRawWebSocket mirrors Flowseal's RawWebSocket message semantics and
 // intentionally stays separate from the Android RawWebSocket abstraction.
@@ -147,8 +151,7 @@ func (ws *flowsealRawWebSocket) Recv() ([]byte, error) {
 			continue
 		case opContinuation, opText, opBinary:
 			if fin && len(ws.frag) == 0 {
-				ws.noteRecv(len(payload))
-				return payload, nil
+				return ws.acceptRelayMessage(payload)
 			}
 			ws.frag = append(ws.frag, payload...)
 			if len(ws.frag) > flowsealMaxWebSocketMessageLen {
@@ -161,8 +164,7 @@ func (ws *flowsealRawWebSocket) Recv() ([]byte, error) {
 			}
 			message := append([]byte(nil), ws.frag...)
 			ws.frag = ws.frag[:0]
-			ws.noteRecv(len(message))
-			return message, nil
+			return ws.acceptRelayMessage(message)
 		}
 	}
 	return nil, ws.failureOr(io.EOF)
@@ -347,7 +349,27 @@ func writeFlowsealShapedFullCount(writer io.Writer, data []byte, chunkBytes int,
 	return total, nil
 }
 
-func (ws *flowsealRawWebSocket) noteRecv(payloadBytes int) {
+// acceptRelayMessage is called only after reassembling an entire WebSocket
+// message. Plaintext HTTP/HTML is not an MTProto response and must never be
+// decrypted and forwarded to the local Telegram client.
+func (ws *flowsealRawWebSocket) acceptRelayMessage(payload []byte) ([]byte, error) {
+	if kind := classifyFlowsealWorkerReply(payload); kind != "" {
+		status := flowsealWorkerHTTPStatus(payload)
+		if logWarn != nil {
+			// Log safe metadata only: never the response body or MTProto bytes.
+			logWarn.Printf("MTProto Worker Legacy WS non-MTProto reply session_id=%s payload_type=%s http_status=%d payload_bytes=%d action=reject",
+				ws.logSessionID(), kind, status, len(payload))
+		}
+		err := fmt.Errorf("%w: payload_type=%s http_status=%d", errFlowsealWorkerNonMTProtoReply, kind, status)
+		ws.fail(err)
+		return nil, err
+	}
+	ws.noteRecv(payload)
+	return payload, nil
+}
+
+func (ws *flowsealRawWebSocket) noteRecv(payload []byte) {
+	payloadBytes := len(payload)
 	sequence := ws.recvCount.Add(1)
 	cumulative := ws.recvBytes.Add(uint64(payloadBytes))
 	if logInfo != nil && (payloadBytes >= 64*1024 || sequence <= 2) {
@@ -356,6 +378,47 @@ func (ws *flowsealRawWebSocket) noteRecv(payloadBytes int) {
 			ws.logSessionID(), sequence, payloadBytes, cumulative,
 		)
 	}
+}
+
+// classifyFlowsealWorkerReply identifies obvious plaintext responses from a
+// proxy/egress intermediary. MTProto responses are obfuscated binary; this is
+// diagnostic only and never changes or discards traffic.
+func classifyFlowsealWorkerReply(payload []byte) string {
+	trimmed := bytes.TrimLeft(payload, " \t\r\n")
+	if bytes.HasPrefix(trimmed, []byte("HTTP/1.")) {
+		return "plaintext_http"
+	}
+	prefix := trimmed
+	if len(prefix) > 32 {
+		prefix = prefix[:32]
+	}
+	lower := bytes.ToLower(prefix)
+	if bytes.HasPrefix(lower, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lower, []byte("<html")) {
+		return "plaintext_html"
+	}
+	return ""
+}
+
+// The 3-digit HTTP status is safe for diagnostics; never include HTTP body,
+// headers or anything from the Telegram stream in the error/log.
+func flowsealWorkerHTTPStatus(payload []byte) int {
+	prefix := bytes.TrimLeft(payload, " \t\r\n")
+	if len(prefix) < 12 || !bytes.HasPrefix(prefix, []byte("HTTP/1.")) ||
+		prefix[8] != ' ' {
+		return 0
+	}
+	status := 0
+	for _, digit := range prefix[9:12] {
+		if digit < '0' || digit > '9' {
+			return 0
+		}
+		status = status*10 + int(digit-'0')
+	}
+	if status < 100 || status > 599 {
+		return 0
+	}
+	return status
 }
 
 func (ws *flowsealRawWebSocket) logSessionID() string {

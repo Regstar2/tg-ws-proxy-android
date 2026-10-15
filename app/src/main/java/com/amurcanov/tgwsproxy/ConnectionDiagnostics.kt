@@ -2,6 +2,8 @@ package com.amurcanov.tgwsproxy
 
 import android.util.Log
 import com.amurcanov.tgwsproxy.worker.ChunkRelayWorkerProbe
+import com.amurcanov.tgwsproxy.worker.LegacyWorkerProtocolProbe
+import com.amurcanov.tgwsproxy.worker.WorkerTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -38,7 +40,7 @@ object ConnectionDiagnostics {
     private const val HANDSHAKE_MS = 4500
     private val testDcs = listOf(1, 2, 3, 4, 5, 203)
 
-    suspend fun probeWorker(domainRaw: String): ConnectionProbeReport = withContext(Dispatchers.IO) {
+    suspend fun probeWorker(domainRaw: String, transport: WorkerTransport = WorkerTransport.CHUNK_RELAY): ConnectionProbeReport = withContext(Dispatchers.IO) {
         val domain = WorkerDomain.normalize(domainRaw)
         if (domain.isBlank()) {
             return@withContext ConnectionProbeReport(
@@ -53,6 +55,17 @@ object ConnectionDiagnostics {
                     )
                 )
             )
+        }
+        if (transport == WorkerTransport.LEGACY_WEBSOCKET) {
+            val checked = LegacyWorkerProtocolProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))
+            return@withContext ConnectionProbeReport(listOf(RouteProbeResult(
+                route = "worker",
+                dc = 2,
+                success = checked.compatible,
+                stage = if (checked.compatible) "legacy_ws_upgrade_only" else checked.errorCode,
+                elapsedMs = checked.elapsedMs,
+                detail = checked.detail,
+            )))
         }
         // One bounded real Chunk Relay check; a WebSocket 101 is not a Worker success.
         val probe = ChunkRelayWorkerProbe().check(domain, ConnectionRuntimeConfig.dcIpForTest(2))

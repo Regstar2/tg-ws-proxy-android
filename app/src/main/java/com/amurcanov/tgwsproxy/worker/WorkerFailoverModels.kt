@@ -14,6 +14,7 @@ data class WorkerFailoverCandidate(
     val lastFailureAt: Long?,
     val isSelectedWorker: Boolean,
     val isBackoffActive: Boolean,
+    val transport: WorkerTransport = WorkerTransport.CHUNK_RELAY,
 )
 
 enum class WorkerFailoverReason(val wireValue: String) {
@@ -24,6 +25,8 @@ enum class WorkerFailoverReason(val wireValue: String) {
     WORKER_DNS_FAILED("worker_dns_failed"),
     WORKER_TLS_FAILED("worker_tls_failed"),
     WORKER_WEBSOCKET_FAILED("worker_websocket_failed"),
+    WORKER_WEBSOCKET_HANDSHAKE_FAILED("worker_websocket_handshake_failed"),
+    WORKER_PROTOCOL_INCOMPATIBLE("worker_protocol_incompatible"),
     WORKER_RUNTIME_FAILURE("worker_runtime_failure"),
     NO_ENABLED_WORKER("no_enabled_worker"),
     ALL_WORKERS_FAILED("all_workers_failed"),
@@ -87,7 +90,7 @@ data class WorkerFailoverPayload(
 ) {
     fun encodeCandidatesToken(): String {
         return candidates.joinToString("|") { candidate ->
-            "${candidate.workerId}:${candidate.domain}"
+            "${candidate.workerId}:${candidate.domain}:${candidate.transport.prefValue}"
         }
     }
 }

@@ -15,6 +15,8 @@ object WorkerFailoverUiMapper {
         WorkerFailoverReason.WORKER_DNS_FAILED -> R.string.worker_failover_reason_dns_failed
         WorkerFailoverReason.WORKER_TLS_FAILED -> R.string.worker_failover_reason_tls_failed
         WorkerFailoverReason.WORKER_WEBSOCKET_FAILED -> R.string.worker_failover_reason_websocket_failed
+        WorkerFailoverReason.WORKER_WEBSOCKET_HANDSHAKE_FAILED -> R.string.worker_failover_reason_ws_handshake_failed
+        WorkerFailoverReason.WORKER_PROTOCOL_INCOMPATIBLE -> R.string.worker_failover_reason_protocol_incompatible
         WorkerFailoverReason.WORKER_RUNTIME_FAILURE -> R.string.worker_failover_reason_unknown
         WorkerFailoverReason.NO_ENABLED_WORKER -> R.string.worker_failover_no_enabled_workers
         WorkerFailoverReason.ALL_WORKERS_FAILED -> R.string.worker_failover_all_workers_failed

@@ -213,6 +213,7 @@ func mtProtoStatusField(value string) string {
 type mtProtoWorkerConnector struct {
 	dial           mtProtoWorkerDial
 	dialContext    func(context.Context, string, string, string) (mtProtoFrameSocket, error)
+	dialTransportContext func(context.Context, workerTransport, string, string, string) (mtProtoFrameSocket, error)
 	flowsealParity bool
 }
 
@@ -220,6 +221,7 @@ func newMtProtoWorkerConnector() *mtProtoWorkerConnector {
 	return &mtProtoWorkerConnector{
 		dial:           dialFlowsealWorkerCandidate,
 		dialContext:    dialFlowsealWorkerCandidateContext,
+		dialTransportContext: dialWorkerTransportContext,
 		flowsealParity: true,
 	}
 }
@@ -331,6 +333,11 @@ func (c *mtProtoWorkerConnector) Connect(
 			return nil, result
 		}
 		candidate := candidates[i]
+		transport := candidate.Transport
+		if transport == "" {
+			transport = settings.Worker.Transport
+		}
+		transport = normalizeWorkerTransport(string(transport))
 		path := buildWorkerWSPath(effectiveDC, target, effectiveMedia, sessionID)
 		prefix := fmt.Sprintf(
 			"[MTProto] session_id=%s DC%d%s cfworker",
@@ -341,7 +348,7 @@ func (c *mtProtoWorkerConnector) Connect(
 		logMtProtoRouteAttempt(
 			request,
 			routeCFWorkerWS,
-			"session_id=%s signed_dc=%d effective_dc=%d effective_media=%t worker_host=%s worker_dst=%s destination_mode=%s effective_destination_mode=%s attempt=%d",
+			"session_id=%s signed_dc=%d effective_dc=%d effective_media=%t worker_host=%s worker_dst=%s destination_mode=%s effective_destination_mode=%s worker_transport=%s attempt=%d",
 			sessionID,
 			request.SignedDC,
 			effectiveDC,
@@ -350,6 +357,7 @@ func (c *mtProtoWorkerConnector) Connect(
 			target,
 			destination.ConfiguredDestinationMode,
 			destination.EffectiveDestinationMode,
+			transport,
 			i+1,
 		)
 
@@ -368,7 +376,9 @@ func (c *mtProtoWorkerConnector) Connect(
 					i+1,
 				)
 			}
-			if c.dialContext != nil {
+			if c.dialTransportContext != nil {
+				ws, err = c.dialTransportContext(ctx, transport, candidate.Domain, path, prefix)
+			} else if c.dialContext != nil {
 				ws, err = c.dialContext(ctx, candidate.Domain, path, prefix)
 			} else {
 				ws, err = c.dial(candidate.Domain, path, prefix)
@@ -427,11 +437,19 @@ func (c *mtProtoWorkerConnector) Connect(
 		if err != nil {
 			lastErr = err
 			lastReason = classifyWorkerConnectFailure(err)
+			if logWarn != nil {
+				logWarn.Printf("MTProto Worker dial failed session_id=%s worker_transport=%s worker_host=%s reason=%s attempt=%d error=%v",
+					sessionID, transport, candidate.Domain, lastReason, i+1, err)
+			}
 			continue
 		}
 
 		stopCancel := context.AfterFunc(ctx, ws.Close)
-		stream, err := mtProtoWorkerWebSocketConn(ws, workerRelayInit, candidate.Domain)
+		connectStream := mtProtoWorkerWebSocketConn
+		if transport == workerTransportLegacyWebSocket {
+			connectStream = mtProtoLegacyWorkerWebSocketConn
+		}
+		stream, err := connectStream(ws, workerRelayInit, candidate.Domain)
 		stopCancel()
 		if ctx.Err() != nil {
 			ws.Close()
@@ -456,6 +474,9 @@ func (c *mtProtoWorkerConnector) Connect(
 			stream = wrapMtProtoWorkerPayloadTrace(stream, request, sessionID, target)
 		}
 
+		if logInfo != nil {
+			logInfo.Printf("MTProto Worker connected session_id=%s worker_transport=%s worker_host=%s worker_dst=%s", sessionID, transport, candidate.Domain, target)
+		}
 		result.ActualBackend = mtProtoWorkerBackend
 		result.Reason = "connected"
 		return stream, result

@@ -1,0 +1,188 @@
+[CmdletBinding()]
+param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$scriptRoot = Split-Path -Parent $PSScriptRoot
+$smokeScript = Join-Path $scriptRoot 'worker-issue-101-device-smoke.ps1'
+$receiver = Join-Path (Split-Path -Parent $scriptRoot) 'app\src\debug\java\com\amurcanov\tgwsproxy\WorkerSmokeConfigReceiver.kt'
+
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $smokeScript, [ref]$tokens, [ref]$errors
+)
+if ($errors) { throw "DC2 A/B smoke PowerShell parser errors: $($errors -join '; ')" }
+$source = Get-Content -LiteralPath $smokeScript -Raw
+$kotlin = Get-Content -LiteralPath $receiver -Raw
+
+foreach ($required in @(
+    '[switch]$LegacyDC2AB', "Name = 'legacy_dc2_51'", "Name = 'legacy_dc2_220'",
+    "Transport = 'legacy_websocket'", "Dc2Target = '149.154.167.51'",
+    "Dc2Target = '149.154.167.220'", "'--es', 'dc2_target'",
+    "Invoke-WorkerSmokeBroadcast -Action 'WORKER_SMOKE_RESTORE'",
+    "Get-Dc2ABDestinationEvidence -Lines",
+    'tg://resolve?domain=telegram', "dc2ComparisonStatus",
+    'inconclusive_missing_dc2_sessions',
+    'short_replies_not_acceptance'
+)) {
+    if (-not $source.Contains($required)) { throw "DC2 A/B smoke missing: $required" }
+}
+foreach ($required in @(
+    'DC2_AB_TARGETS = setOf("149.154.167.51", "149.154.167.220")',
+    'transport == WorkerTransport.LEGACY_WEBSOCKET.prefValue',
+    'DcIpTexts.KEY_DC2, dc2Target',
+    'WorkerDestinationMode.FLOWSEAL_DC_MAP.prefValue',
+    'DcIpTexts.KEY_DC2, ProxyRuntimeConfigFactory.KEY_WORKER_DESTINATION_MODE',
+    '"last_proxy_port_default_1443_migrated", FlowsealDcPreset.PREF_ENABLED',
+    'FlowsealDcPreset.PREF_ENABLED, false',
+    'editor.remove(key)',
+    'setResultData("restored")'
+)) {
+    if (-not $kotlin.Contains($required)) { throw "DC2 A/B backup/override missing: $required" }
+}
+
+$fn = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-Dc2ABDestinationEvidence'
+}, $true)
+if ($null -eq $fn) { throw 'Missing DC2 destination evidence function' }
+. ([scriptblock]::Create($fn.Extent.Text))
+
+$sample = @(
+    'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=-2 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=-2 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=20 dc=20 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=20 dc=20 worker_dst=149.154.167.220',
+    'MTProto Worker route signed_dc=4 dc=4 worker_dst=149.154.167.51',
+    'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.2200',
+    'MTProto Worker route signed_dc=2 dc=2 worker_dst=149.154.167.5'
+)
+if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.51') -ne 2) {
+    throw 'DC2 .51 evidence counting should exclude other DCs and IPs'
+}
+if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.220') -ne 3) {
+    throw 'DC2 .220 evidence counting incorrect'
+}
+if ((Get-Dc2ABDestinationEvidence -Lines $sample -ExpectedWorkerDst '149.154.167.50') -ne 0) {
+    throw 'Unobserved DC2 destination must not be reported as selected'
+}
+
+$reportAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-TransportReport'
+}, $true)
+if ($null -eq $reportAst) { throw 'Missing transport report function' }
+. ([scriptblock]::Create($reportAst.Extent.Text))
+
+$closed = @(
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=0'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=400'
+    'MTProto Worker connected worker_transport=legacy_websocket'
+)
+$report51 = Get-TransportReport -Transport 'legacy_websocket' -Lines $closed -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+$report220 = Get-TransportReport -Transport 'legacy_websocket' -Lines $closed -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($report51.workerOnlyCloseCount -ne 1 -or $report51.workerOnlyOtherTargetCloseCount -ne 1 -or
+    $report51.dc2ZeroDownstreamCount -ne 1 -or $report51.bidirectionalBridgeCount -ne 0) {
+    throw 'DC2 .51 A/B report was contaminated by the other endpoint'
+}
+if ($report220.workerOnlyCloseCount -ne 1 -or $report220.workerOnlyOtherTargetCloseCount -ne 1 -or
+    $report220.dc2ZeroDownstreamCount -ne 0 -or $report220.bidirectionalBridgeCount -ne 1) {
+    throw 'DC2 .220 A/B report was contaminated by the other endpoint'
+}
+
+# Media connections use signed_dc=-2. Without this check, a broken media
+# route can be omitted from the DC2 analysis even while ordinary DC2 works.
+$mediaSessionLines = @(
+    'MTProto Worker connected session_id=media_ok worker_transport=legacy_websocket worker_dst=149.154.167.51'
+    'MTProto bridge closed frontend=MTProto session_id=media_ok signed_dc=-2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=4096 duration_ms=5000'
+    'MTProto bridge closed frontend=MTProto session_id=media_silent signed_dc=-2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+    'MTProto bridge closed frontend=MTProto session_id=unrelated signed_dc=-2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+    'MTProto bridge closed frontend=MTProto session_id=other_dc signed_dc=-20 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=1024 down_bytes=0 duration_ms=3000'
+)
+$mediaReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $mediaSessionLines -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+if ($mediaReport.dc2CloseCount -ne 2 -or
+    $mediaReport.dc2MediaCloseCount -ne 2 -or
+    $mediaReport.dc2MediaBidirectionalBridgeCount -ne 1 -or
+    $mediaReport.dc2MediaZeroDownstreamCount -ne 1 -or
+    $mediaReport.dc2ZeroDownstreamCount -ne 1 -or
+    $mediaReport.bidirectionalBridgeCount -ne 1 -or
+    $mediaReport.observedNetworkStatus -ne 'two_way_bytes_observed_media_unverified') {
+    throw 'Media DC2 (-2) closures must be counted, but other DCs/destinations must not contaminate the report'
+}
+$ordinaryReport = Get-TransportReport -Transport 'legacy_websocket' -Lines @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.51 actual_backend=cf_worker_ws fallback_used=false up_bytes=128 down_bytes=1024'
+) -LogName 'ordinary.log' -ExpectedWorkerDst '149.154.167.51'
+if ($ordinaryReport.dc2CloseCount -ne 1 -or $ordinaryReport.dc2MediaCloseCount -ne 0) {
+    throw 'Ordinary signed DC2 must not be reported as media traffic'
+}
+
+$shortReplies = @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1200 down_bytes=309 duration_ms=120'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1400 down_bytes=309 duration_ms=190'
+    'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=5000 down_bytes=309 duration_ms=550'
+)
+$shortReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($shortReport.observedNetworkStatus -ne 'dc2_uniform_short_replies_unverified' -or
+    $shortReport.dc2UniformShortReplyBytes -ne 309 -or
+    $shortReport.dc2PositiveReplyCount -ne 3) {
+    throw "Uniform short DC2 responses must not be treated as usable MTProto: $($shortReport.observedNetworkStatus)"
+}
+$shortReplies[3] = $shortReplies[3].Replace('down_bytes=309', 'down_bytes=8192')
+$longReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($longReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
+    throw 'Meaningful mixed-size responses must not trigger uniform short reply signature'
+}
+$shortReplies[3] = $shortReplies[3].Replace('down_bytes=8192', 'down_bytes=309').Replace('duration_ms=550', 'duration_ms=3000')
+$longLivedReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $shortReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($longLivedReport.observedNetworkStatus -eq 'dc2_uniform_short_replies_unverified') {
+    throw 'Long-running legitimate sessions must not trigger uniform short reply signature'
+}
+
+# Reproduce the actual 2026-10-14 DC2 evidence: 23 silent sessions and
+# 25 identical 309-byte short replies. Counting positive bytes alone is a
+# false success when every response closes in under 2 seconds.
+$recorded = @('MTProto Worker connected worker_transport=legacy_websocket')
+for ($i = 0; $i -lt 23; $i++) {
+    $recorded += 'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=0 duration_ms=150'
+}
+for ($i = 0; $i -lt 25; $i++) {
+    $recorded += 'MTProto bridge closed signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1600 down_bytes=309 duration_ms=230'
+}
+$recordedReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $recorded -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($recordedReport.dc2CloseCount -ne 48 -or $recordedReport.dc2PositiveReplyCount -ne 25 -or
+    $recordedReport.dc2ZeroDownstreamCount -ne 23 -or
+    $recordedReport.observedNetworkStatus -ne 'dc2_uniform_short_replies_unverified') {
+    throw '2026-10-14 DC2 report must be classified as short-reply failure, not healthy MTProto'
+}
+
+$httpReplies = @(
+    'MTProto Worker connected worker_transport=legacy_websocket'
+    'MTProto bridge closed frontend=MTProto session_id=abc123 signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1200 down_bytes=309 duration_ms=120'
+    'MTProto bridge closed frontend=MTProto session_id=abc456 signed_dc=2 worker_dst=149.154.167.220 actual_backend=cf_worker_ws fallback_used=false up_bytes=1400 down_bytes=0 duration_ms=180'
+    'MTProto bridge closed frontend=MTProto session_id=abc789 signed_dc=1 worker_dst=149.154.175.50 actual_backend=cf_worker_ws fallback_used=false up_bytes=800 down_bytes=309 duration_ms=150'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc123 payload_type=plaintext_http http_status=403 payload_bytes=309 action=reject'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc123 payload_type=plaintext_http http_status=403 payload_bytes=309 action=reject'
+    'MTProto Worker Legacy WS non-MTProto reply session_id=abc789 payload_type=plaintext_http http_status=502 payload_bytes=309 action=reject'
+)
+$httpReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $httpReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.220'
+if ($httpReport.observedNetworkStatus -ne 'dc2_non_mtproto_reply_detected' -or
+    $httpReport.dc2PlaintextReplyCount -ne 1 -or
+    $httpReport.dc2HTTPStatusCounts['403'] -ne 2 -or
+    $httpReport.dc2HTTPStatusCounts.ContainsKey('502')) {
+    throw 'HTTP errors must be identified only for the matching DC2 sessions'
+}
+$otherReport = Get-TransportReport -Transport 'legacy_websocket' -Lines $httpReplies -LogName 'fixture.log' -ExpectedWorkerDst '149.154.167.51'
+if ($otherReport.dc2PlaintextReplyCount -ne 0 -or
+    $otherReport.observedNetworkStatus -ne 'no_worker_sessions_observed') {
+    throw 'Other destinations must not inherit DC2 HTTP failures'
+}
+Write-Host 'Worker DC2 legacy A/B target selection, restoration and report checks: PASS'

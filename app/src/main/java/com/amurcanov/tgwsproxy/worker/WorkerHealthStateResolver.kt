@@ -1,6 +1,27 @@
 package com.amurcanov.tgwsproxy.worker
 
 object WorkerHealthStateResolver {
+    // A WebSocket upgrade confirms endpoint compatibility, not Telegram relay health.
+    fun statusAfterProbe(transport: WorkerTransport, result: WorkerHealthCheckStatus): WorkerHealthCheckStatus =
+        if (transport == WorkerTransport.LEGACY_WEBSOCKET && result == WorkerHealthCheckStatus.OK) {
+            WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED
+        } else {
+            result
+        }
+
+    fun resolveAfterTransportCheck(
+        transport: WorkerTransport,
+        currentFailureCount: Int,
+        checkStatus: WorkerHealthCheckStatus,
+    ): Pair<WorkerHealthState, Int> {
+        if (transport == WorkerTransport.LEGACY_WEBSOCKET &&
+            (checkStatus == WorkerHealthCheckStatus.OK || checkStatus == WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED)
+        ) {
+            return WorkerHealthState.UNKNOWN to 0
+        }
+        return resolveAfterCheck(currentFailureCount, checkStatus)
+    }
+
     fun resolveAfterCheck(
         currentFailureCount: Int,
         checkStatus: WorkerHealthCheckStatus,

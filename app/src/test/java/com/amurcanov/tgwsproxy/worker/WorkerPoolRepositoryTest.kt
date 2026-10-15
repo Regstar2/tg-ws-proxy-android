@@ -9,6 +9,31 @@ import org.junit.Test
 
 class WorkerPoolRepositoryTest {
     @Test
+    fun changingWorkerProtocolInvalidatesPreviousTransportHealth() {
+        val repository = WorkerPoolRepository(InMemoryWorkerPoolPersistence())
+        val created = repository.addWorker(
+            WorkerEndpoint.create(name = "Worker", url = "one.user.workers.dev"),
+        ).getOrThrow()
+        val previouslyHealthy = created.copy(
+            state = WorkerHealthState.HEALTHY,
+            lastSuccessAt = 100L,
+            latencyMs = 50,
+            lastCheckedAt = 100L,
+            failureCount = 0,
+        )
+        repository.updateWorker(previouslyHealthy).getOrThrow()
+        val changed = repository.updateWorker(
+            previouslyHealthy.copy(transport = WorkerTransport.LEGACY_WEBSOCKET),
+        ).getOrThrow()
+        assertEquals(WorkerTransport.LEGACY_WEBSOCKET, changed.transport)
+        assertEquals(WorkerHealthState.UNKNOWN, changed.state)
+        assertNull(changed.lastSuccessAt)
+        assertNull(changed.lastCheckedAt)
+        assertNull(changed.latencyMs)
+        assertEquals(0, changed.failureCount)
+    }
+
+    @Test
     fun addUpdateDeleteWorker() {
         val repository = WorkerPoolRepository(InMemoryWorkerPoolPersistence())
         val created = repository.addWorker(
