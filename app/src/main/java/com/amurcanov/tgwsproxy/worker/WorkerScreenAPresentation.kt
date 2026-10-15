@@ -27,3 +27,16 @@ internal fun workerScreenAPresentation(
     showActualRuntime = proxyRunning && poolEnabled &&
         activeRoute in setOf("cf_worker_ws", "worker_ws", "worker"),
 )
+
+/**
+ * Adds optional line-break opportunities only to rendered addresses.
+ * The stored endpoint and the URL used for connections are never modified.
+ */
+internal fun workerScreenAReadableAddress(displayAddress: String): String = buildString {
+    for (char in displayAddress) {
+        append(char)
+        if (char == '.' || char == '/' || char == '-' || char == '_') {
+            append('\u200B')
+        }
+    }
+}
