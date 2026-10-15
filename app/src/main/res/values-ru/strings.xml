@@ -958,8 +958,8 @@
     <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay недоступен или несовместим</string>
     <string name="worker_transport_label">Протокол Telegram Worker</string>
     <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (рекомендуется)</string>
-    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws)</string>
-    <string name="worker_transport_scope">Проверки протокола не подтверждают двусторонний MTProto. Legacy WebSocket может зависать при передаче крупных медиа. Worker для WARP — отдельный тип.</string>
+    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws) — экспериментально</string>
+    <string name="worker_transport_scope">Flowseal Legacy WebSocket — экспериментальный режим. Некоторые провайдеры ограничивают долгоживущие соединения WebSocket с Cloudflare: Telegram может не подключиться, сообщения и медиа — не загружаться. Успешная проверка WebSocket (HTTP 101) не подтверждает работу MTProto. По умолчанию используется Chunk Relay. Worker для WARP — отдельный тип.</string>
     <string name="cf_worker_test_legacy_fail">Legacy WebSocket недоступен или несовместим</string>
     <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d из %2$d проверок подключения пройдено (обмен MTProto не проверялся)</string>
 </resources>
