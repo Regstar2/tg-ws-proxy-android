@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="worker_screen_a_title">Telegram Worker</string>
+    <string name="worker_screen_a_subtitle">Адреса Worker, протокол, выбор подключения и диагностика</string>
+    <string name="worker_screen_a_pool_hint">Если пул отключён, используется сохранённый одиночный Worker.</string>
+    <string name="worker_screen_a_connection">Состояние подключения</string>
+    <string name="worker_screen_a_proxy_running">Прокси запущен (подключение Telegram не подтверждено)</string>
+    <string name="worker_screen_a_proxy_stopped">Прокси остановлен</string>
+    <string name="worker_screen_a_actual_transport">Транспорт в runtime</string>
+    <string name="worker_screen_a_diagnostic_caution">Успешная проверка сети или совместимости не подтверждает двустороннюю передачу MTProto. Работу Telegram проверяйте отдельно.</string>
+    <string name="worker_screen_a_my_workers">Мои Worker · %1$d</string>
+    <string name="worker_screen_a_worker_counts">Включено: %1$d · Выключено: %2$d</string>
+    <string name="worker_screen_a_import">Импорт доменов</string>
+    <string name="worker_screen_a_import_hint">По одному домену или URL в строке (до 30). Протокол указывается явно. Повторяющиеся и уже добавленные адреса не импортируются.</string>
+    <string name="worker_screen_a_domains">Домены или URL</string>
+    <string name="worker_screen_a_import_invalid">Введите от 1 до 30 корректных уникальных адресов, отсутствующих в пуле.</string>
+    <string name="worker_screen_a_import_error">Импорт остановлен на записи %1$d: %2$s. Предыдущие записи могли сохраниться.</string>
+    <string name="worker_screen_a_advanced">Дополнительные настройки Worker</string>
+    <string name="worker_screen_a_advanced_hide">Скрыть дополнительные настройки</string>
+    <string name="worker_screen_a_empty_hint">Добавьте Worker, выберите HTTPS Chunk Relay или экспериментальный Legacy WebSocket, затем проверьте его доступность.</string>
+    <string name="worker_screen_a_actions">Действия с Worker</string>
+</resources>
