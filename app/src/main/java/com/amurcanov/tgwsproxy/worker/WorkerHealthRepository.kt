@@ -128,19 +128,22 @@ class WorkerHealthRepository(
         val (state, failureCount) = WorkerHealthStateResolver.resolveAfterTransportCheck(
             worker.transport, worker.failureCount, result.status,
         )
+        // Successful Legacy WebSocket Upgrade is neither MTProto success nor failure.
+        val protocolCompatible = result.status == WorkerHealthCheckStatus.COMPATIBLE_UNVERIFIED
+        val endpointResponded = result.status == WorkerHealthCheckStatus.OK || protocolCompatible
         val updated = worker.copy(
             state = state,
             lastSuccessAt = if (result.status == WorkerHealthCheckStatus.OK) now else worker.lastSuccessAt,
-            lastFailureAt = if (result.status != WorkerHealthCheckStatus.OK &&
+            lastFailureAt = if (!endpointResponded &&
                 result.status != WorkerHealthCheckStatus.SKIPPED
             ) {
                 now
             } else {
                 worker.lastFailureAt
             },
-            latencyMs = if (result.status == WorkerHealthCheckStatus.OK) result.latencyMs else worker.latencyMs,
+            latencyMs = if (endpointResponded) result.latencyMs else worker.latencyMs,
             failureCount = failureCount,
-            lastErrorCode = if (result.status == WorkerHealthCheckStatus.OK) {
+            lastErrorCode = if (endpointResponded) {
                 null
             } else {
                 result.errorCode.name
