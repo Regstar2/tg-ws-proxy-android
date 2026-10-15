@@ -19,4 +19,13 @@
     <string name="worker_screen_a_advanced_hide">Скрыть дополнительные настройки</string>
     <string name="worker_screen_a_empty_hint">Добавьте Worker, выберите HTTPS Chunk Relay или экспериментальный Legacy WebSocket, затем проверьте его доступность.</string>
     <string name="worker_screen_a_actions">Действия с Worker</string>
+    <string name="worker_screen_a_diagnostic_brief">Проверка сети не подтверждает работу MTProto.</string>
+    <string name="worker_screen_a_change_strategy">Изменить стратегию</string>
+    <string name="worker_screen_a_extra_show">Приоритет и включение</string>
+    <string name="worker_screen_a_extra_hide">Скрыть дополнительные поля</string>
+    <string name="worker_screen_a_chunk_short">HTTPS Chunk Relay</string>
+    <string name="worker_screen_a_legacy_short">Legacy WebSocket (/apiws)</string>
+    <string name="worker_screen_a_legacy_warning">Экспериментальный протокол. Ответ HTTP 101 не подтверждает работу Telegram.</string>
+    <string name="worker_screen_a_help_show">Ограничения протоколов</string>
+    <string name="worker_screen_a_help_hide">Скрыть ограничения</string>
 </resources>
