@@ -1,5 +1,6 @@
 package com.amurcanov.tgwsproxy.worker
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,4 +61,17 @@ class WorkerScreenAPresentationTest {
         val state = workerScreenAPresentation(true, true, 1, 1, false, "")
         assertFalse(state.showActualRuntime)
     }
+    @Test fun hostnameHasBreakOpportunitiesButKeepsOriginalCharacters() {
+        val original = "https://black-mountain-bb46.example.workers.dev"
+        val rendered = workerScreenAReadableAddress(original)
+        assertTrue(rendered.contains("\u200B"))
+        assertTrue(rendered.contains(".\u200B"))
+        assertTrue(rendered.contains("-\u200B"))
+        assertEquals(original, rendered.replace("\u200B", ""))
+    }
+
+    @Test fun shortLabelWithoutSeparatorsStaysUnchanged() {
+        assertEquals("Worker", workerScreenAReadableAddress("Worker"))
+    }
+
 }
