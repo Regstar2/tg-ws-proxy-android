@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -99,40 +102,48 @@ fun WorkerPoolSettingsScreen(
     var deletingWorker by remember { mutableStateOf<WorkerItemUiModel?>(null) }
     var disablingWorker by remember { mutableStateOf<WorkerItemUiModel?>(null) }
     var strategyExpanded by rememberSaveable { mutableStateOf(false) }
+    var advancedExpanded by rememberSaveable { mutableStateOf(false) }
+    var showImportDialog by rememberSaveable { mutableStateOf(false) }
+    val presentation = workerScreenAPresentation(
+        poolEnabled = uiState.poolEnabled,
+        proxyRunning = uiState.isProxyRunning,
+        totalWorkers = uiState.workers.size,
+        enabledWorkers = uiState.summary.enabledCount,
+        checkingAll = uiState.isCheckingAllWorkers,
+    )
 
     LaunchedEffect(Unit) {
         onScreenOpened()
     }
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.worker_screen_a_title),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            stringResource(R.string.worker_screen_a_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+        )
         WorkerPoolEnableRow(
             poolEnabled = uiState.poolEnabled,
             isProxyRunning = uiState.isProxyRunning,
             onPoolEnabledChange = onPoolEnabledChange,
         )
-
         Spacer(modifier = Modifier.height(12.dp))
-
-        WorkerPoolFlowsealDcOnlySection(
-            enabled = flowsealDcOnlyEnabled,
-            isProxyRunning = uiState.isProxyRunning,
-            onEnabledChange = onFlowsealDcOnlyEnabledChange,
+        WorkerPoolConnectionSection(
+            uiState = uiState,
+            legacyWorkerDomainText = legacyWorkerDomainText,
+            legacyWorkerTransport = legacyWorkerTransport,
+            showActualRuntime = presentation.showActualRuntime,
+            onOpenDiagnostics = onOpenDiagnostics,
         )
-
         Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            text = stringResource(R.string.worker_chunk_relay_scope),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
 
         if (uiState.poolEnabled) {
-            WorkerPoolSummarySection(uiState.summary)
-            Spacer(modifier = Modifier.height(10.dp))
             WorkerPoolStrategySection(
                 strategy = uiState.strategy,
                 expanded = strategyExpanded,
@@ -140,57 +151,54 @@ fun WorkerPoolSettingsScreen(
                 onToggleExpanded = { strategyExpanded = !strategyExpanded },
                 onStrategyChange = onSelectionStrategyChange,
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            WorkerPoolDestinationModeSection(
-                destinationMode = workerDestinationMode,
-                mediaFixEnabled = flowsealMediaFixEnabled,
-                mediaFixDcText = flowsealMediaFixDcText,
-                mediaFixIpText = flowsealMediaFixIpText,
-                isProxyRunning = uiState.isProxyRunning,
-                onDestinationModeChange = onWorkerDestinationModeChange,
-                onMediaFixEnabledChange = onFlowsealMediaFixEnabledChange,
-                onMediaFixDcChange = onFlowsealMediaFixDcChange,
-                onMediaFixIpChange = onFlowsealMediaFixIpChange,
-                onSettingsBlur = onFlowsealDestinationSettingsBlur,
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.worker_screen_a_my_workers, uiState.workers.size),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            WorkerPoolRuntimeSection(uiState.runtime, context)
-            Spacer(modifier = Modifier.height(10.dp))
-            uiState.configWarning?.let { warning ->
-                WorkerPoolWarningBanner(warning)
-                Spacer(modifier = Modifier.height(10.dp))
-            }
+            Text(
+                stringResource(R.string.worker_screen_a_worker_counts, uiState.summary.enabledCount, uiState.summary.disabledCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             WorkerPoolQuickActions(
                 uiState = uiState,
+                canCheckAll = presentation.canCheckAll,
                 onCheckAllWorkers = onCheckAllWorkers,
                 onAddWorker = { showAddDialog = true },
-                onOpenDiagnostics = onOpenDiagnostics,
+                onImportWorkers = { showImportDialog = true },
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            when (uiState.contentState) {
-                WorkerPoolContentState.EMPTY -> WorkerPoolEmptyState(onAddWorker = { showAddDialog = true })
-                WorkerPoolContentState.NO_ENABLED -> WorkerPoolNoEnabledState(onAddWorker = { showAddDialog = true })
-                WorkerPoolContentState.INVALID_CONFIG,
-                WorkerPoolContentState.CONTENT,
-                -> {
-                    uiState.workers.forEach { item ->
-                        WorkerPoolItemCardPolished(
-                            item = item,
-                            isChecking = uiState.checkingWorkerIds.contains(item.id),
-                            isCheckingAll = uiState.isCheckingAllWorkers,
-                            onSelect = { onSelectWorker(item.id) },
-                            onEdit = {
-                                WorkerPoolUiLogger.workerEditOpened(item.id)
-                                editingWorker = item
-                            },
-                            onDelete = { deletingWorker = item },
-                            onCheck = { onCheckWorker(item.id) },
-                            onDisable = { disablingWorker = item },
-                            onEnable = { onSetWorkerEnabled(item.id, true) },
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
+            // A single warning followed by the full list, including disabled Workers.
+            if (presentation.showNoEnabledWarning) {
+                WorkerPoolWarningBanner(WorkerPoolConfigWarning.NO_ENABLED_WORKERS)
+                Spacer(modifier = Modifier.height(10.dp))
+            } else if (uiState.configWarning != null) {
+                WorkerPoolWarningBanner(uiState.configWarning)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            if (presentation.showEmptyState) {
+                WorkerPoolEmptyState()
+            } else {
+                uiState.workers.forEach { item ->
+                    WorkerPoolItemCardPolished(
+                        item = item,
+                        isChecking = uiState.checkingWorkerIds.contains(item.id),
+                        isCheckingAll = uiState.isCheckingAllWorkers,
+                        onSelect = { onSelectWorker(item.id) },
+                        onEdit = {
+                            WorkerPoolUiLogger.workerEditOpened(item.id)
+                            editingWorker = item
+                        },
+                        onDelete = { deletingWorker = item },
+                        onCheck = { onCheckWorker(item.id) },
+                        onDisable = { disablingWorker = item },
+                        onEnable = { onSetWorkerEnabled(item.id, true) },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         } else {
@@ -209,6 +217,50 @@ fun WorkerPoolSettingsScreen(
                 onOpenWorkerHelp = onOpenWorkerHelp,
             )
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        TextButton(onClick = { advancedExpanded = !advancedExpanded }) {
+            Text(stringResource(if (advancedExpanded) R.string.worker_screen_a_advanced_hide else R.string.worker_screen_a_advanced))
+        }
+        AnimatedVisibility(visible = advancedExpanded) {
+            Column {
+                WorkerPoolFlowsealDcOnlySection(
+                    enabled = flowsealDcOnlyEnabled,
+                    isProxyRunning = uiState.isProxyRunning,
+                    onEnabledChange = onFlowsealDcOnlyEnabledChange,
+                )
+                if (uiState.poolEnabled) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    WorkerPoolDestinationModeSection(
+                        destinationMode = workerDestinationMode,
+                        mediaFixEnabled = flowsealMediaFixEnabled,
+                        mediaFixDcText = flowsealMediaFixDcText,
+                        mediaFixIpText = flowsealMediaFixIpText,
+                        isProxyRunning = uiState.isProxyRunning,
+                        onDestinationModeChange = onWorkerDestinationModeChange,
+                        onMediaFixEnabledChange = onFlowsealMediaFixEnabledChange,
+                        onMediaFixDcChange = onFlowsealMediaFixDcChange,
+                        onMediaFixIpChange = onFlowsealMediaFixIpChange,
+                        onSettingsBlur = onFlowsealDestinationSettingsBlur,
+                    )
+                }
+                Text(
+                    stringResource(R.string.worker_chunk_relay_scope),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                )
+            }
+        }
+    }
+
+    if (showImportDialog) {
+        WorkerImportDialog(
+            existingUrls = existingWorkerUrls,
+            proxyRunning = uiState.isProxyRunning,
+            onDismiss = { showImportDialog = false },
+            onImport = { name, url, transport -> onAddWorker(name, url, true, 0, transport) },
+            onDone = { showImportDialog = false },
+        )
     }
 
     if (showAddDialog) {
@@ -330,20 +382,117 @@ private fun WorkerPoolEnableRow(
     isProxyRunning: Boolean,
     onPoolEnabledChange: (Boolean) -> Unit,
 ) {
-    Row(
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.worker_pool_enable), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    stringResource(R.string.worker_screen_a_pool_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = poolEnabled, enabled = !isProxyRunning, onCheckedChange = onPoolEnabledChange)
+        }
+    }
+}
+
+/** Overview for both pool and preserved single-Worker mode; no synthetic MTProto success. */
+@Composable
+private fun WorkerPoolConnectionSection(
+    uiState: WorkerPoolUiState,
+    legacyWorkerDomainText: String,
+    legacyWorkerTransport: WorkerTransport,
+    showActualRuntime: Boolean,
+    onOpenDiagnostics: () -> Unit,
+) {
+    val context = LocalContext.current
+    val active = uiState.workers.firstOrNull { it.isRuntimeWorker }
+    val selected = uiState.workers.firstOrNull { it.isSelected }
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        ),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.worker_pool_enable), style = MaterialTheme.typography.bodyLarge)
+        Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                stringResource(if (poolEnabled) R.string.worker_pool_enabled else R.string.worker_pool_disabled),
+                stringResource(R.string.worker_screen_a_connection),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(if (uiState.isProxyRunning) R.string.worker_screen_a_proxy_running else R.string.worker_screen_a_proxy_stopped),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (uiState.isProxyRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 5.dp, bottom = 7.dp),
+            )
+            if (uiState.poolEnabled) {
+                com.amurcanov.tgwsproxy.MetricLine(
+                    stringResource(R.string.worker_pool_selected_worker),
+                    uiState.summary.selectedWorkerName,
+                )
+                selected?.let {
+                    com.amurcanov.tgwsproxy.MetricLine(
+                        stringResource(R.string.worker_transport_label),
+                        stringResource(workerTransportLabel(it.endpoint.transport)),
+                    )
+                }
+            } else {
+                com.amurcanov.tgwsproxy.MetricLine(
+                    stringResource(R.string.cf_worker_pool_legacy_worker),
+                    legacyWorkerDomainText.ifBlank { stringResource(R.string.worker_pool_no_selected_worker) },
+                )
+                com.amurcanov.tgwsproxy.MetricLine(
+                    stringResource(R.string.worker_transport_label),
+                    stringResource(workerTransportLabel(legacyWorkerTransport)),
+                )
+            }
+            com.amurcanov.tgwsproxy.MetricLine(
+                stringResource(R.string.route_runtime_configured_mode),
+                RouteDisplayNames.modeLabel(context, uiState.runtime.configuredMode),
+            )
+            if (uiState.isProxyRunning) {
+                com.amurcanov.tgwsproxy.MetricLine(
+                    stringResource(R.string.route_runtime_active_route),
+                    RouteDisplayNames.routeLabel(context, uiState.runtime.activeRoute),
+                )
+                if (showActualRuntime) {
+                    com.amurcanov.tgwsproxy.MetricLine(
+                        stringResource(R.string.worker_pool_runtime_worker),
+                        uiState.summary.runtimeWorkerName,
+                    )
+                    active?.let {
+                        com.amurcanov.tgwsproxy.MetricLine(
+                            stringResource(R.string.worker_screen_a_actual_transport),
+                            stringResource(workerTransportLabel(it.endpoint.transport)),
+                        )
+                    }
+                }
+            }
+            uiState.runtime.failoverReason.takeIf { it.isNotBlank() }?.let {
+                com.amurcanov.tgwsproxy.MetricLine(
+                    stringResource(R.string.worker_pool_last_failover_reason), it,
+                )
+            }
+            Text(
+                stringResource(R.string.worker_screen_a_diagnostic_caution),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 10.dp),
             )
+            OutlinedButton(
+                onClick = onOpenDiagnostics,
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(stringResource(R.string.worker_pool_open_diagnostics))
+            }
         }
-        Switch(checked = poolEnabled, enabled = !isProxyRunning, onCheckedChange = onPoolEnabledChange)
     }
 }
 
@@ -589,64 +738,44 @@ private fun WorkerPoolWarningBanner(warning: WorkerPoolConfigWarning) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkerPoolQuickActions(
     uiState: WorkerPoolUiState,
+    canCheckAll: Boolean,
     onCheckAllWorkers: () -> Unit,
     onAddWorker: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
+    onImportWorkers: () -> Unit,
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        FilledTonalButton(
-            onClick = onAddWorker,
-            enabled = !uiState.isProxyRunning,
-            modifier = Modifier.weight(1f),
-        ) {
+        FilledTonalButton(onClick = onAddWorker, enabled = !uiState.isProxyRunning) {
             Text(stringResource(R.string.worker_pool_add_worker))
         }
-        OutlinedButton(
-            onClick = onCheckAllWorkers,
-            enabled = !uiState.isProxyRunning && !uiState.isCheckingAllWorkers &&
-                uiState.workers.any { it.enabled },
-            modifier = Modifier.weight(1f),
-        ) {
+        OutlinedButton(onClick = onCheckAllWorkers, enabled = canCheckAll) {
             if (uiState.isCheckingAllWorkers) {
                 CircularProgressIndicator(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .padding(end = 6.dp),
+                    modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
             Text(
-                if (uiState.isCheckingAllWorkers) {
-                    stringResource(R.string.worker_health_checking)
-                } else {
-                    stringResource(R.string.worker_pool_check_all_workers)
-                },
+                stringResource(if (uiState.isCheckingAllWorkers) R.string.worker_health_checking else R.string.worker_pool_check_all_workers),
             )
         }
-    }
-    OutlinedButton(
-        onClick = onOpenDiagnostics,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-    ) {
-        Text(stringResource(R.string.worker_pool_open_diagnostics))
+        TextButton(onClick = onImportWorkers, enabled = !uiState.isProxyRunning) {
+            Text(stringResource(R.string.worker_screen_a_import))
+        }
     }
 }
 
 @Composable
-private fun WorkerPoolEmptyState(onAddWorker: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-    ) {
+private fun WorkerPoolEmptyState() {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 stringResource(R.string.worker_pool_empty_title),
@@ -654,13 +783,10 @@ private fun WorkerPoolEmptyState(onAddWorker: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                stringResource(R.string.worker_pool_empty_description),
+                stringResource(R.string.worker_screen_a_empty_hint),
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
-            FilledTonalButton(onClick = onAddWorker) {
-                Text(stringResource(R.string.worker_pool_add_worker))
-            }
         }
     }
 }
@@ -704,6 +830,7 @@ private fun WorkerPoolItemCardPolished(
     onEnable: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var detailsExpanded by rememberSaveable(item.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -744,7 +871,7 @@ private fun WorkerPoolItemCardPolished(
                     )
                 }
                 IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = null)
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.worker_screen_a_actions))
                 }
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                     if (item.canSelect) {
@@ -783,6 +910,24 @@ private fun WorkerPoolItemCardPolished(
                     )
                 }
             }
+            FlowRow(
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onCheck,
+                    enabled = item.canCheck && !isChecking && !isCheckingAll,
+                ) {
+                    if (isChecking || isCheckingAll) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    }
+                    Text(stringResource(R.string.worker_pool_check_worker))
+                }
+                TextButton(onClick = { detailsExpanded = !detailsExpanded }) {
+                    Text(stringResource(if (detailsExpanded) R.string.worker_pool_details_hide else R.string.worker_pool_details))
+                }
+            }
             if (item.tagLabelResIds.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 6.dp),
@@ -793,6 +938,13 @@ private fun WorkerPoolItemCardPolished(
                     }
                 }
             }
+            AnimatedVisibility(visible = detailsExpanded) {
+                Column {
+                    Text(
+                        stringResource(R.string.worker_screen_a_diagnostic_caution),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             item.lastCheckedLabel?.let { checked ->
                 Text(
                     stringResource(R.string.worker_pool_last_checked, checked),
@@ -819,6 +971,8 @@ private fun WorkerPoolItemCardPolished(
                         stringResource(R.string.worker_pool_failures, item.failureCount),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+            }
                 }
             }
         }
@@ -918,7 +1072,7 @@ private fun WorkerEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(titleRes)) },
         text = {
-            Column {
+            Column(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; validationError = null },
@@ -994,6 +1148,81 @@ private fun WorkerEditDialog(
                 Text(stringResource(R.string.worker_pool_cancel))
             }
         },
+    )
+}
+
+/**
+ * Explicit batch import through the existing persistence callback. Validates every row and
+ * de-duplicates before applying; transport is always chosen by the user (never guessed).
+ */
+@Composable
+private fun WorkerImportDialog(
+    existingUrls: List<String>,
+    proxyRunning: Boolean,
+    onDismiss: () -> Unit,
+    onImport: (String, String, WorkerTransport) -> WorkerValidationError?,
+    onDone: () -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    var transport by rememberSaveable { mutableStateOf(WorkerTransport.CHUNK_RELAY) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val urls = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val normalized = urls.map { WorkerDomain.normalize(it).lowercase() }
+    val exists = existingUrls.map { WorkerDomain.normalize(it).lowercase() }.toSet()
+    val valid = urls.isNotEmpty() && urls.size <= 30 &&
+        normalized.size == normalized.toSet().size &&
+        normalized.none { it in exists } &&
+        urls.all { WorkerEndpointValidator.validate(it, it) == null }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.worker_screen_a_import)) },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    stringResource(R.string.worker_screen_a_import_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                WorkerTransportSelector(transport, !proxyRunning, { transport = it })
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it; message = null },
+                    label = { Text(stringResource(R.string.worker_screen_a_domains)) },
+                    enabled = !proxyRunning,
+                    minLines = 3,
+                    maxLines = 7,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (urls.isNotEmpty() && !valid) {
+                    Text(
+                        stringResource(R.string.worker_screen_a_import_invalid),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                message?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !proxyRunning && valid,
+                onClick = {
+                    var accepted = 0
+                    for (url in urls) {
+                        val error = onImport(WorkerDomain.normalize(url), url, transport)
+                        if (error != null) {
+                            message = "Import stopped at item ${accepted + 1}: ${error.name}"
+                            break
+                        }
+                        accepted++
+                    }
+                    if (accepted == urls.size) onDone()
+                },
+            ) { Text(stringResource(R.string.worker_screen_a_import)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.worker_pool_cancel)) } },
     )
 }
 
