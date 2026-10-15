@@ -18,10 +18,12 @@ internal fun workerScreenAPresentation(
     totalWorkers: Int,
     enabledWorkers: Int,
     checkingAll: Boolean,
+    activeRoute: String,
 ): WorkerScreenAPresentation = WorkerScreenAPresentation(
     canChangeConfiguration = !proxyRunning,
     canCheckAll = poolEnabled && !proxyRunning && !checkingAll && enabledWorkers > 0,
     showEmptyState = poolEnabled && totalWorkers == 0,
     showNoEnabledWarning = poolEnabled && totalWorkers > 0 && enabledWorkers == 0,
-    showActualRuntime = proxyRunning && poolEnabled,
+    showActualRuntime = proxyRunning && poolEnabled &&
+        activeRoute in setOf("cf_worker_ws", "worker_ws", "worker"),
 )
