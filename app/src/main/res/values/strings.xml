@@ -958,8 +958,8 @@
     <string name="worker_chunk_relay_result_fail">%1$s: Chunk Relay unavailable or incompatible</string>
     <string name="worker_transport_label">Telegram Worker transport</string>
     <string name="worker_transport_chunk_relay">HTTPS Chunk Relay (recommended)</string>
-    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws)</string>
-    <string name="worker_transport_scope">Protocol checks do not verify bidirectional Telegram MTProto; Legacy WebSocket can stall on large media transfers. WARP provisioning Workers are separate.</string>
+    <string name="worker_transport_legacy_websocket">Flowseal Legacy WebSocket (/apiws) — experimental</string>
+    <string name="worker_transport_scope">Flowseal Legacy WebSocket is experimental. Some networks restrict long-lived Cloudflare WebSocket connections: Telegram may fail to connect, or messages and media may not load. A successful WebSocket check (HTTP 101) does not verify MTProto. Chunk Relay remains the default. WARP provisioning Workers are separate.</string>
     <string name="cf_worker_test_legacy_fail">Legacy WebSocket unavailable or incompatible</string>
     <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d of %2$d upgrade checks passed (MTProto exchange unverified)</string>
 </resources>
