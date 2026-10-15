@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="worker_screen_a_title">Telegram Worker</string>
+    <string name="worker_screen_a_subtitle">Manage Worker addresses, transport, selection and diagnostics</string>
+    <string name="worker_screen_a_pool_hint">When disabled, the saved single Worker is used instead of the pool.</string>
+    <string name="worker_screen_a_connection">Connection status</string>
+    <string name="worker_screen_a_proxy_running">Proxy service running (Telegram connectivity not confirmed)</string>
+    <string name="worker_screen_a_proxy_stopped">Proxy service stopped</string>
+    <string name="worker_screen_a_actual_transport">Runtime transport</string>
+    <string name="worker_screen_a_diagnostic_caution">A successful network/compatibility check does not confirm two-way MTProto traffic. Check Telegram and diagnostics separately.</string>
+    <string name="worker_screen_a_my_workers">My Workers · %1$d</string>
+    <string name="worker_screen_a_worker_counts">Enabled: %1$d · Disabled: %2$d</string>
+    <string name="worker_screen_a_import">Import domains</string>
+    <string name="worker_screen_a_import_hint">One Worker hostname or URL per line (up to 30). Select the transport explicitly. Existing domains and duplicates are not imported.</string>
+    <string name="worker_screen_a_domains">Domains or URLs</string>
+    <string name="worker_screen_a_import_invalid">Enter 1–30 valid unique addresses not already in the pool.</string>
+    <string name="worker_screen_a_import_error">Import stopped at item %1$d: %2$s. Earlier items may have been saved.</string>
+    <string name="worker_screen_a_advanced">Additional Worker settings</string>
+    <string name="worker_screen_a_advanced_hide">Hide additional settings</string>
+    <string name="worker_screen_a_empty_hint">Add a Worker and choose HTTPS Chunk Relay or experimental Legacy WebSocket, then check its availability.</string>
+    <string name="worker_screen_a_actions">Worker actions</string>
+</resources>
