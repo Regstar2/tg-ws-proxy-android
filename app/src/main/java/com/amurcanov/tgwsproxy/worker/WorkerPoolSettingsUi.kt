@@ -272,6 +272,7 @@ fun WorkerPoolSettingsScreen(
             initialEnabled = true,
             initialPriority = 0,
             initialTransport = WorkerTransport.CHUNK_RELAY,
+            isProxyRunning = uiState.isProxyRunning,
             existingUrls = existingWorkerUrls,
             onDismiss = { showAddDialog = false },
             onSave = { name, url, enabled, priority, transport ->
@@ -290,6 +291,7 @@ fun WorkerPoolSettingsScreen(
             initialEnabled = item.enabled,
             initialPriority = item.priority,
             initialTransport = item.endpoint.transport,
+            isProxyRunning = uiState.isProxyRunning,
             existingUrls = existingWorkerUrls.filter { it != item.endpoint.url },
             onDismiss = { editingWorker = null },
             onSave = { name, url, enabled, priority, transport ->
@@ -324,7 +326,9 @@ fun WorkerPoolSettingsScreen(
             text = { Text(stringResource(R.string.worker_pool_delete_confirmation_message, item.name)) },
             confirmButton = {
                 TextButton(
+                    enabled = !uiState.isProxyRunning,
                     onClick = {
+                        if (uiState.isProxyRunning) return@TextButton
                         onDeleteWorker(item.id)
                         deletingWorker = null
                     },
@@ -360,7 +364,9 @@ fun WorkerPoolSettingsScreen(
             },
             confirmButton = {
                 TextButton(
+                    enabled = !uiState.isProxyRunning,
                     onClick = {
+                        if (uiState.isProxyRunning) return@TextButton
                         onSetWorkerEnabled(item.id, false)
                         disablingWorker = null
                     },
@@ -436,7 +442,7 @@ private fun WorkerPoolConnectionSection(
             if (uiState.poolEnabled) {
                 com.amurcanov.tgwsproxy.MetricLine(
                     stringResource(R.string.worker_pool_selected_worker),
-                    uiState.summary.selectedWorkerName,
+                    selected?.name ?: uiState.summary.selectedWorkerName,
                 )
                 selected?.let {
                     com.amurcanov.tgwsproxy.MetricLine(
@@ -447,7 +453,8 @@ private fun WorkerPoolConnectionSection(
             } else {
                 com.amurcanov.tgwsproxy.MetricLine(
                     stringResource(R.string.cf_worker_pool_legacy_worker),
-                    if (legacyWorkerDomainText.isBlank()) stringResource(R.string.worker_pool_no_selected_worker) else legacyWorkerDomainText,
+                    if (legacyWorkerDomainText.isBlank()) stringResource(R.string.worker_pool_no_selected_worker)
+                    else WorkerUrlSanitizer.maskForDisplay(legacyWorkerDomainText, uiState.maskDomains),
                 )
                 com.amurcanov.tgwsproxy.MetricLine(
                     stringResource(R.string.worker_transport_label),
@@ -888,6 +895,7 @@ private fun WorkerEditDialog(
     initialEnabled: Boolean,
     initialPriority: Int,
     initialTransport: WorkerTransport,
+    isProxyRunning: Boolean,
     existingUrls: List<String>,
     onDismiss: () -> Unit,
     onSave: (name: String, url: String, enabled: Boolean, priority: Int, transport: WorkerTransport) -> WorkerValidationError?,
@@ -910,6 +918,7 @@ private fun WorkerEditDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; validationError = null },
+                    enabled = !isProxyRunning,
                     label = { Text(stringResource(R.string.worker_pool_worker_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -918,6 +927,7 @@ private fun WorkerEditDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it; validationError = null },
+                    enabled = !isProxyRunning,
                     label = { Text(stringResource(R.string.worker_pool_worker_url)) },
                     placeholder = { Text(stringResource(R.string.worker_domain_placeholder)) },
                     singleLine = true,
@@ -932,11 +942,12 @@ private fun WorkerEditDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                WorkerTransportSelector(transport, true, { transport = it })
+                WorkerTransportSelector(transport, !isProxyRunning, { transport = it })
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = priorityText,
                     onValueChange = { priorityText = it.filter { ch -> ch.isDigit() || ch == '-' }; validationError = null },
+                    enabled = !isProxyRunning,
                     label = { Text(stringResource(R.string.worker_pool_worker_priority)) },
                     supportingText = { Text(stringResource(R.string.worker_pool_worker_priority_hint)) },
                     singleLine = true,
@@ -949,7 +960,7 @@ private fun WorkerEditDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(stringResource(R.string.worker_pool_worker_enabled))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                    Switch(checked = enabled, onCheckedChange = { enabled = it }, enabled = !isProxyRunning)
                 }
                 validationError?.let { error ->
                     Text(
@@ -968,8 +979,9 @@ private fun WorkerEditDialog(
         },
         confirmButton = {
             TextButton(
+                enabled = !isProxyRunning && !duplicateUrl,
                 onClick = {
-                    if (duplicateUrl) return@TextButton
+                    if (duplicateUrl || isProxyRunning) return@TextButton
                     val priority = priorityText.toIntOrNull() ?: 0
                     validationError = onSave(name.trim(), url.trim(), enabled, priority, transport)
                 },
