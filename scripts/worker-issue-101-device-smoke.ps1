@@ -286,24 +286,39 @@ $report = [ordered]@{
     comparison = if ($LegacyDC2AB) { 'legacy_dc2_dst_ab' } else { 'none' }
 }
 
-$phases = @()
-if ($ChunkRelayOnly) {
-    $phases = @(
-        @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain; Transport = 'chunk_relay'; Dc2Target = '' }
+function Get-WorkerSmokePhases {
+    [CmdletBinding()]
+    param(
+        [string]$LegacyWorkerDomain = '',
+        [string]$ChunkRelayWorkerDomain = '',
+        [switch]$LegacyOnly,
+        [switch]$ChunkRelayOnly,
+        [switch]$LegacyDC2AB
     )
-} elseif ($LegacyDC2AB) {
-    $phases = @(
-        @{ Name = 'legacy_dc2_51'; Label = 'Flowseal Legacy DC2 via 149.154.167.51'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.51' },
-        @{ Name = 'legacy_dc2_220'; Label = 'Flowseal Legacy DC2 via 149.154.167.220'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.220' }
-    )
-} else {
-    $phases = @(
-        @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '' }
-    )
-    if (-not $LegacyOnly) {
-        $phases += @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain; Transport = 'chunk_relay'; Dc2Target = '' }
+    $phases = @()
+    if ($ChunkRelayOnly) {
+        $phases = @(
+            @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain; Transport = 'chunk_relay'; Dc2Target = '' }
+        )
+    } elseif ($LegacyDC2AB) {
+        $phases = @(
+            @{ Name = 'legacy_dc2_51'; Label = 'Flowseal Legacy DC2 via 149.154.167.51'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.51' },
+            @{ Name = 'legacy_dc2_220'; Label = 'Flowseal Legacy DC2 via 149.154.167.220'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '149.154.167.220' }
+        )
+    } else {
+        $phases = @(
+            @{ Name = 'legacy_websocket'; Label = 'Flowseal Legacy WebSocket'; Domain = $LegacyWorkerDomain; Transport = 'legacy_websocket'; Dc2Target = '' }
+        )
+        if (-not $LegacyOnly) {
+            $phases += @{ Name = 'chunk_relay'; Label = 'HTTPS Chunk Relay'; Domain = $ChunkRelayWorkerDomain; Transport = 'chunk_relay'; Dc2Target = '' }
+        }
     }
+    
+    return $phases
 }
+$phases = @(Get-WorkerSmokePhases -LegacyWorkerDomain $LegacyWorkerDomain `
+    -ChunkRelayWorkerDomain $ChunkRelayWorkerDomain -LegacyOnly:$LegacyOnly `
+    -ChunkRelayOnly:$ChunkRelayOnly -LegacyDC2AB:$LegacyDC2AB)
 
 Write-Host "ADB device: $deviceId"
 Write-Host "Automatic test: $($phases.Count) transport phases, $PhaseSeconds seconds each."
