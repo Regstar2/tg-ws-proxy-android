@@ -57,4 +57,34 @@ if ($goodReport.observedNetworkStatus -ne 'two_way_bytes_observed_media_unverifi
     $goodReport.dc2ZeroDownstreamCount -ne 0) {
     throw 'Healthy two-way Chunk Relay data misclassified'
 }
+
+# Exercise the same transport-phase planning that the device runner uses, without ADB.
+$phasePlanAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-WorkerSmokePhases'
+}, $true)
+if ($null -eq $phasePlanAst) { throw 'Get-WorkerSmokePhases function missing' }
+. ([scriptblock]::Create($phasePlanAst.Extent.Text))
+$chunkPlan = @(Get-WorkerSmokePhases -ChunkRelayOnly -ChunkRelayWorkerDomain 'chunk.example.workers.dev')
+if ($chunkPlan.Count -ne 1 -or $chunkPlan[0].Name -ne 'chunk_relay' -or
+    $chunkPlan[0].Domain -ne 'chunk.example.workers.dev' -or
+    $chunkPlan[0].Transport -ne 'chunk_relay') {
+    throw 'ChunkRelayOnly must not require or select a Legacy Worker'
+}
+$legacyPlan = @(Get-WorkerSmokePhases -LegacyOnly -LegacyWorkerDomain 'flowseal.example.workers.dev')
+if ($legacyPlan.Count -ne 1 -or $legacyPlan[0].Transport -ne 'legacy_websocket') {
+    throw 'LegacyOnly must not require or select a Chunk Relay Worker'
+}
+$combinedPlan = @(Get-WorkerSmokePhases -LegacyWorkerDomain 'flowseal.example.workers.dev' -ChunkRelayWorkerDomain 'chunk.example.workers.dev')
+if ($combinedPlan.Count -ne 2 -or $combinedPlan[0].Name -ne 'legacy_websocket' -or
+    $combinedPlan[1].Name -ne 'chunk_relay') {
+    throw 'Combined smoke must preserve Legacy and Chunk Relay independent phases'
+}
+$dc2Plan = @(Get-WorkerSmokePhases -LegacyOnly -LegacyDC2AB -LegacyWorkerDomain 'flowseal.example.workers.dev')
+if ($dc2Plan.Count -ne 2 -or $dc2Plan[0].Dc2Target -ne '149.154.167.51' -or
+    $dc2Plan[1].Dc2Target -ne '149.154.167.220') {
+    throw 'Legacy-only DC2 A/B phase selection must remain unchanged'
+}
+
 Write-Host 'Worker DC2 zero-downstream regression classification: PASS'
