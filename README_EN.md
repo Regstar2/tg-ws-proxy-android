@@ -24,7 +24,7 @@ A local Telegram proxy for Android with MTProto and SOCKS5 frontends and routing
 
 ---
 
-> **Telegram Worker:** choose between HTTPS Chunk Relay (existing default) and Flowseal Legacy WebSocket (`/apiws`) per Worker. Legacy WebSocket is experimental on Android: successful WebSocket upgrade does not verify MTProto or media transfers. Existing Worker configurations stay on Chunk Relay unless explicitly changed. See [Cloudflare Worker setup](docs/cloudflare-worker.md).
+> **Telegram Worker:** choose between HTTPS Chunk Relay (existing default) and Flowseal Legacy WebSocket (`/apiws`) per Worker. Legacy WebSocket is **experimental**: some networks restrict long-lived Cloudflare WebSocket connections, so Telegram may not connect and messages or media may fail to load. A successful WebSocket upgrade does not verify MTProto on Android. Existing Worker configurations stay on Chunk Relay unless explicitly changed. See [Cloudflare Worker setup](docs/cloudflare-worker.md).
 
 ## About
 
