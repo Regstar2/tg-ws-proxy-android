@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Worker — макет B · issue #103</title>
+<style>
+:root{font-family:Roboto,"Segoe UI",system-ui,sans-serif;color-scheme:light;--bg:#f6f7fb;--card:#fff;--ink:#202231;--muted:#686c7b;--accent:#435ec2;--line:#e1e4ed;--good:#166d4c;--goodbg:#e5f5ed;--warn:#855800;--warnbg:#fff1d0;--bad:#a52f38;--badbg:#ffebed}
+*{box-sizing:border-box}body{margin:0;background:#e9ecf6;color:var(--ink)}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,input:disabled,select:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #87a1ff;outline-offset:2px}
+.demo{padding:12px 16px;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;background:#1e284e;color:#fff;font-size:13px}
+.demo select{max-width:240px;background:#fff;color:#182249;border:0;border-radius:10px;padding:9px 12px;min-height:42px}.demo span{opacity:.8}
+.screen{margin:18px auto 45px;width:min(100% - 20px,420px);min-width:0;background:var(--bg);padding:0 0 22px;border-radius:24px;box-shadow:0 12px 45px #283b6940;overflow:hidden}
+.header{padding:20px 18px 14px;background:#fdfdff;border-bottom:1px solid var(--line)}
+.eyebrow{color:var(--muted);font-size:12px;margin-bottom:5px}
+h1{font-size:23px;letter-spacing:-.4px;margin:0 0 5px}h2{font-size:16px;margin:0}h3{font-size:14px;margin:0}p{margin:0;line-height:1.5}
+.sub{color:var(--muted);font-size:13px;line-height:1.5}
+.content{padding:14px;display:grid;gap:12px;min-width:0}
+.card{border:1px solid var(--line);background:var(--card);border-radius:17px;padding:14px;min-width:0}
+.card.soft{background:#eef2ff;border-color:#d8e0ff}.card.warn{background:var(--warnbg);border-color:#ebd49e}.card.bad{background:var(--badbg);border-color:#eababe}
+.row{display:flex;align-items:center;justify-content:space-between;gap:9px;min-width:0}.row>*{min-width:0}
+.stack{display:grid;gap:9px}.headrow{display:flex;align-items:start;justify-content:space-between;gap:9px}
+.headrow>*{min-width:0}.textbreak{overflow-wrap:anywhere;word-break:break-word}
+.small{font-size:12px;color:var(--muted);line-height:1.5}.strong{font-weight:700}.spaced{margin-top:10px}
+.buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+button.btn{min-height:40px;padding:8px 11px;border-radius:12px;border:1px solid #cfd6ea;background:#fff;color:var(--ink);font-size:13px;font-weight:650}
+button.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.btn.tonal{background:#e8edff;border-color:transparent;color:#25409b}button.btn.danger{color:var(--bad);background:#fff3f4;border-color:#f2c5c9}
+button.btn.full{width:100%}
+.tag{display:inline-block;padding:4px 7px;border-radius:12px;background:#eef0f5;color:#4c5369;font-size:11px;font-weight:650;line-height:1.3;overflow-wrap:anywhere}
+.tag.good{background:var(--goodbg);color:var(--good)}.tag.warn{background:var(--warnbg);color:var(--warn)}.tag.bad{background:var(--badbg);color:var(--bad)}.tag.blue{background:#e5eaff;color:#2949a7}
+.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.meta{font-size:12px;color:var(--muted);margin-top:6px;overflow-wrap:anywhere}
+.line{height:1px;background:var(--line);margin:12px 0}
+.detailgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:7px;font-size:12px;line-height:1.5}
+.detailgrid div:nth-child(odd){color:var(--muted)}.detailgrid div:nth-child(even){text-align:right;font-weight:650;overflow-wrap:anywhere}
+.sectionhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:9px 2px 0}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.panel{padding:12px;background:#f7f8fd;border-radius:12px;min-width:0}
+.panel b{display:block;font-size:12px;margin-bottom:4px;overflow-wrap:anywhere}
+.panel span{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.field{display:grid;gap:5px}.field label{font-size:12px;font-weight:650}.field input,.field select,.field textarea{width:100%;min-width:0;max-width:100%;padding:11px;border:1px solid #c9d0df;border-radius:11px;background:white;font-size:14px;min-height:43px}.field textarea{min-height:112px;resize:vertical}
+.choice{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.4}.choice input{margin-top:3px;accent-color:var(--accent)}
+.toggle{width:44px;min-height:26px;height:26px;border:0;border-radius:30px;background:#aab4c6;flex:0 0 44px;position:relative}.toggle:before{content:"";position:absolute;background:white;width:20px;height:20px;border-radius:50%;top:3px;left:3px;transition:.14s}.toggle.on{background:var(--accent)}.toggle.on:before{left:21px}
+details.card>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:700;gap:8px}details.card>summary::-webkit-details-marker{display:none}details.card>summary:after{content:"⌄";color:var(--muted)}details.card[open]>summary:after{content:"⌃"}
+.worker .name{font-size:14px;font-weight:750;overflow-wrap:anywhere}.worker .url{font-size:12px;color:var(--muted);overflow-wrap:anywhere;margin-top:4px}
+.worker .status{font-size:12px;line-height:1.45;color:var(--muted);margin-top:6px}
+.worker .btn{flex:0 0 auto}
+.empty{text-align:center;padding:26px 12px}.empty .symbol{font-size:34px;margin-bottom:7px}.empty p{margin:10px auto 14px;max-width:270px;font-size:13px;color:var(--muted)}
+.group{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}.groupheader{padding:14px;background:#f0f3ff;border-bottom:1px solid var(--line)}.groupheader.legacy{background:#fff5e2}.groupinner{display:grid;gap:9px;padding:10px}.groupinner .card{background:#fcfcff}
+.modalback{position:fixed;inset:0;background:#161e38aa;display:grid;place-items:center;padding:10px;z-index:10}.modal{width:min(100%,430px);max-height:min(94vh,850px);overflow:auto;background:var(--bg);border-radius:19px;box-shadow:0 20px 70px #13162a66;padding:16px}
+.modalheader{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.modalbody{display:grid;gap:13px}.modalfooter{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:15px}
+.notice{font-size:12px;line-height:1.5;border-radius:10px;background:#eff1f8;padding:10px 11px;overflow-wrap:anywhere}
+.notice.warn{background:var(--warnbg)}.notice.bad{background:var(--badbg)}
+.step{font-size:12px;color:var(--accent);font-weight:700;letter-spacing:.02em}
+.inlineerror{color:var(--bad);font-size:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#222b41;color:#f0f4ff;padding:12px;border-radius:11px;line-height:1.55}
+@media(max-width:390px){.screen{margin:0 auto 30px;width:100%;border-radius:0;box-shadow:none}.content{padding:10px}.card{padding:12px}.buttons button.btn{font-size:12px}}
+@media(max-width:330px){.pair{grid-template-columns:1fr}.sectionhead,.headrow{flex-wrap:wrap}.buttons .btn{flex:1 1 110px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="demo"><b>Макет B · только экран Worker</b><label for="scenario">Состояние:</label><select id="scenario"><option value="mixed">Смешанный пул</option><option value="empty">Первый запуск</option><option value="chunk">Один Chunk Relay</option><option value="legacy">Один Legacy WS</option><option value="failed">Ошибка проверки</option><option value="incompatible">Несовместимый Worker</option><option value="cooldown">Квота / cooldown</option><option value="running">Прокси работает</option><option value="disabled">Все отключены</option><option value="single">Одиночный режим</option></select><span>Все действия — демонстрация</span></div>
+<main class="screen"><header class="header"><div class="eyebrow">Настройки → Cloudflare</div><h1>Telegram Worker</h1><p class="sub">Адреса Worker, выбор подключения и диагностика MTProto</p></header><div class="content" id="content"></div></main>
+<div id="overlay"></div>
+<script>
+(function(){
+"use strict";
+const variant="B";
+const protocols={chunk:"HTTPS Chunk Relay",legacy:"Flowseal Legacy WebSocket"};
+const strategies={manual:"Вручную",priority:"По приоритету",failover:"Резервирование",round:"По очереди",latency:"Наименьшая задержка"};
+const explanations={manual:"Предпочитать выбранный Worker.",priority:"Вначале Worker с более высоким приоритетом.",failover:"Переходить к следующему при сбое.",round:"Распределять новые подключения по очереди.",latency:"Использовать актуальные данные задержки."};
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const mk=(id,name,url,proto,status,enabled=true)=>({id,name,url,proto,status,enabled,priority:0,ms:status==="good"?112:null,checked:status!=="unknown",mt:false});
+let s={};let dialog=null;let draft=null;let formError="";let checkDraft=false;
+function init(key){
+const chunk=mk("w1","Основной Worker","primary-demo.workers.dev","chunk","good");
+const legacy=mk("w2","Резервный Flowseal","legacy-demo.workers.dev","legacy","compatible");
+const bad=mk("w3","Проблемный Worker","broken-demo.workers.dev","chunk","failed");
+s={scenario:key,pool:true,running:false,workers:[chunk,legacy],selected:"w1",actual:null,strategy:"failover",route:"auto",destination:"preserve",dcOnly:false,mediaFix:false,mediaDc:"4",mediaIp:"149.154.167.220",mask:false,legacySingle:{name:"Прежний Worker",url:"old-demo.workers.dev",proto:"chunk",enabled:true},events:["Транспортная проверка ≠ подтверждение MTProto."],lastFail:"",next:4};
+if(key==="empty"){s.workers=[];s.selected=null}
+if(key==="chunk"){s.workers=[chunk]}
+if(key==="legacy"){s.workers=[legacy];s.selected="w2"}
+if(key==="failed"){s.workers=[chunk,bad];s.lastFail="DNS_FAILED / TCP timeout"}
+if(key==="incompatible"){s.workers=[mk("w3","Неверный протокол","legacy-only-demo.workers.dev","chunk","incompatible")];s.selected="w3"}
+if(key==="cooldown"){s.workers=[mk("w4","Квота исчерпана","quota-demo.workers.dev","chunk","cooldown")];s.selected="w4";s.lastFail="429 / cooldown — повторить позже"}
+if(key==="disabled"){s.workers=[mk("w3","Выключенный","disabled-demo.workers.dev","chunk","disabled",false)];s.selected=null}
+if(key==="running"){s.running=true;s.actual="w2";s.lastFail="Переключение после ошибки основного Worker";legacy.mt=true}
+if(key==="single"){s.pool=false;s.selected=null;s.actual=null}
+dialog=null;draft=null;formError="";checkDraft=false;$("scenario").value=key;render();
+}
+const current=()=>s.workers.find(w=>w.id===s.selected);
+const actual=()=>s.workers.find(w=>w.id===s.actual);
+const statusText=w=>({good:"Транспорт совместим · MTProto не проверен",compatible:"WebSocket совместим · MTProto не проверен",failed:"Ошибка сети или таймаут",incompatible:"Несовместимый протокол",cooldown:"Временная блокировка / квота",unknown:"Не проверялся",disabled:"Выключен"}[w.status]||"Неизвестно");
+const statusClass=w=>({good:"good",compatible:"warn",failed:"bad",incompatible:"bad",cooldown:"warn"}[w.status]||"");
+function domain(url){try{return new URL(url.includes("://")?url:"https://"+url).hostname.toLowerCase()}catch{return""}}
+function validHost(value){const h=domain(value);return h.includes(".")&&!/\s/.test(value)&&!value.includes("@")&&h.length<254}
+function nameFor(w){return w?esc(w.name):"Не выбран"}
+function displayUrl(w){return s.mask?"••••.workers.dev":esc(w.url)}
+function button(text,action,id,cls="",disabled=false){return '<button class="btn '+cls+'" data-act="'+action+'" '+(id?'data-id="'+esc(id)+'"':'')+(disabled?' disabled':'')+'>'+text+'</button>'}
+function toggle(on,action,disabled){return '<button type="button" class="toggle '+(on?"on":"")+'" data-act="'+action+'" aria-pressed="'+on+'" aria-label="'+action+'" '+(disabled?"disabled":"")+'></button>'}
+function banner(){if(s.running)return '<div class="notice warn">Прокси запущен. Настройки заблокированы: сначала остановите прокси в приложении. Данные ниже — демо.</div>';
+if(!s.pool)return '<div class="notice warn">Включён прежний одиночный режим. Список Worker Pool сейчас не используется.</div>';
+if(!s.workers.length)return '<div class="notice">Worker пока нет. Добавьте адрес и выберите протокол.</div>';
+if(!s.workers.some(w=>w.enabled))return '<div class="notice bad">Нет включённых Worker. Включите хотя бы один адрес.</div>';
+if(s.lastFail)return '<div class="notice warn">'+esc(s.lastFail)+'</div>';return""}
+function runtime(){
+const selected=current(),effective=actual();
+return '<section class="card soft"><div class="headrow"><div><h2>Состояние подключения</h2><p class="sub">Конфигурация и реальный маршрут различаются</p></div><span class="tag '+(s.running?"good":"")+'">'+(s.running?"Работает":"Остановлен")+'</span></div>'+
+'<div class="pair"><div class="panel"><b>Выбранный Worker</b><span>'+nameFor(s.pool?selected:{name:"Одиночный режим"})+'</span></div><div class="panel"><b>Фактический Worker</b><span>'+(s.running?nameFor(effective):"Нет активного соединения")+'</span></div></div>'+
+'<div class="detailgrid spaced"><div>Фактический транспорт</div><div>'+(s.running&&effective?protocols[effective.proto]:"Не установлен")+'</div><div>Маршрут MTProto</div><div>'+(s.running?(effective?"Worker WS":"Нет подтверждения"):"Прокси выключен")+'</div><div>Двусторонний MTProto</div><div>'+(s.running&&effective&&effective.mt?"Есть данные runtime (демо)":"Не подтверждён")+'</div></div>'+
+'<div class="buttons">'+button("Диагностика и журнал","diagnostics",null,"tonal")+'</div></section>';
+}
+function choiceStrategy(){return '<section class="card"><div class="headrow"><div><h2>Выбор Worker</h2><p class="sub">Стратегия внутри пула, не режим маршрутизации сети</p></div></div><div class="field spaced"><label for="strategy">Стратегия</label><select id="strategy" data-field="strategy" '+(s.running||!s.pool?"disabled":"")+'>'+Object.entries(strategies).map(([k,v])=>'<option value="'+k+'" '+(s.strategy===k?"selected":"")+'>'+v+'</option>').join("")+'</select></div><p class="small spaced">'+esc(explanations[s.strategy])+'</p></section>'}
+function single(){
+return '<section class="card"><h2>Одиночный Worker — прежний режим</h2><p class="sub spaced">Сохранённая настройка доступна отдельно. Она не становится частью пула автоматически.</p>'+
+'<div class="field spaced"><label>Домен</label><input data-field="singleUrl" value="'+esc(s.legacySingle.url)+'" '+(s.running?"disabled":"")+'></div>'+
+'<div class="field spaced"><label>Протокол</label><select data-field="singleProto" '+(s.running?"disabled":"")+'>'+protocolOption(s.legacySingle.proto)+'</select></div>'+
+'<div class="row spaced"><span class="small strong">Включён</span>'+toggle(s.legacySingle.enabled,"singleEnabled",s.running)+'</div>'+
+'<div class="buttons">'+button("Проверить","singleCheck",null,"",s.running)+button("Скопировать в пул","copySingle",null,"tonal",s.running)+'</div></section>';
+}
+function workerCard(w){
+return '<article class="card worker"><div class="headrow"><div><div class="name">'+esc(w.name)+'</div><div class="url">'+displayUrl(w)+'</div></div><span class="tag '+statusClass(w)+'">'+(w.enabled?statusLabel(w.status):"Выключен")+'</span></div>'+
+'<div class="tags"><span class="tag blue">'+protocols[w.proto]+'</span>'+(w.id===s.selected?'<span class="tag">Выбранный</span>':"")+(w.id===s.actual&&s.running?'<span class="tag good">В runtime</span>':"")+'</div>'+
+'<div class="status">'+statusText(w)+(w.ms?" · "+w.ms+" мс":"")+'</div>'+
+'<div class="buttons">'+button("Проверить","check",w.id,"",s.running||!w.enabled)+button("Действия","details",w.id,"tonal")+'</div></article>';
+}
+function statusLabel(st){return({good:"Совместим",compatible:"Совместим",failed:"Ошибка",incompatible:"Несовместим",cooldown:"Ожидание",unknown:"Не проверен",disabled:"Выключен"}[st]||st)}
+function poolSwitch(){return '<section class="card"><div class="row"><div><h2>Использовать Worker Pool</h2><p class="small">При отключении применяется сохранённый одиночный Worker</p></div>'+toggle(s.pool,"togglePool",s.running)+'</div></section>'}
+function listA(){
+let cards=s.workers.length?s.workers.map(workerCard).join(""):'<div class="card empty"><div class="symbol">◇</div><h2>Worker ещё не добавлены</h2><p>Введите домен, укажите Chunk Relay или Legacy WebSocket и выполните проверку.</p>'+button("Добавить Worker","add",null,"primary")+'</div>';
+return '<div class="sectionhead"><h2>Мои Worker · '+s.workers.length+'</h2>'+button("＋ Добавить","add",null,"primary",s.running)+'</div><div class="stack">'+cards+'</div><div class="buttons">'+button("Проверить все","checkAll",null,"",s.running||!s.workers.some(w=>w.enabled))+button("Импорт доменов","import",null,"tonal",s.running)+'</div>';
+}
+function group(proto,title,desc){
+let ws=s.workers.filter(w=>w.proto===proto);
+return '<section class="group"><div class="groupheader '+(proto==="legacy"?"legacy":"")+'"><div class="headrow"><div><h2>'+title+' · '+ws.length+'</h2><p class="small">'+desc+'</p></div>'+button("＋","addProto",proto,"primary",s.running)+'</div></div><div class="groupinner">'+(ws.length?ws.map(workerCard).join(""):'<p class="sub">Worker этого протокола пока нет.</p>')+'</div></section>';
+}
+function listB(){
+return '<div class="sectionhead"><h2>Worker по протоколам</h2>'+button("Импорт","import",null,"tonal",s.running)+'</div>'+
+group("chunk","HTTPS Chunk Relay","/chunk-relay/* · основной транспорт")+
+group("legacy","Flowseal Legacy WebSocket","/apiws · экспериментальная поддержка")+
+'<div class="buttons">'+button("Проверить все Worker","checkAll",null,"",s.running||!s.workers.some(w=>w.enabled))+'</div>';
+}
+function extras(){
+return '<details class="card"><summary>Дополнительные настройки Worker</summary><div class="stack spaced">'+
+'<div class="field"><label>Режим маршрутизации MTProto (макет)</label><select data-field="route" '+(s.running?"disabled":"")+'><option value="auto" '+(s.route==="auto"?"selected":"")+'>Авто с резервным маршрутом</option><option value="worker" '+(s.route==="worker"?"selected":"")+'>Только Worker</option></select></div>'+
+'<p class="small">Эти понятные режимы — UX-предложение. В Android должны соответствовать текущей политике Wi‑Fi/мобильной сети; совпадение ещё требует проверки.</p>'+
+'<div class="field"><label>Адрес Telegram DC</label><select data-field="destination" '+(s.running?"disabled":"")+'><option value="preserve" '+(s.destination==="preserve"?"selected":"")+'>Сохранять исходный адрес</option><option value="map" '+(s.destination==="map"?"selected":"")+'>Таблица DC → IP</option><option value="media" '+(s.destination==="media"?"selected":"")+'>Экспериментальная замена media DC</option></select></div>'+
+'<div class="row"><div><b class="small">Только Flowseal DC</b><p class="small">Ограничить маршрутизацию указанными DC</p></div>'+toggle(s.dcOnly,"dcOnly",s.running)+'</div>'+
+(s.destination==="media"?'<div class="row"><b class="small">Media fix</b>'+toggle(s.mediaFix,"mediaFix",s.running)+'</div><div class="pair"><div class="field"><label>DC</label><input data-field="mediaDc" value="'+esc(s.mediaDc)+'" '+(!s.mediaFix||s.running?"disabled":"")+'></div><div class="field"><label>IP</label><input data-field="mediaIp" value="'+esc(s.mediaIp)+'" '+(!s.mediaFix||s.running?"disabled":"")+'></div></div>':"")+
+'<div class="row"><div><b class="small">Скрывать адреса</b><p class="small">Маскировать домены на карточках</p></div>'+toggle(s.mask,"mask",false)+'</div>'+
+'<div class="notice">Отдельные настройки Cloudflare Proxy и WARP/AWG здесь намеренно не показаны: это не Telegram Worker.</div></div></details>';
+}
+function render(){
+let content=poolSwitch()+banner();
+if(variant==="A"){content+=runtime();content+=s.pool?choiceStrategy()+listA():single();}
+else{content+=s.pool?choiceStrategy()+listB():single();content+=runtime();}
+content+=extras();$("content").innerHTML=content;renderDialog();
+}
+function protocolOption(chosen){return '<option value="chunk" '+(chosen==="chunk"?"selected":"")+'>'+protocols.chunk+'</option><option value="legacy" '+(chosen==="legacy"?"selected":"")+'>'+protocols.legacy+'</option>'}
+function renderDialog(){
+if(!dialog){$("overlay").innerHTML="";return;}
+let title="",body="",footer="";
+if(dialog.type==="add"||dialog.type==="edit"){
+const add=dialog.type==="add";title=add?"Добавить Worker":"Редактировать Worker";
+body='<div class="step">'+(add?"Шаг 1–3 · протокол, адрес, проверка":"Изменение сохранённой записи")+'</div>'+
+'<div class="field"><label>Транспорт Worker</label><select data-draft="proto">'+protocolOption(draft.proto)+'</select></div>'+
+'<p class="small">'+(draft.proto==="legacy"?"Legacy WebSocket — экспериментальный. HTTP 101 не означает, что Telegram работает.":"Chunk Relay требует соответствующего Cloudflare Worker и Durable Objects.")+'</p>'+
+'<div class="field"><label>Название</label><input data-draft="name" value="'+esc(draft.name)+'" placeholder="Мой Worker"></div>'+
+'<div class="field"><label>Домен или URL</label><input data-draft="url" value="'+esc(draft.url)+'" placeholder="example.workers.dev"></div>'+
+'<div class="field"><label>Приоритет</label><input type="number" data-draft="priority" value="'+esc(draft.priority)+'"></div>'+
+'<label class="choice"><input type="checkbox" data-draft="enabled" '+(draft.enabled?"checked":"")+'><span>Включить после сохранения</span></label>'+
+'<div class="notice">'+(checkDraft?"Демонстрационная проверка выполнена. MTProto этим не подтверждён.":"При смене домена или протокола предыдущий результат проверки сбрасывается.")+'</div>'+
+(formError?'<div class="inlineerror">'+esc(formError)+'</div>':"");
+footer=button("Отмена","close")+button("Проверить (демо)","checkDraft",null,"tonal")+button(add?"Сохранить Worker":"Сохранить изменения","saveForm",null,"primary");
+}else if(dialog.type==="import"){
+title="Импорт доменов";body='<p class="sub">По одному домену на строку. Все импортированные Worker получат выбранный протокол; автоматического определения нет.</p>'+
+'<div class="field"><label>Протокол</label><select data-draft="proto">'+protocolOption(draft.proto)+'</select></div>'+
+'<div class="field"><label>Адреса</label><textarea data-draft="urls" placeholder="one.workers.dev&#10;two.workers.dev">'+esc(draft.urls)+'</textarea></div>'+(formError?'<div class="inlineerror">'+esc(formError)+'</div>':"");
+footer=button("Отмена","close")+button("Импортировать","doImport",null,"primary");
+}else if(dialog.type==="details"){
+let w=s.workers.find(x=>x.id===dialog.id);if(!w){dialog=null;return render();}
+title=w.name;body='<div class="detailgrid"><div>Домен</div><div>'+displayUrl(w)+'</div><div>Протокол</div><div>'+protocols[w.proto]+'</div><div>Сетевая проверка</div><div>'+statusText(w)+'</div><div>Двусторонний MTProto</div><div>'+(w.mt&&s.running?"Подтверждён runtime (демо)":"Нет подтверждения")+'</div><div>Приоритет</div><div>'+w.priority+'</div></div>'+
+(w.proto==="legacy"?'<div class="notice warn">Legacy WebSocket может не работать в сетях с ограничениями долгоживущих соединений.</div>':"")+
+(w.id===s.selected?'<div class="notice">Выбранный Worker — это предпочтение, а не гарантия фактического runtime.</div>':"");
+footer=button("Закрыть","close")+button("Выбрать","select",w.id,"",s.running||!w.enabled||w.id===s.selected)+button(w.enabled?"Выключить":"Включить","toggleWorker",w.id,"",s.running)+button("Изменить","edit",w.id,"tonal",s.running)+button("Удалить","remove",w.id,"danger",s.running);
+}else if(dialog.type==="confirm"){
+const w=s.workers.find(x=>x.id===dialog.id);title=dialog.action==="remove"?"Удалить Worker?":"Отключить Worker?";
+body='<p class="sub">'+(w?esc(w.name):"Worker")+' — '+(dialog.action==="remove"?"запись будет удалена из пула.":"доступность этого адреса для новых подключений прекратится.")+'</p><p class="small">Если это выбранный Worker, предпочтение нужно будет выбрать заново.</p>';
+footer=button("Отмена","close")+button("Подтвердить","confirm",null,"danger");
+}else if(dialog.type==="diagnostics"){
+title="Диагностика Worker";
+const w=actual()||current()||s.workers[0];
+body='<div class="notice">Ни одна проверка в HTML не отправляет сетевые запросы. Результаты ниже — тестовые состояния.</div>'+
+'<div class="detailgrid"><div>Выбранный</div><div>'+nameFor(current())+'</div><div>Фактический</div><div>'+nameFor(actual())+'</div><div>Протокол проверки</div><div>'+(w?protocols[w.proto]:"Нет Worker")+'</div><div>DNS / TCP / TLS</div><div>'+(w&&w.checked?"Есть результат демонстрации":"Не проверялось")+'</div><div>Совместимость</div><div>'+(w?statusText(w):"Нет данных")+'</div><div>MTProto full-duplex</div><div>'+(w&&w.mt&&s.running?"Подтверждение runtime (демо)":"Не доказан")+'</div></div>'+
+'<h3>Журнал</h3><pre>'+esc(s.events.slice(-8).join("\n"))+'</pre>'+
+'<p class="small">Успешный HTTP, TLS или WS handshake не равен успешной передаче сообщений и медиа Telegram.</p>';
+footer=button("Закрыть","close")+button("Повторить проверку","checkAll",null,"tonal",s.running||!s.workers.some(w=>w.enabled));
+}
+$("overlay").innerHTML='<div class="modalback" data-act="backdrop"><div class="modal" role="dialog" aria-modal="true" aria-label="'+esc(title)+'"><div class="modalheader"><h2>'+esc(title)+'</h2>'+button("✕","close")+'</div><div class="modalbody">'+body+'</div><div class="modalfooter">'+footer+'</div></div></div>';
+}
+function beginForm(id,proto){if(s.running)return;const w=s.workers.find(x=>x.id===id);dialog={type:w?"edit":"add",id:w?.id};draft=w?{...w}:{name:"",url:"",proto:proto||"chunk",enabled:true,priority:0};formError="";checkDraft=false;renderDialog();}
+function formErrorText(d){if(!String(d.name).trim())return"Укажите название.";if(!validHost(d.url))return"Введите допустимый домен / URL.";if(s.workers.some(w=>w.id!==dialog.id&&domain(w.url)===domain(d.url)))return"Домен уже есть в пуле.";return""}
+function note(v){s.events.push(v)}
+function checkOne(w){if(!w||!w.enabled)return;w.checked=true;if(w.status==="unknown")w.status=w.proto==="legacy"?"compatible":"good";if(["good","compatible"].includes(w.status))w.ms=w.ms||103;w.mt=false;note("Проверка транспорта: "+w.name+" / "+protocols[w.proto]+". MTProto не подтверждён.");}
+function fallback(){if(!s.workers.some(w=>w.id===s.selected&&w.enabled))s.selected=s.workers.find(w=>w.enabled)?.id||null}
+document.addEventListener("click",e=>{
+const b=e.target.closest("[data-act]");if(!b||b.disabled)return;const a=b.dataset.act,id=b.dataset.id;
+if(a==="backdrop"){if(e.target===b){dialog=null;renderDialog()}return}
+if(a==="close"){dialog=null;renderDialog();return}
+if(a==="togglePool"&&!s.running){s.pool=!s.pool;render();return}
+if(a==="dcOnly"&&!s.running){s.dcOnly=!s.dcOnly;render();return}
+if(a==="mediaFix"&&!s.running){s.mediaFix=!s.mediaFix;render();return}
+if(a==="mask"){s.mask=!s.mask;render();return}
+if(a==="singleEnabled"&&!s.running){s.legacySingle.enabled=!s.legacySingle.enabled;render();return}
+if(a==="singleCheck"&&!s.running){note("Одиночный Worker: проверка транспорта смоделирована. MTProto не доказан.");render();return}
+if(a==="copySingle"&&!s.running){if(!validHost(s.legacySingle.url)){alert("Исправьте адрес одиночного Worker.");return}if(s.workers.some(w=>domain(w.url)===domain(s.legacySingle.url))){alert("Адрес уже есть в пуле.");return}const w=mk("w"+s.next++,"Из прежних настроек",domain(s.legacySingle.url),s.legacySingle.proto,"unknown");s.workers.push(w);s.selected=w.id;note("Одиночный Worker скопирован без удаления исходных настроек.");render();return}
+if(a==="add"||a==="addProto"){beginForm(null,a==="addProto"?id:null);return}
+if(a==="edit"){beginForm(id);return}
+if(a==="details"){dialog={type:"details",id};renderDialog();return}
+if(a==="remove"||a==="toggleWorker"){const w=s.workers.find(x=>x.id===id);if(!w||s.running)return;if(a==="toggleWorker"&&!w.enabled){w.enabled=true;w.status="unknown";note("Worker включён: "+w.name);render();return}dialog={type:"confirm",id,action:a==="remove"?"remove":"disable"};renderDialog();return}
+if(a==="confirm"){if(s.running)return;const w=s.workers.find(x=>x.id===dialog.id);if(dialog.action==="remove")s.workers=s.workers.filter(x=>x.id!==dialog.id);else if(w){w.enabled=false;w.status="disabled";w.mt=false;}note((dialog.action==="remove"?"Удаление: ":"Отключение: ")+(w?.name||dialog.id));fallback();dialog=null;render();return}
+if(a==="select"&&!s.running){if(!s.workers.some(w=>w.id===id&&w.enabled))return;s.selected=id;dialog=null;note("Выбор предпочтительного Worker, runtime не изменён.");render();return}
+if(a==="check"&&!s.running){checkOne(s.workers.find(w=>w.id===id));render();return}
+if(a==="checkAll"&&!s.running){s.workers.filter(w=>w.enabled).forEach(checkOne);render();return}
+if(a==="import"&&!s.running){dialog={type:"import"};draft={proto:"chunk",urls:""};formError="";renderDialog();return}
+if(a==="checkDraft"){formError=formErrorText(draft);if(!formError){checkDraft=true;note("Демонстрационная проверка вводимого адреса "+draft.url)}renderDialog();return}
+if(a==="saveForm"&&!s.running){formError=formErrorText(draft);if(formError){renderDialog();return}const normalized=domain(draft.url);if(dialog.type==="add"){const w=mk("w"+s.next++,String(draft.name).trim(),normalized,draft.proto,checkDraft?(draft.proto==="legacy"?"compatible":"good"):"unknown",draft.enabled);w.priority=Number(draft.priority)||0;if(!w.enabled)w.status="disabled";s.workers.push(w);if(!current())s.selected=w.id;s.pool=true;note("Worker добавлен: "+w.name)}else{const w=s.workers.find(x=>x.id===dialog.id);if(!w)return;const changed=w.url!==normalized||w.proto!==draft.proto;Object.assign(w,{name:String(draft.name).trim(),url:normalized,proto:draft.proto,priority:Number(draft.priority)||0,enabled:!!draft.enabled});if(changed){w.status=w.enabled?"unknown":"disabled";w.checked=false;w.ms=null;w.mt=false;}else if(!w.enabled)w.status="disabled";else if(w.status==="disabled")w.status="unknown";fallback();note("Worker изменён: "+w.name+(changed?", результат проверки сброшен":""))}dialog=null;render();return}
+if(a==="doImport"&&!s.running){const domains=String(draft.urls).split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean);if(!domains.length||domains.some(v=>!validHost(v))){formError="Нужен хотя бы один корректный домен.";renderDialog();return}const existing=new Set(s.workers.map(w=>domain(w.url)));let added=0;for(const v of domains){const host=domain(v);if(existing.has(host))continue;existing.add(host);s.workers.push(mk("w"+s.next++,"Импорт "+(++added),host,draft.proto,"unknown"))}if(!added){formError="Новых доменов нет: все уже добавлены.";renderDialog();return}fallback();s.pool=true;note("Импортировано: "+added+" Worker. Проверки не проводились.");dialog=null;render();return}
+if(a==="diagnostics"){dialog={type:"diagnostics"};renderDialog();return}
+});
+document.addEventListener("input",e=>{
+const t=e.target,k=t.dataset.draft;if(k&&draft)draft[k]=t.type==="checkbox"?t.checked:t.value;
+const f=t.dataset.field;if(f==="singleUrl")s.legacySingle.url=t.value;
+if(f==="mediaDc")s.mediaDc=t.value;if(f==="mediaIp")s.mediaIp=t.value;
+});
+document.addEventListener("change",e=>{
+const t=e.target,k=t.dataset.field;if(k==="strategy")s.strategy=t.value;
+if(k==="route")s.route=t.value;
+if(k==="destination"){s.destination=t.value;render()}
+if(k==="singleProto")s.legacySingle.proto=t.value;
+if(t.dataset.draft==="proto"&&draft){draft.proto=t.value;checkDraft=false;renderDialog()}
+});
+$("scenario").addEventListener("change",e=>init(e.target.value));
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&dialog){dialog=null;renderDialog()}});
+init("mixed");
+})();
+</script>
+</body>
+</html>
