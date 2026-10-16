@@ -74,4 +74,30 @@ class WorkerScreenAPresentationTest {
         assertEquals("Worker", workerScreenAReadableAddress("Worker"))
     }
 
+    @Test
+    fun strategyScreenProjectionUsesObservedValueBeforeReenteringScreen() {
+        val stored = WorkerPoolConfig(
+            enabled = true,
+            selectedWorkerId = "primary",
+            selectionStrategy = WorkerSelectionStrategy.FAILOVER,
+            roundRobinCursor = "cursor",
+        )
+        val projected = workerPoolConfigForPresentation(stored, WorkerSelectionStrategy.PRIORITY)
+
+        assertEquals(WorkerSelectionStrategy.PRIORITY, projected.selectionStrategy)
+        assertEquals(WorkerSelectionStrategy.FAILOVER, stored.selectionStrategy)
+        assertEquals(stored.enabled, projected.enabled)
+        assertEquals(stored.selectedWorkerId, projected.selectedWorkerId)
+        assertEquals(stored.roundRobinCursor, projected.roundRobinCursor)
+    }
+
+    @Test
+    fun strategyScreenProjectionSupportsEveryStrategyWithoutNavigation() {
+        val stored = WorkerPoolConfig(selectionStrategy = WorkerSelectionStrategy.FAILOVER)
+        for (choice in WorkerSelectionStrategy.entries) {
+            val rendered = workerPoolConfigForPresentation(stored, choice)
+            assertEquals(choice, rendered.selectionStrategy)
+        }
+    }
+
 }
