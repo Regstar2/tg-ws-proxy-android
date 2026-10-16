@@ -61,6 +61,18 @@ class WorkerPoolRepositoryTest {
     }
 
     @Test
+    fun changingSelectionStrategyPersistsForNextScreenOpen() {
+        val persistence = InMemoryWorkerPoolPersistence()
+        val repository = WorkerPoolRepository(persistence)
+        repository.setSelectionStrategy(WorkerSelectionStrategy.LOWEST_LATENCY)
+        assertEquals(WorkerSelectionStrategy.LOWEST_LATENCY, repository.getWorkerPoolConfig().selectionStrategy)
+        assertEquals(
+            WorkerSelectionStrategy.LOWEST_LATENCY,
+            WorkerPoolRepository(persistence).getWorkerPoolConfig().selectionStrategy,
+        )
+    }
+
+    @Test
     fun deleteSelectedWorkerSelectsNextEnabled() {
         val repository = WorkerPoolRepository(InMemoryWorkerPoolPersistence())
         val first = repository.addWorker(
