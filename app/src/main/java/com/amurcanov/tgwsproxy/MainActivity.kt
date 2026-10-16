@@ -718,7 +718,10 @@ private fun ProxyScreen(
     fun buildWorkerPoolUiInput(): WorkerPoolUiInput {
         return WorkerPoolUiInput(
             poolEnabled = workerPoolEnabled,
-            config = workerPoolRepository.getWorkerPoolConfig(),
+            config = com.amurcanov.tgwsproxy.worker.workerPoolConfigForPresentation(
+                persistedConfig = workerPoolRepository.getWorkerPoolConfig(),
+                observedStrategy = workerPoolSelectionStrategy,
+            ),
             workers = workerPoolWorkers,
             selectedWorker = workerPoolSelectedWorker,
             failoverSnapshot = if (workerPoolEnabled) buildWorkerFailoverSnapshot() else null,
