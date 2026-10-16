@@ -40,3 +40,12 @@ internal fun workerScreenAReadableAddress(displayAddress: String): String = buil
         }
     }
 }
+
+/**
+ * UI reads [observedStrategy] from Compose state; a direct persistence read alone is
+ * not observable and can leave the selected strategy stale until screen re-entry.
+ */
+internal fun workerPoolConfigForPresentation(
+    persistedConfig: WorkerPoolConfig,
+    observedStrategy: WorkerSelectionStrategy,
+): WorkerPoolConfig = persistedConfig.copy(selectionStrategy = observedStrategy)
