@@ -32,8 +32,8 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.1` (`versionCode 57`)  
-**Стадия:** stable patch release candidate; автозапуск после reboot проверен на реальном устройстве
+**Версия исходников:** `1.11.2` (`versionCode 58`)  
+**Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 | Область | Статус |
 |---|---|
@@ -45,7 +45,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 | Worker Pool | Работает, но остаётся медленнее прямого соединения и не рекомендуется как основной маршрут |
 
-**Telegram Worker:** доступны два явно выбираемых транспорта — HTTPS Chunk Relay (по умолчанию) и Flowseal Legacy WebSocket (`/apiws`). Legacy WebSocket — **экспериментальный режим**: некоторые провайдеры ограничивают долгоживущие WebSocket-соединения к Cloudflare, поэтому Telegram может не подключаться, а сообщения и медиа — не загружаться. Успешный WebSocket handshake не подтверждает работу MTProto на Android. Текущие пользовательские настройки продолжают использовать Chunk Relay, пока тип не выбран вручную. Инструкция: [Cloudflare Worker](docs/cloudflare-worker.md).
+**Telegram Worker (v1.11.2):** доступны два явно выбираемых транспорта — HTTPS Chunk Relay (по умолчанию) и Flowseal Legacy WebSocket (`/apiws`). Legacy WebSocket — **экспериментальный режим**: некоторые провайдеры ограничивают долгоживущие WebSocket-соединения к Cloudflare, поэтому Telegram может не подключаться, а сообщения и медиа — не загружаться. Успешный WebSocket handshake не подтверждает работу MTProto на Android. Текущие пользовательские настройки продолжают использовать Chunk Relay, пока тип не выбран вручную. Инструкция: [Cloudflare Worker](docs/cloudflare-worker.md).
 | Feedback | Отдельный экран; GitHub Issue Forms без встроенного PAT |
 | Updates | Проверка официальных GitHub Releases с SemVer и открытием официальной страницы релиза |
 

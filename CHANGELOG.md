@@ -3,7 +3,14 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
-- Fixed false-positive Telegram Worker diagnostics: legacy WebSocket `101` no longer counts as Chunk Relay availability. Connection checks, Worker Pool health and route probes now use a bounded single-DC Chunk Relay open/up-validation/down/close test, classify protocol/HTTP errors and explicitly mark two-way MTProto traffic as unverified.
+
+## 1.11.2 - 2026-10-16
+- Restored **experimental compatibility with original Flowseal Legacy WebSocket** Workers (`/apiws`) alongside the existing HTTPS Chunk Relay route. Transport is selected explicitly for single Workers and individual Worker Pool entries; previously configured Workers keep Chunk Relay by default.
+- Redesigned Settings → Cloudflare → Worker Pool around a unified Worker list, transport labels, runtime/selection status, diagnostics, import, selection strategies and collapsible advanced DC/media controls.
+- Fixed overlapping labels and long domains on larger display font sizes; compacted edit dialogs and improved Russian translations.
+- Fixed the selection-strategy UI so changes appear immediately without reopening Worker Pool.
+- Fixed false-positive Telegram Worker diagnostics: legacy WebSocket HTTP `101` no longer counts as Chunk Relay availability. Protocol-aware compatibility checks do not claim to verify bidirectional MTProto.
+- **Known limitation:** Flowseal Legacy WebSocket remains unstable on networks that restrict persistent Cloudflare WebSocket connections. Telegram may fail to connect and messages/media may not load. HTTP 101 is not proof of working MTProto. Chunk Relay still depends on DO quotas and is slower than direct transport; the Worker route is not the recommended default.
 
 ## 1.11.1 - 2026-10-07
 - Added an opt-in **Autostart on boot** setting that restores the existing `ProxyService` from the last saved configuration after Android finishes booting.
