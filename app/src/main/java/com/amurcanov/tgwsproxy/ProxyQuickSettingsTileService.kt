@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal object ProxyTileStateMapper {
     fun isActive(status: ProxyServiceStatus, running: Boolean): Boolean {
@@ -26,6 +27,12 @@ internal object ProxyTileStateMapper {
         return status == ProxyServiceStatus.STARTING ||
             status == ProxyServiceStatus.RECONNECTING
     }
+}
+
+internal object ProxyTileCommandGate {
+    private val inFlight = AtomicBoolean(false)
+    fun tryAcquire(): Boolean = inFlight.compareAndSet(false, true)
+    fun release() { inFlight.set(false) }
 }
 
 class ProxyQuickSettingsTileService : TileService() {
@@ -50,10 +57,11 @@ class ProxyQuickSettingsTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
-        if (ProxyTileStateMapper.isTransitioning(status)) return
+        if (ProxyTileStateMapper.isTransitioning(status) || !ProxyTileCommandGate.tryAcquire()) return
 
         val running = ProxyService.isRunning.value
         if (!running && !ProxyTileStartPolicy.canStart(this)) {
+            ProxyTileCommandGate.release()
             openSettings()
             return
         }
@@ -68,6 +76,7 @@ class ProxyQuickSettingsTileService : TileService() {
                 ContextCompat.startForegroundService(this, intent)
             }
         } catch (_: RuntimeException) {
+            ProxyTileCommandGate.release()
             openSettings()
         }
         refreshTile()
