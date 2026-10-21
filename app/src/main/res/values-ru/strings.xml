@@ -962,4 +962,10 @@
     <string name="worker_transport_scope">Flowseal Legacy WebSocket — экспериментальный режим. Некоторые провайдеры ограничивают долгоживущие соединения WebSocket с Cloudflare: Telegram может не подключиться, сообщения и медиа — не загружаться. Успешная проверка WebSocket (HTTP 101) не подтверждает работу MTProto. По умолчанию используется Chunk Relay. Worker для WARP — отдельный тип.</string>
     <string name="cf_worker_test_legacy_fail">Legacy WebSocket недоступен или несовместим</string>
     <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d из %2$d проверок подключения пройдено (обмен MTProto не проверялся)</string>
+    <string name="quick_tile_title">TgWsProxy</string>
+    <string name="quick_tile_on">Прокси работает</string>
+    <string name="quick_tile_off">Прокси выключен</string>
+    <string name="quick_tile_transitioning">Переключение…</string>
+    <string name="quick_tile_error">Ошибка запуска · откройте приложение</string>
+    <string name="quick_tile_setup">Откройте приложение для настройки</string>
 </resources>
