@@ -99,7 +99,7 @@ class ProxyQuickSettingsTileService : TileService() {
             Tile.STATE_INACTIVE
         }
         tile.label = getString(R.string.quick_tile_title)
-        tile.icon = Icon.createWithResource(this, R.drawable.ic_notification_small_v2)
+        tile.icon = Icon.createWithResource(this, R.drawable.ic_quick_settings_tile)
         tile.contentDescription = getString(R.string.quick_tile_title) + ": " + getString(subtitle)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = getString(subtitle)
