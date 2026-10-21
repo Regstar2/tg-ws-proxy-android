@@ -14,6 +14,20 @@ internal object ProxyTileStartPolicy {
     private val relevantPreferences = setOf(
         "connection_mode",
         "auto_strategy",
+        "port",
+        "pool",
+        "worker_domain",
+        "dc1",
+        "dc2",
+        "dc4",
+        "dc203",
+        "flowseal_dc_only_enabled",
+        "cf_manual_domains",
+        "cfproxy_domain",
+        "cf_upstream_domains",
+        "cf_domain_mirror_enabled",
+        "cf_domain_mirror_url",
+        "cf_auto_update_domains",
         ProxyRuntimeConfigFactory.KEY_CFPROXY_ENABLED,
         ProxyRuntimeConfigFactory.KEY_CFPROXY_PRIORITY,
         ProxyRuntimeConfigFactory.KEY_CFPROXY_ONLY,
@@ -88,7 +102,12 @@ internal object ProxyTileStartPolicy {
             prefs,
         ).resolve(profile)
         val relevant = prefs.all
-            .filterKeys { it in relevantPreferences }
+            .filterKeys { key ->
+                key in relevantPreferences ||
+                    (key.startsWith("worker_pool_") &&
+                        key != "worker_pool_round_robin_cursor_v1" &&
+                        key != "worker_pool_migration_done_v1")
+            }
             .toSortedMap()
             .entries.joinToString("|") { (key, value) -> "$key=$value" }
         val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
