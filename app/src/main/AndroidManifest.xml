@@ -55,7 +55,7 @@
         <service
             android:name="com.amurcanov.tgwsproxy.ProxyQuickSettingsTileService"
             android:label="@string/quick_tile_title"
-            android:icon="@drawable/ic_notification_small_v2"
+            android:icon="@drawable/ic_quick_settings_tile"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter>
