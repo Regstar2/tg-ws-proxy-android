@@ -28,28 +28,35 @@ internal object NativeSocks5Proxy : Socks5NativeProxy {
 internal class Socks5LocalProxyFrontend(
     private val nativeProxy: Socks5NativeProxy = NativeSocks5Proxy,
 ) : LocalProxyFrontend {
-    private var running = false
+    private var status = LocalProxyFrontendStatus.STOPPED
 
     override val type: LocalProxyFrontendType = LocalProxyFrontendType.SOCKS5
 
     override fun start(config: LocalProxyFrontendConfig): LocalProxyFrontendStartResult {
         nativeProxy.setPoolSize(config.poolSize)
-        nativeProxy.startProxy(config.host, config.port, config.runtimeConfig, config.verbose)
-        running = true
-        return LocalProxyFrontendStartResult(getState())
+        val resultCode = nativeProxy.startProxy(
+            config.host, config.port, config.runtimeConfig, config.verbose,
+        )
+        status = if (resultCode == 0) LocalProxyFrontendStatus.RUNNING else LocalProxyFrontendStatus.FAILED
+        return if (status == LocalProxyFrontendStatus.RUNNING) {
+            LocalProxyFrontendStartResult(getState())
+        } else {
+            LocalProxyFrontendStartResult(
+                state = getState(),
+                message = "SOCKS5 native runtime refused to start.",
+                errorCode = "NATIVE_START_REJECTED",
+            )
+        }
     }
 
     override fun stop(): String? {
         val exported = nativeProxy.getAdaptiveRouteStats()
         nativeProxy.stopProxy()
-        running = false
+        status = LocalProxyFrontendStatus.STOPPED
         return exported
     }
 
     override fun getState(): LocalProxyFrontendState {
-        return LocalProxyFrontendState(
-            type = type,
-            status = if (running) LocalProxyFrontendStatus.RUNNING else LocalProxyFrontendStatus.STOPPED,
-        )
+        return LocalProxyFrontendState(type = type, status = status)
     }
 }
