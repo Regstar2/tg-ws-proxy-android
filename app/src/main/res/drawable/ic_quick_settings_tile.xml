@@ -4,16 +4,25 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Earth with two readable continental cutouts; the orbit stays outside the globe. -->
+    <!-- Monochrome version of icon.png: globe, three continents, diagonal orbit and central paper plane. -->
     <path
+        android:pathData="M 5.5 13.4 C 3.0 14.7 1.0 16.7 2.4 17.9 C 3.75 19.25 6.2 19.0 9.1 18.1 M 16.8 6.1 C 19.75 5.65 21.5 6.15 21.8 7.55 C 22.28 9.42 20.9 11.35 18.95 12.65"
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M 16.244,5.450 C 19.15,4.60 21.10,5.37 21.66,6.85 C 22.18,8.21 21.09,9.75 19.776,11.328 M 7.756,18.550 C 4.85,19.40 2.90,18.63 2.34,17.15 C 1.82,15.79 2.91,14.25 4.224,12.672" />
+        android:strokeWidth="1.05"
+        android:strokeLineCap="round" />
     <path
+        android:pathData="M 19.15 12.15 C 19.15 16.51 16.1 19.96 12 19.96 C 7.9 19.96 4.85 16.51 4.85 12.15 C 4.85 7.78 7.90 4.24 12.0 4.24 C 16.10 4.24 19.15 7.78 19.15 12.15 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.02" />
+    <path
+        android:pathData="M 5.55 11.1 C 5.65 8.35 7.35 5.6 10.05 4.9 C 9.05 5.53 9.05 6.20 9.92 6.55 C 10.55 6.8 10.65 7.43 10.10 7.78 C 9.4 8.24 8.3 7.92 7.85 8.84 C 7.45 9.56 6.55 9.37 5.55 11.1 Z M 18.55 12.72 C 18.46 14.86 17.7 16.45 16.55 17.3 C 16.23 16.68 16.62 16.25 16.95 15.75 C 17.20 15.1 16.65 14.77 16.17 14.77 C 15.78 14.13 16.4 13.92 16.96 13.66 C 17.55 13.33 18.12 13.02 18.55 12.72 Z M 10.35 17.27 C 10.65 18.17 11.7 18.42 12.22 17.5 C 12.62 17.08 13.02 17.04 13.25 17.56 C 13.58 18.18 12.68 18.69 12.68 19.22 C 12.72 19.36 12.88 19.47 13.07 19.61 C 11.24 19.38 10.48 18.55 10.35 17.27 Z"
+        android:fillColor="#FFFFFFFF" />
+    <path
+        android:pathData="M 7.8 12 L 18.22 8.36 L 9.55 13.18 Z M 10.78 13.5 L 18.22 8.36 L 15.12 16.26 L 11.62 14.08 L 10.35 16.27 Z"
         android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M 19.55,12 A 7.55,7.55 0 1 1 4.45,12 A 7.55,7.55 0 1 1 19.55,12 Z M 6.25,8.25 L 7.75,6.45 9.55,6.25 10.65,7.2 9.0,8.55 8.45,10.0 9.45,11.45 9.7,13.0 9.1,15.2 8.55,16.2 7.85,13.4 7.35,11.65 6.1,10.2 Z M 13.5,7.15 L 15.55,6.6 17.55,8.15 17.6,10.1 16.2,10.25 16.55,12.65 15.4,15.65 14.45,16.65 13.95,13.95 13.15,12.35 13.25,10.25 12.55,9.0 Z" />
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="0.13"
+        android:strokeLineJoin="round" />
 </vector>
