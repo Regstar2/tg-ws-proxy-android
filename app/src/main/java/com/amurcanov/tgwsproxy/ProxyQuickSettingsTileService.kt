@@ -134,10 +134,12 @@ class ProxyQuickSettingsTileService : TileService() {
 
     companion object {
         fun requestRefresh(context: Context) {
-            TileService.requestListeningState(
-                context,
-                ComponentName(context, ProxyQuickSettingsTileService::class.java),
-            )
+            runCatching {
+                TileService.requestListeningState(
+                    context,
+                    ComponentName(context, ProxyQuickSettingsTileService::class.java),
+                )
+            }
         }
     }
 }
