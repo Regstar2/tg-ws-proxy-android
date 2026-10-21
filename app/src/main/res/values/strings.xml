@@ -962,4 +962,10 @@
     <string name="worker_transport_scope">Flowseal Legacy WebSocket is experimental. Some networks restrict long-lived Cloudflare WebSocket connections: Telegram may fail to connect, or messages and media may not load. A successful WebSocket check (HTTP 101) does not verify MTProto. Chunk Relay remains the default. WARP provisioning Workers are separate.</string>
     <string name="cf_worker_test_legacy_fail">Legacy WebSocket unavailable or incompatible</string>
     <string name="cf_worker_test_legacy_ok">Legacy WebSocket: %1$d of %2$d upgrade checks passed (MTProto exchange unverified)</string>
+    <string name="quick_tile_title">TgWsProxy</string>
+    <string name="quick_tile_on">Proxy running</string>
+    <string name="quick_tile_off">Proxy stopped</string>
+    <string name="quick_tile_transitioning">Switching…</string>
+    <string name="quick_tile_error">Start failed · open app</string>
+    <string name="quick_tile_setup">Open app to set up</string>
 </resources>
