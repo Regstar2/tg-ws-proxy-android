@@ -77,7 +77,11 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        val commandIntent = intent ?: run {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+        val action = commandIntent.action
         if (action !in setOf(ACTION_START, ACTION_STOP, ACTION_RECONNECT, ACTION_RECONFIGURE)) {
             stopSelfResult(startId)
             return START_NOT_STICKY
@@ -85,7 +89,14 @@ class ProxyService : Service() {
         // startForegroundService must be acknowledged before an earlier native command completes.
         if (action == ACTION_START && !_isRunning.value) {
             ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.STARTING) }
-            startForegroundWithNotification()
+            try {
+                startForegroundWithNotification()
+            } catch (error: RuntimeException) {
+                ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
+                ProxyQuickSettingsTileService.requestRefresh(this)
+                stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
             ProxyQuickSettingsTileService.requestRefresh(this)
         }
         pendingCommands.incrementAndGet()
@@ -95,9 +106,9 @@ class ProxyService : Service() {
                     ACTION_START -> {
                         loadLastConfig()
                         logAction("start")
-                        val port = intent.getIntExtra(EXTRA_PORT, lastPort)
-                        val ips = intent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
-                        val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
+                        val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
+                        val ips = commandIntent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
+                        val poolSize = commandIntent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
                         val frontendType = lastFrontendType
                         if (port !in 1..65535 || poolSize <= 0 ||
                             (frontendType == LocalProxyFrontendType.SOCKS5 && ips.isBlank())
@@ -120,9 +131,9 @@ class ProxyService : Service() {
                     ACTION_RECONFIGURE -> {
                         loadLastConfig()
                         logAction("reconfigure")
-                        val port = intent.getIntExtra(EXTRA_PORT, lastPort)
-                        val ips = intent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
-                        val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
+                        val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
+                        val ips = commandIntent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
+                        val poolSize = commandIntent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
                         if (port in 1..65535 && poolSize > 0 &&
                             (lastFrontendType != LocalProxyFrontendType.SOCKS5 || ips.isNotBlank())
                         ) reconfigureProxy(port, ips, poolSize, lastFrontendType)
@@ -133,6 +144,7 @@ class ProxyService : Service() {
                 ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
                 releaseWakeLock()
                 stopForegroundServiceNotification()
+                ProxyTileCommandGate.release()
                 ProxyQuickSettingsTileService.requestRefresh(this@ProxyService)
                 AppLogger.e(
                     context = this@ProxyService,
@@ -141,6 +153,7 @@ class ProxyService : Service() {
                     details = mapOf("error" to error.javaClass.simpleName),
                 )
             } finally {
+                ProxyTileCommandGate.release()
                 if (pendingCommands.decrementAndGet() == 0 && !_isRunning.value) {
                     stopSelfResult(startId)
                 }
