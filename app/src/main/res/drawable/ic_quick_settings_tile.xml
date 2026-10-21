@@ -4,19 +4,16 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Simplified cloud outline based on the app mark; no tiny intersecting regions. -->
+    <!-- Earth with two readable continental cutouts; the orbit stays outside the globe. -->
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.45"
+        android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M7,18.4 H17.2 C19.9,18.4 21.8,16.6 21.8,14.1 C21.8,11.8 20.4,10.1 18.3,9.7 C17.8,6.4 15.2,4.2 12,4.2 C8.9,4.2 6.4,6.3 5.9,9.5 C3.6,9.9 2.2,11.9 2.2,14.1 C2.2,16.6 4.1,18.4 7,18.4 Z" />
+        android:pathData="M 16.244,5.450 C 19.15,4.60 21.10,5.37 21.66,6.85 C 22.18,8.21 21.09,9.75 19.776,11.328 M 7.756,18.550 C 4.85,19.40 2.90,18.63 2.34,17.15 C 1.82,15.79 2.91,14.25 4.224,12.672" />
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.3"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M14.6,13 C14.6,14.436 13.436,15.6 12,15.6 C10.564,15.6 9.4,14.436 9.4,13 C9.4,11.564 10.564,10.4 12,10.4 C13.436,10.4 14.6,11.564 14.6,13 Z" />
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M 19.55,12 A 7.55,7.55 0 1 1 4.45,12 A 7.55,7.55 0 1 1 19.55,12 Z M 6.25,8.25 L 7.75,6.45 9.55,6.25 10.65,7.2 9.0,8.55 8.45,10.0 9.45,11.45 9.7,13.0 9.1,15.2 8.55,16.2 7.85,13.4 7.35,11.65 6.1,10.2 Z M 13.5,7.15 L 15.55,6.6 17.55,8.15 17.6,10.1 16.2,10.25 16.55,12.65 15.4,15.65 14.45,16.65 13.95,13.95 13.15,12.35 13.25,10.25 12.55,9.0 Z" />
 </vector>
