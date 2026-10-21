@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Simplified cloud outline based on the app mark; no tiny intersecting regions. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.45"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M7,18.4 H17.2 C19.9,18.4 21.8,16.6 21.8,14.1 C21.8,11.8 20.4,10.1 18.3,9.7 C17.8,6.4 15.2,4.2 12,4.2 C8.9,4.2 6.4,6.3 5.9,9.5 C3.6,9.9 2.2,11.9 2.2,14.1 C2.2,16.6 4.1,18.4 7,18.4 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14.6,13 C14.6,14.436 13.436,15.6 12,15.6 C10.564,15.6 9.4,14.436 9.4,13 C9.4,11.564 10.564,10.4 12,10.4 C13.436,10.4 14.6,11.564 14.6,13 Z" />
+</vector>
