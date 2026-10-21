@@ -68,6 +68,14 @@ When enabled in Settings → Notifications:
 
 Legacy channels `proxy_status` / `proxy_alerts` are deleted on first launch after update (MIUI caches notification artwork per channel id).
 
-## Planned
+## Quick Settings tile (v1.11.3)
 
-Quick Settings Tile (start/stop/reconnect) is planned for a later release (v1.6.1 / v1.7).
+The system tile `ProxyQuickSettingsTileService` is a separate Android `TileService`, protected by `BIND_QUICK_SETTINGS_TILE`. It is an active tile: service transitions call `TileService.requestListeningState` and the tile additionally observes `ProxyRuntimeState.uiMetrics` while listening. No independent polling or proxy instance exists.
+
+Only `ProxyServiceStatus.RUNNING` **and** `ProxyService.isRunning == true` render as ACTIVE. STARTING, RECONNECTING, STOPPED, and ERROR never show ACTIVE. In a new process the state starts as STOPPED; saved desired state does not imply a running proxy.
+
+Tile start is fail-closed: `ProxyTileStartPolicy` stores a SHA-256 fingerprint only after a successful frontend start; it checks the currently selected frontend, MTProto validity, saved runtime, network profile, effective route policy, relevant routing preferences, and AWG config modification time. Mismatches or first use open the app for a fresh configuration. The tile does not update Telegram settings. An in-process gate rejects rapid duplicate taps; all native start/stop/reconfigure/reconnect commands use a serialized worker. A failed frontend start leaves the service in ERROR, not RUNNING.
+
+The foreground notification remains mandatory while running. The tile is added manually by the user, and OEM-specific panel behavior is not guaranteed. Device acceptance is described in `docs/testing/quick-settings-tile.md`.
+
+
