@@ -34,6 +34,7 @@ class ProxyService : Service() {
     private val commandDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val commandScope = CoroutineScope(SupervisorJob() + commandDispatcher)
     private val pendingCommands = AtomicInteger()
+    private var allowTileConfirmation = false
     private val speedSampler = SpeedSampler()
     private var currentFrontend: LocalProxyFrontend = localProxyFrontendFor(LocalProxyFrontendType.DEFAULT)
 
@@ -104,6 +105,8 @@ class ProxyService : Service() {
             try {
                 when (action) {
                     ACTION_START -> {
+                        // Only an explicitly validated UI start can establish first-run tile trust.
+                        allowTileConfirmation = commandIntent.hasExtra(EXTRA_PORT)
                         loadLastConfig()
                         logAction("start")
                         val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
@@ -121,14 +124,17 @@ class ProxyService : Service() {
                         }
                     }
                     ACTION_STOP -> {
+                        allowTileConfirmation = false
                         logAction("stop")
                         stopProxy()
                     }
                     ACTION_RECONNECT -> {
+                        allowTileConfirmation = false
                         logAction("reconnect")
                         reconnectProxy()
                     }
                     ACTION_RECONFIGURE -> {
+                        allowTileConfirmation = commandIntent.hasExtra(EXTRA_PORT)
                         loadLastConfig()
                         logAction("reconfigure")
                         val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
@@ -245,7 +251,7 @@ class ProxyService : Service() {
             return
         }
         saveLastConfig(port, ips, poolSize, frontendType)
-        ProxyTileStartPolicy.confirmSuccessfulStart(this)
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
         acquireWakeLock()
         speedSampler.reset()
         _isRunning.value = true
@@ -292,7 +298,7 @@ class ProxyService : Service() {
             config.poolSize,
             LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
         )
-        ProxyTileStartPolicy.confirmSuccessfulStart(this)
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
         acquireWakeLock()
         speedSampler.reset()
         currentFrontend = frontend
@@ -489,7 +495,7 @@ class ProxyService : Service() {
         if (saveConfig) {
             saveLastConfig(config.port, config.runtimeConfig, config.poolSize, frontend.type)
         }
-        ProxyTileStartPolicy.confirmSuccessfulStart(this)
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
         speedSampler.reset()
         _isRunning.value = true
         ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RUNNING) }
