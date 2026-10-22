@@ -19,6 +19,21 @@ Use an Android 8+ arm64-v8a device or emulator with the debug APK. Record Androi
 
 An invalid or missing configuration never opens MainActivity implicitly. The user can open the app separately to reconfigure.
 
+## Diagnosing an inactive tile
+
+After pressing the tile, a short message explains whether the proxy needs initial setup, a fresh confirmation from the app, or failed to start. On a supported device, capture only the safe tile log tag:
+
+```powershell
+adb logcat -c
+# Tap the TgWsProxy Quick Settings tile, then run:
+adb logcat -d -s ProxyQuickSettingsTile:V '*:S'
+```
+
+`TILE_START_REJECTED reason=SETUP_REQUIRED` means no valid previously started configuration exists.
+`CONFIG_CHANGED` means that preferences, network profile or routing no longer match the confirmed configuration; start the proxy once from the application.
+`TILE_START_REQUESTED` and `TILE_STOP_REQUESTED` indicate dispatch to the existing `ProxyService`, not successful completion. Confirm the foreground notification and real tile state. `TILE_COMMAND_REJECTED` indicates an Android service start failure.
+No proxy tokens, secrets or hostnames are logged by the tile.
+
 ## Build and JVM tests
 
 ```powershell
