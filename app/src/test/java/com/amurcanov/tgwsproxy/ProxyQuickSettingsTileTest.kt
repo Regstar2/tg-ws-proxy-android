@@ -252,6 +252,20 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun previouslyRunningMtProtoCanBeStartedFromSavedConfig() {
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
+            port = 1443,
+        )
+        val valid = MtProtoProxyConfig(port = 1443, secret = "0123456789abcdef0123456789abcdef")
+        assertTrue(ProxyTileStartPolicy.isFrontendValid(saved, valid))
+        assertFalse(ProxyTileStartPolicy.isFrontendValid(saved, valid.copy(port = 1444)))
+        assertFalse(ProxyTileStartPolicy.isFrontendValid(saved, valid.copy(enabled = false)))
+        assertFalse(ProxyTileStartPolicy.isFrontendValid(saved, valid.copy(secret = "")))
+        assertFalse(ProxyTileStartPolicy.isFrontendValid(saved, null))
+    }
+
+    @Test
     fun rapidTileClicksHaveOneCommandUntilCompletion() {
         ProxyTileCommandGate.release()
         try {
