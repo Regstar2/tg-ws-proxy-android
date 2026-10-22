@@ -7,6 +7,8 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.util.Log
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,10 +58,19 @@ class ProxyQuickSettingsTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
-        if (ProxyTileStateMapper.isTransitioning(status) || !ProxyTileCommandGate.tryAcquire()) return
+        if (ProxyTileStateMapper.isTransitioning(status)) {
+            showFeedback(R.string.quick_tile_transitioning)
+            return
+        }
+        if (!ProxyTileCommandGate.tryAcquire()) {
+            showFeedback(R.string.quick_tile_transitioning)
+            return
+        }
 
         val running = ProxyService.isRunning.value
-        val saved = if (!running && ProxyTileStartPolicy.canStart(this)) {
+        Log.i(TAG, "TILE_TAP running=$running status=${status.name}")
+        val decision = if (running) null else ProxyTileStartPolicy.startDecision(this)
+        val saved = if (decision == ProxyTileStartDecision.READY) {
             runCatching {
                 ProxySavedConfigStore(
                     getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE),
@@ -68,16 +79,25 @@ class ProxyQuickSettingsTileService : TileService() {
         } else {
             null
         }
-        if (!running && (saved == null || !saved.isSufficientForStart())) {
+        if (!running && (decision != ProxyTileStartDecision.READY ||
+                saved == null || !saved.isSufficientForStart())
+        ) {
             ProxyTileCommandGate.release()
+            val reason = decision ?: ProxyTileStartDecision.CONFIG_CHANGED
+            Log.w(TAG, "TILE_START_REJECTED reason=${reason.name}")
+            showFeedback(
+                if (reason == ProxyTileStartDecision.SETUP_REQUIRED) {
+                    R.string.quick_tile_setup
+                } else {
+                    R.string.quick_tile_config_changed
+                },
+            )
             refreshTile()
             return
         }
 
         val intent = Intent(this, ProxyService::class.java).apply {
             action = if (running) ProxyService.ACTION_STOP else ProxyService.ACTION_START
-            // Explicit, validated extras let ProxyService persist the confirmation on
-            // successful startup, including the first start after upgrading the app.
             saved?.let {
                 putExtra(ProxyService.EXTRA_PORT, it.port)
                 putExtra(ProxyService.EXTRA_IPS, it.runtimeConfig)
@@ -90,10 +110,17 @@ class ProxyQuickSettingsTileService : TileService() {
             } else {
                 ContextCompat.startForegroundService(this, intent)
             }
-        } catch (_: RuntimeException) {
+            Log.i(TAG, if (running) "TILE_STOP_REQUESTED" else "TILE_START_REQUESTED")
+        } catch (error: RuntimeException) {
             ProxyTileCommandGate.release()
+            Log.e(TAG, "TILE_COMMAND_REJECTED error=${error.javaClass.simpleName}")
+            showFeedback(R.string.quick_tile_error)
         }
         refreshTile()
+    }
+
+    private fun showFeedback(messageRes: Int) {
+        Toast.makeText(applicationContext, messageRes, Toast.LENGTH_SHORT).show()
     }
 
     private fun refreshTile() {
@@ -131,6 +158,8 @@ class ProxyQuickSettingsTileService : TileService() {
     }
 
     companion object {
+        private const val TAG = "ProxyQuickSettingsTile"
+
         fun requestRefresh(context: Context) {
             runCatching {
                 TileService.requestListeningState(
