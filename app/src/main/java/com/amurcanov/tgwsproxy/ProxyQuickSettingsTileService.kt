@@ -1,6 +1,5 @@
 package com.amurcanov.tgwsproxy
 
-import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -60,14 +59,30 @@ class ProxyQuickSettingsTileService : TileService() {
         if (ProxyTileStateMapper.isTransitioning(status) || !ProxyTileCommandGate.tryAcquire()) return
 
         val running = ProxyService.isRunning.value
-        if (!running && !ProxyTileStartPolicy.canStart(this)) {
+        val saved = if (!running && ProxyTileStartPolicy.canStart(this)) {
+            runCatching {
+                ProxySavedConfigStore(
+                    getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE),
+                ).load()
+            }.getOrNull()
+        } else {
+            null
+        }
+        if (!running && (saved == null || !saved.isSufficientForStart())) {
             ProxyTileCommandGate.release()
-            openSettings()
+            refreshTile()
             return
         }
 
         val intent = Intent(this, ProxyService::class.java).apply {
             action = if (running) ProxyService.ACTION_STOP else ProxyService.ACTION_START
+            // Explicit, validated extras let ProxyService persist the confirmation on
+            // successful startup, including the first start after upgrading the app.
+            saved?.let {
+                putExtra(ProxyService.EXTRA_PORT, it.port)
+                putExtra(ProxyService.EXTRA_IPS, it.runtimeConfig)
+                putExtra(ProxyService.EXTRA_POOL_SIZE, it.poolSize)
+            }
         }
         try {
             if (running) {
@@ -77,7 +92,6 @@ class ProxyQuickSettingsTileService : TileService() {
             }
         } catch (_: RuntimeException) {
             ProxyTileCommandGate.release()
-            openSettings()
         }
         refreshTile()
     }
@@ -108,22 +122,6 @@ class ProxyQuickSettingsTileService : TileService() {
             tile.stateDescription = getString(subtitle)
         }
         tile.updateTile()
-    }
-
-    private fun openSettings() {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val pending = PendingIntent.getActivity(
-                this, 109, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            startActivityAndCollapse(pending)
-        } else {
-            @Suppress("DEPRECATION")
-            startActivityAndCollapse(intent)
-        }
     }
 
     override fun onDestroy() {
