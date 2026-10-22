@@ -332,7 +332,7 @@ AI tools were used for selected parts of the code, tests, and documentation. The
 
 Open Android's Quick Settings editor (Edit / pencil icon), find **TgWsProxy** and drag it into the panel. Tapping the tile starts or stops the **local proxy service**; it does not configure Telegram or provide a system-wide VPN.
 
-Start the proxy successfully in the app first. The tile can reuse only that confirmed configuration. If the network, effective routing policy or associated settings change, open the app and start the proxy again to rebuild its configuration. Missing/invalid settings or a rejected start also lead back to the app. Repeated taps while the service is switching are ignored. Tile placement and styling depend on the Android/OEM UI.
+The tile directly starts or stops the proxy using the last successfully running configuration, without opening the app. After upgrading, an existing saved configuration can be reused only when its recorded network and route policy match the current one. Configure and start the proxy in the app initially. With missing or stale settings, the tile stays off and never opens the app automatically; start it in the app to confirm updated settings. Repeated taps while switching are ignored. Tile placement and styling depend on the Android/OEM UI.
 
 ## Limitations
 
