@@ -127,11 +127,17 @@ class ProxyQuickSettingsTileService : TileService() {
         val tile = qsTile ?: return
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
         val running = ProxyService.isRunning.value
+        val decision = if (!running && status == ProxyServiceStatus.STOPPED) {
+            ProxyTileStartPolicy.startDecision(this)
+        } else {
+            null
+        }
         val subtitle = when {
             ProxyTileStateMapper.isTransitioning(status) -> R.string.quick_tile_transitioning
             ProxyTileStateMapper.isActive(status, running) -> R.string.quick_tile_on
             status == ProxyServiceStatus.ERROR -> R.string.quick_tile_error
-            !ProxyTileStartPolicy.canStart(this) -> R.string.quick_tile_setup
+            decision == ProxyTileStartDecision.SETUP_REQUIRED -> R.string.quick_tile_setup
+            decision == ProxyTileStartDecision.CONFIG_CHANGED -> R.string.quick_tile_config_changed
             else -> R.string.quick_tile_off
         }
         tile.state = if (ProxyTileStateMapper.isActive(status, running)) {
