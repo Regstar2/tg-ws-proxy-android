@@ -108,6 +108,42 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun configuredProxyStartDecisionIsExplicit() {
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.SOCKS5,
+            runtimeConfig = "valid-route-tokens",
+        )
+        assertTrue(
+            ProxyTileStartPolicy.decide(saved, "same", "same", false) ==
+                ProxyTileStartDecision.READY,
+        )
+        assertTrue(
+            ProxyTileStartPolicy.decide(saved, null, "current", true) ==
+                ProxyTileStartDecision.READY,
+        )
+        assertTrue(
+            ProxyTileStartPolicy.decide(saved, "old", "new", true) ==
+                ProxyTileStartDecision.CONFIG_CHANGED,
+        )
+        assertTrue(
+            ProxyTileStartPolicy.decide(saved, null, null, true) ==
+                ProxyTileStartDecision.CONFIG_CHANGED,
+        )
+    }
+
+    @Test
+    fun missingProxyConfigReportsSetupRequired() {
+        val missing = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.SOCKS5,
+            runtimeConfig = "",
+        )
+        assertTrue(
+            ProxyTileStartPolicy.decide(missing, null, null, false) ==
+                ProxyTileStartDecision.SETUP_REQUIRED,
+        )
+    }
+
+    @Test
     fun rapidTileClicksHaveOneCommandUntilCompletion() {
         ProxyTileCommandGate.release()
         try {
