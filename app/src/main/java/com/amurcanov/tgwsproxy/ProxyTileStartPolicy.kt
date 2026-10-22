@@ -116,8 +116,11 @@ internal object ProxyTileStartPolicy {
         currentAwgPath: String,
     ): Boolean {
         if (!savedBySuccessfulStart || !saved.isSufficientForStart() ||
-            saved.runtimeConfig.isBlank() || expectedTokens.isEmpty()
+            saved.runtimeConfig.isBlank() || expectedTokens.isEmpty() ||
+            currentAwgPath.isNotBlank()
         ) return false
+        // Old versions did not save an AWG configuration timestamp, so an imported
+        // WARP profile must be revalidated by starting from the app once.
         val tokens = saved.runtimeConfig.split(',')
             .filter { it.startsWith("@") && '=' in it }
             .associate { it.substringBefore('=') to it.substringAfter('=') }
