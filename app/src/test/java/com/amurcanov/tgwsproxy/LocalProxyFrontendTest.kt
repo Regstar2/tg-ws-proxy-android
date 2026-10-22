@@ -35,6 +35,25 @@ class LocalProxyFrontendTest {
     }
 
     @Test
+    fun socks5Frontend_nativeStartupRejectionIsNotReportedAsRunning() {
+        val frontend = Socks5LocalProxyFrontend(RecordingSocks5NativeProxy(startResult = -2))
+        val result = frontend.start(
+            LocalProxyFrontendConfig(
+                host = "127.0.0.1",
+                port = 1443,
+                runtimeConfig = "1:149.154.175.50",
+                poolSize = 4,
+                verbose = 1,
+            ),
+        )
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(LocalProxyFrontendStatus.FAILED, frontend.getState().status)
+        assertEquals("NATIVE_START_REJECTED", result.errorCode)
+        frontend.stop()
+        assertEquals(LocalProxyFrontendStatus.STOPPED, frontend.getState().status)
+    }
+
+    @Test
     fun mtprotoExperimentalFrontend_doesNotStartWithoutRuntimeImplementation() {
         val frontend = MtProtoLocalProxyFrontend(
             runtimeAdapter = UnsupportedMtProtoRuntimeAdapter(),
@@ -213,7 +232,7 @@ class LocalProxyFrontendTest {
         }
     }
 
-    private class RecordingSocks5NativeProxy : Socks5NativeProxy {
+    private class RecordingSocks5NativeProxy(private val startResult: Int = 0) : Socks5NativeProxy {
         var recordedPoolSize = 0
         var host = ""
         var port = 0
@@ -229,7 +248,7 @@ class LocalProxyFrontendTest {
             this.port = port
             this.runtimeConfig = runtimeConfig
             this.verbose = verbose
-            return 0
+            return startResult
         }
 
         override fun stopProxy(): Int = 0

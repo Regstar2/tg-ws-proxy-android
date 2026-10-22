@@ -68,6 +68,14 @@ When enabled in Settings → Notifications:
 
 Legacy channels `proxy_status` / `proxy_alerts` are deleted on first launch after update (MIUI caches notification artwork per channel id).
 
-## Planned
+## Quick Settings tile (v1.11.3)
 
-Quick Settings Tile (start/stop/reconnect) is planned for a later release (v1.6.1 / v1.7).
+The system tile `ProxyQuickSettingsTileService` is a separate Android `TileService`, protected by `BIND_QUICK_SETTINGS_TILE`. It is an active tile: service transitions call `TileService.requestListeningState` and the tile additionally observes `ProxyRuntimeState.uiMetrics` while listening. No independent polling or proxy instance exists.
+
+Only `ProxyServiceStatus.RUNNING` **and** `ProxyService.isRunning == true` render as ACTIVE. STARTING, RECONNECTING, STOPPED, and ERROR never show ACTIVE. In a new process the state starts as STOPPED; saved desired state does not imply a running proxy.
+
+Tile start is fail-closed: `ProxyTileStartPolicy` compares the saved, previously successful frontend configuration with the current network profile, routing policy and relevant user preferences. The tile first validates the last successfully started runtime against the active network and effective route policy, then verifies the current frontend settings. A valid previously running runtime is reusable even when an unrelated preference changed and its stored fingerprint no longer matches. SHA-256 fingerprints remain supported for configurations that lack embedded route metadata. AWG/WARP profiles additionally require a recorded modification timestamp from a successful start on the current version; changed profiles must be re-confirmed in the app. The tile dispatches to the existing ProxyService via ACTION_START/ACTION_STOP. Rejected starts never silently open MainActivity: a short localized message and a non-sensitive `ProxyQuickSettingsTile` Logcat reason identify missing or changed configuration, and the tile stays inactive. A failed foreground-service start releases the click gate. No secrets, hosts, routes or tokens are written to tile logs.
+
+The foreground notification remains mandatory while running. The tile is added manually by the user, and OEM-specific panel behavior is not guaranteed. Device acceptance is described in `docs/testing/quick-settings-tile.md`.
+
+

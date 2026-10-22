@@ -21,12 +21,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 class ProxyService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var metricsJob: Job? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // Native frontend commands must never overlap, including start/stop/reconfigure.
+    private val commandDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val commandScope = CoroutineScope(SupervisorJob() + commandDispatcher)
+    private val pendingCommands = AtomicInteger()
+    private var allowTileConfirmation = false
     private val speedSampler = SpeedSampler()
     private var currentFrontend: LocalProxyFrontend = localProxyFrontendFor(LocalProxyFrontendType.DEFAULT)
 
@@ -70,42 +78,95 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                loadLastConfig()
-                logAction("start")
-                val port = intent.getIntExtra(EXTRA_PORT, lastPort)
-                val ips = intent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
-                val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
-                val frontendType = lastFrontendType
-                if (frontendType == LocalProxyFrontendType.SOCKS5 && ips.isBlank()) {
-                    stopSelf()
-                    return START_NOT_STICKY
+        val commandIntent = intent ?: run {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+        val action = commandIntent.action
+        if (action !in setOf(ACTION_START, ACTION_STOP, ACTION_RECONNECT, ACTION_RECONFIGURE)) {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+        // startForegroundService must be acknowledged before an earlier native command completes.
+        if (action == ACTION_START && !_isRunning.value) {
+            ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.STARTING) }
+            try {
+                startForegroundWithNotification()
+            } catch (error: RuntimeException) {
+                ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
+                ProxyTileCommandGate.release()
+                ProxyQuickSettingsTileService.requestRefresh(this)
+                stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
+            ProxyQuickSettingsTileService.requestRefresh(this)
+        }
+        pendingCommands.incrementAndGet()
+        commandScope.launch {
+            try {
+                when (action) {
+                    ACTION_START -> {
+                        // Only an explicitly validated UI start can establish first-run tile trust.
+                        allowTileConfirmation = commandIntent.hasExtra(EXTRA_PORT)
+                        loadLastConfig()
+                        logAction("start")
+                        val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
+                        val ips = commandIntent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
+                        val poolSize = commandIntent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
+                        val frontendType = lastFrontendType
+                        if (port !in 1..65535 || poolSize <= 0 ||
+                            (frontendType == LocalProxyFrontendType.SOCKS5 && ips.isBlank())
+                        ) {
+                            ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
+                            stopForegroundServiceNotification()
+                            ProxyQuickSettingsTileService.requestRefresh(this@ProxyService)
+                        } else {
+                            startProxy(port, ips, poolSize, frontendType)
+                        }
+                    }
+                    ACTION_STOP -> {
+                        allowTileConfirmation = false
+                        logAction("stop")
+                        stopProxy()
+                    }
+                    ACTION_RECONNECT -> {
+                        allowTileConfirmation = false
+                        logAction("reconnect")
+                        reconnectProxy()
+                    }
+                    ACTION_RECONFIGURE -> {
+                        allowTileConfirmation = commandIntent.hasExtra(EXTRA_PORT)
+                        loadLastConfig()
+                        logAction("reconfigure")
+                        val port = commandIntent.getIntExtra(EXTRA_PORT, lastPort)
+                        val ips = commandIntent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
+                        val poolSize = commandIntent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
+                        if (port in 1..65535 && poolSize > 0 &&
+                            (lastFrontendType != LocalProxyFrontendType.SOCKS5 || ips.isNotBlank())
+                        ) reconfigureProxy(port, ips, poolSize, lastFrontendType)
+                    }
                 }
-                startProxy(port, ips, poolSize, frontendType)
-            }
-            ACTION_STOP -> {
-                logAction("stop")
-                stopProxy()
-            }
-            ACTION_RECONNECT -> {
-                logAction("reconnect")
-                reconnectProxy()
-            }
-            ACTION_RECONFIGURE -> {
-                loadLastConfig()
-                logAction("reconfigure")
-                val port = intent.getIntExtra(EXTRA_PORT, lastPort)
-                val ips = intent.getStringExtra(EXTRA_IPS).orEmpty().ifBlank { lastIps }
-                val poolSize = intent.getIntExtra(EXTRA_POOL_SIZE, lastPoolSize)
-                val frontendType = lastFrontendType
-                if (frontendType == LocalProxyFrontendType.SOCKS5 && ips.isBlank()) {
-                    return START_STICKY
+            } catch (error: Exception) {
+                _isRunning.value = false
+                ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
+                releaseWakeLock()
+                stopForegroundServiceNotification()
+                ProxyTileCommandGate.release()
+                ProxyQuickSettingsTileService.requestRefresh(this@ProxyService)
+                AppLogger.e(
+                    context = this@ProxyService,
+                    category = AppLogCategory.APP,
+                    message = "PROXY_COMMAND_FAILED",
+                    details = mapOf("error" to error.javaClass.simpleName),
+                )
+            } finally {
+                ProxyTileCommandGate.release()
+                if (pendingCommands.decrementAndGet() == 0 && !_isRunning.value) {
+                    stopSelfResult(startId)
                 }
-                reconfigureProxy(port, ips, poolSize, frontendType)
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun saveLastConfig(
@@ -163,12 +224,9 @@ class ProxyService : Service() {
         frontend: LocalProxyFrontend,
         config: LocalProxyFrontendConfig,
     ) {
-        if (
-            _isRunning.value &&
+        if (_isRunning.value &&
             currentFrontend.type == frontendType &&
-            ips == lastIps &&
-            port == lastPort &&
-            poolSize == lastPoolSize &&
+            ips == lastIps && port == lastPort && poolSize == lastPoolSize &&
             frontendType == lastFrontendType
         ) {
             updateNotification()
@@ -176,24 +234,32 @@ class ProxyService : Service() {
         }
         if (_isRunning.value) {
             stopNativeOnly()
+            _isRunning.value = false
+        }
+        ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.STARTING) }
+        ProxyQuickSettingsTileService.requestRefresh(this)
+        startForegroundWithNotification()
+        currentFrontend = frontend
+        val result = runCatching { frontend.start(config) }.getOrElse { error ->
+            LocalProxyFrontendStartResult(
+                state = LocalProxyFrontendState(frontend.type, LocalProxyFrontendStatus.FAILED),
+                errorCode = error.javaClass.simpleName,
+            )
+        }
+        logFrontendStartResult(result)
+        if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
+            handleFrontendStartFailure(frontend, result, wasRunning = false)
+            return
         }
         saveLastConfig(port, ips, poolSize, frontendType)
-        ProxyRuntimeState.update {
-            it.copy(serviceStatus = ProxyServiceStatus.STARTING)
-        }
-        startForegroundWithNotification()
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
         acquireWakeLock()
         speedSampler.reset()
-        currentFrontend = frontend
-        Thread {
-            logFrontendStartResult(frontend.start(config))
-        }.start()
         _isRunning.value = true
-        ProxyRuntimeState.update {
-            it.copy(serviceStatus = ProxyServiceStatus.RUNNING)
-        }
+        ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RUNNING) }
         startMetricsLoop()
         updateNotification()
+        ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
     private fun startMtProtoProxy(
@@ -233,6 +299,7 @@ class ProxyService : Service() {
             config.poolSize,
             LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
         )
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
         acquireWakeLock()
         speedSampler.reset()
         currentFrontend = frontend
@@ -245,6 +312,7 @@ class ProxyService : Service() {
         }
         startMetricsLoop()
         updateNotification()
+        ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
     private fun buildFrontendConfig(
@@ -350,44 +418,32 @@ class ProxyService : Service() {
             ProxyRuntimeState.update {
                 it.copy(serviceStatus = ProxyServiceStatus.ERROR)
             }
+            releaseWakeLock()
             stopForegroundServiceNotification()
-            stopSelf()
         } else {
             updateNotification()
         }
+        ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
     private fun reconnectProxy() {
         if (!_isRunning.value) {
             loadLastConfig()
             if (lastFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL || lastIps.isNotBlank()) {
-                logAction("start")
                 startProxy(lastPort, lastIps, lastPoolSize, lastFrontendType)
             }
             return
         }
-        val activeFrontendType = currentFrontend.type
-        if (activeFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
-            startProxy(lastPort, lastIps, lastPoolSize, activeFrontendType)
+        val type = currentFrontend.type
+        if (type == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            startProxy(lastPort, lastIps, lastPoolSize, type)
             return
         }
-        val frontend = localProxyFrontendFor(activeFrontendType)
-        val config = buildFrontendConfig(activeFrontendType, lastPort, lastIps, lastPoolSize)
-        ProxyRuntimeState.update {
-            it.copy(serviceStatus = ProxyServiceStatus.RECONNECTING)
-        }
-        updateNotification()
-        serviceScope.launch(Dispatchers.IO) {
-            stopNativeOnly()
-            delay(400)
-            currentFrontend = frontend
-            logFrontendStartResult(frontend.start(config))
-            speedSampler.reset()
-            ProxyRuntimeState.update {
-                it.copy(serviceStatus = ProxyServiceStatus.RUNNING)
-            }
-            updateNotification()
-        }
+        restartSocks5(
+            localProxyFrontendFor(type),
+            buildFrontendConfig(type, lastPort, lastIps, lastPoolSize),
+            saveConfig = false,
+        )
     }
 
     private fun reconfigureProxy(
@@ -396,44 +452,56 @@ class ProxyService : Service() {
         poolSize: Int,
         frontendType: LocalProxyFrontendType,
     ) {
-        if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+        if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL || !_isRunning.value) {
             startProxy(port, ips, poolSize, frontendType)
             return
         }
-        val frontend = localProxyFrontendFor(frontendType)
-        if (!_isRunning.value) {
-            startProxy(port, ips, poolSize, frontendType)
-            return
-        }
-        if (
-            currentFrontend.type == frontendType &&
-            port == lastPort &&
-            ips == lastIps &&
-            poolSize == lastPoolSize &&
+        if (currentFrontend.type == frontendType &&
+            port == lastPort && ips == lastIps && poolSize == lastPoolSize &&
             frontendType == lastFrontendType
         ) {
             updateNotification()
             return
         }
-        ProxyRuntimeState.update {
-            it.copy(serviceStatus = ProxyServiceStatus.RECONNECTING)
-        }
+        restartSocks5(
+            localProxyFrontendFor(frontendType),
+            buildFrontendConfig(frontendType, port, ips, poolSize),
+            saveConfig = true,
+        )
+    }
+
+    private fun restartSocks5(
+        frontend: LocalProxyFrontend,
+        config: LocalProxyFrontendConfig,
+        saveConfig: Boolean,
+    ) {
+        ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RECONNECTING) }
+        ProxyQuickSettingsTileService.requestRefresh(this)
         updateNotification()
-        val config = buildFrontendConfig(frontendType, port, ips, poolSize)
-        serviceScope.launch(Dispatchers.IO) {
-            stopNativeOnly()
-            delay(400)
-            saveLastConfig(port, ips, poolSize, frontendType)
-            currentFrontend = frontend
-            logFrontendStartResult(frontend.start(config))
-            speedSampler.reset()
-            ProxyRuntimeState.update {
-                it.copy(serviceStatus = ProxyServiceStatus.RUNNING)
-            }
-            launch(Dispatchers.Main) {
-                updateNotification()
-            }
+        stopNativeOnly()
+        _isRunning.value = false
+        Thread.sleep(400)
+        currentFrontend = frontend
+        val result = runCatching { frontend.start(config) }.getOrElse { error ->
+            LocalProxyFrontendStartResult(
+                state = LocalProxyFrontendState(frontend.type, LocalProxyFrontendStatus.FAILED),
+                errorCode = error.javaClass.simpleName,
+            )
         }
+        logFrontendStartResult(result)
+        if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
+            handleFrontendStartFailure(frontend, result, wasRunning = false)
+            return
+        }
+        if (saveConfig) {
+            saveLastConfig(config.port, config.runtimeConfig, config.poolSize, frontend.type)
+        }
+        if (allowTileConfirmation) ProxyTileStartPolicy.confirmSuccessfulStart(this)
+        speedSampler.reset()
+        _isRunning.value = true
+        ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RUNNING) }
+        updateNotification()
+        ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
     private fun stopNativeOnly() {
@@ -448,15 +516,13 @@ class ProxyService : Service() {
     private fun stopProxy() {
         metricsJob?.cancel()
         metricsJob = null
-        serviceScope.launch(Dispatchers.IO) {
-            stopNativeOnly()
-            PersistentLogStore.flushAsync()
-        }
+        runCatching { stopNativeOnly() }
+        PersistentLogStore.flushAsync()
         releaseWakeLock()
         _isRunning.value = false
         ProxyRuntimeState.reset()
         stopForegroundServiceNotification()
-        stopSelf()
+        ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
     private fun startMetricsLoop() {
@@ -765,9 +831,15 @@ class ProxyService : Service() {
     }
 
     override fun onDestroy() {
+        metricsJob?.cancel()
         if (_isRunning.value) {
-            stopProxy()
+            runCatching { stopNativeOnly() }
         }
+        _isRunning.value = false
+        ProxyRuntimeState.reset()
+        releaseWakeLock()
+        ProxyQuickSettingsTileService.requestRefresh(this)
+        commandDispatcher.close()
         PersistentLogStore.flushAsync()
         super.onDestroy()
     }

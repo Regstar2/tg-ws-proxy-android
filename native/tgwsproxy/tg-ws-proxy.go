@@ -2835,13 +2835,17 @@ func listenProxyTCP(ctx context.Context, addr string) (net.Listener, error) {
 	return listener, nil
 }
 
-func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]string) error {
+func runProxy(ctx context.Context, host string, port int, dcOptMap map[int]string, started ...chan<- error) error {
 	dcOptMu.Lock()
 	dcOpt = dcOptMap
 	dcOptMu.Unlock()
 
 	addr := joinAddr(host, port)
 	listener, err := listenProxyTCP(ctx, addr)
+	if len(started) > 0 && started[0] != nil {
+		// Report the real bind result before Android marks the local proxy as running.
+		started[0] <- err
+	}
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
@@ -3315,11 +3319,18 @@ func StartProxy(cHost *C.char, port C.int, cDcIps *C.char, verbose C.int) C.int 
 
 	globalCtx, globalCancel = context.WithCancel(context.Background())
 
+	started := make(chan error, 1)
 	go func() {
-		if err := runProxy(globalCtx, host, goPort, dcOptMap); err != nil {
+		if err := runProxy(globalCtx, host, goPort, dcOptMap, started); err != nil {
 			logError.Printf("runProxy error: %v", err)
 		}
 	}()
+	if err := <-started; err != nil {
+		globalCancel()
+		globalCancel = nil
+		globalCtx = nil
+		return -3
+	}
 
 	return 0
 }
