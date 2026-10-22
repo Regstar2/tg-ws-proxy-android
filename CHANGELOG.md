@@ -4,6 +4,14 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
+## 1.11.3 - 2026-10-22
+- Added an Android Quick Settings tile for starting and stopping the existing local TgWsProxy service without opening the main app (Android 8.0+), with a simplified monochrome icon and RU/EN status messages.
+- The tile reflects actual service state and never reports ACTIVE before the proxy frontend reaches RUNNING. Rapid duplicate taps and background foreground-service launch failures are handled without spawning duplicate proxy runtimes.
+- A previously successful runtime can be reused after an upgrade when the network profile, effective route policy and frontend remain valid. Missing, outdated or changed configurations stay inactive and provide a diagnostic explanation instead of silently opening the app.
+- Hardened SOCKS5 frontend success reporting and added Quick Settings unit/native regression coverage and on-device diagnostic guidance.
+- The tile does not change Telegram proxy settings or create a VPN. Flowseal Legacy WebSocket remains experimental; Android/HyperOS appearance and restrictions depend on the device.
+
+
 ## 1.11.2 - 2026-10-16
 - Restored **experimental compatibility with original Flowseal Legacy WebSocket** Workers (`/apiws`) alongside the existing HTTPS Chunk Relay route. Transport is selected explicitly for single Workers and individual Worker Pool entries; previously configured Workers keep Chunk Relay by default.
 - Redesigned Settings → Cloudflare → Worker Pool around a unified Worker list, transport labels, runtime/selection status, diagnostics, import, selection strategies and collapsible advanced DC/media controls.

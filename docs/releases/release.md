@@ -1,67 +1,28 @@
 # Release workflow
 
-Актуальный release target: **v1.11.1 stable**.
+Актуальный target: **v1.11.3 stable patch**.
 
 ## Метаданные
 
-- `versionName 1.11.1`
-- `versionCode 57`
-- tag: `v1.11.1`
-- APK: `TgWsProxy-Android-v1.11.1-arm64-v8a.apk`
-- full RU notes: [v1.11.1.md](v1.11.1.md)
-- full EN notes: [v1.11.1_EN.md](v1.11.1_EN.md)
-- GitHub Release body: [RELEASE_NOTES_v1.11.1.md](RELEASE_NOTES_v1.11.1.md)
+- `versionName 1.11.3`
+- `versionCode 59`
+- Git tag: `v1.11.3` (тег ставится только на проверенный commit после слияния release-prep PR)
+- APK: `TgWsProxy-Android-v1.11.3-arm64-v8a.apk`
+- [Описание на русском](v1.11.3.md) · [English](v1.11.3_EN.md)
+- [Краткое описание GitHub Release](RELEASE_NOTES_v1.11.3.md)
 
 ## Перед тегом
 
-1. Запустить:
-   ```powershell
-   .\scripts\ci.ps1
-   ```
-2. Собрать подписанный release:
-   ```powershell
-   .\scripts\release.ps1 -Version v1.11.1
-   ```
-3. Установить signed APK поверх `v1.11.0` с той же release-подписью; uninstall не использовать как способ обхода проверки подписи.
-4. Проверить MTProto/CF, `awg_warp`, сообщения/media, reconnect, Wi-Fi ↔ mobile и boot autostart с последней сохранённой конфигурацией.
-5. Проверить custom provisioning Worker и поведение переключателя встроенных Worker.
-6. Просмотреть экспорт diagnostics/logs на наличие секретов.
-7. Зафиксировать результат в [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+1. Проверьте `scripts/ci.ps1` и пройденный GitHub Actions CI на итоговом commit.
+2. `./scripts/release.ps1 -Version v1.11.3 -PreflightOnly` — проверка соответствия метаданных.
+3. Проверьте вручную выключение/запуск прокси и доставку сообщений через Telegram. Отдельно проверьте сохранённые настройки, индикацию плитки, отсутствие ложного ACTIVE и обновление подписанного APK без удаления данных, когда финальная сборка доступна.
+4. Подтвердите источники подписи и отсутствие секретов в tracked files.
+5. Отправьте точный тег `v1.11.3` из итогового `main`. Не переносите существующий тег и не используйте force-push.
 
-## Автоматические проверки
+## Автоматическая публикация
 
-`.\scripts\ci.ps1` проверяет release metadata/localization/private-file audit, release preflight, Go module/tests, Android unit tests, debug APK build и packaged-resource audit.
+`.github/workflows/release.yml` запускается при push tag, проверяет, что тег существует, выполняет `scripts/ci.ps1`, подписывает релизный APK ключом из GitHub Actions secrets, сверяет пакет, версию, подпись и вычисляет SHA-256, затем публикует ровно APK и checksum в GitHub Releases.
 
-`.\scripts\release.ps1 -Version v1.11.1` дополнительно:
+Публикация не считается состоявшейся, пока workflow не завершился с результатом PASS, а release assets не доступны в GitHub.
 
-- требует release signing material вне Git;
-- собирает release APK;
-- проверяет package, `versionName` и `versionCode`;
-- проверяет APK signature через `apksigner`;
-- создаёт ровно APK и SHA-256 в `dist/`.
-
-## Публикация
-
-`.github/workflows/release.yml` запускается для существующего tag `v1.11.1`. Workflow:
-
-1. checkout exact tag;
-2. повторно запускает `scripts/ci.ps1`;
-3. восстанавливает release keystore из GitHub Actions secrets во временный каталог hosted runner;
-4. запускает `scripts/release.ps1 -Version v1.11.1`;
-5. проверяет наличие одного APK и одного `.sha256`;
-6. создаёт GitHub Release только если предыдущие шаги завершились успешно.
-
-Для stable tag workflow не добавляет флаг prerelease.
-
-## Signing secrets
-
-Repository Actions secrets:
-
-```text
-RELEASE_KEYSTORE_BASE64
-RELEASE_KEYSTORE_PASSWORD
-RELEASE_KEY_PASSWORD
-RELEASE_KEY_ALIAS
-```
-
-Keystore, пароли и локальные signing env-файлы не должны попадать в Git, diagnostics или release assets.
+Секреты `RELEASE_KEYSTORE_BASE64`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_PASSWORD`, `RELEASE_KEY_ALIAS` хранятся только в Actions secrets; не коммитьте keystore и пароли.
