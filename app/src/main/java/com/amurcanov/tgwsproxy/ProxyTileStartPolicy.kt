@@ -171,6 +171,13 @@ internal object ProxyTileStartPolicy {
             tokens["@awg_warp_config_path"].orEmpty() == currentAwgPath
     }
 
+    internal fun isSignaturePreference(key: String, stable: Boolean): Boolean =
+        (key in relevantPreferences && (!stable || key != "cf_upstream_domains")) ||
+            (key.startsWith("worker_pool_") &&
+                key != "worker_pool_round_robin_cursor_v1" &&
+                key != "worker_pool_migration_done_v1" &&
+                (!stable || key != "worker_pool_workers_v1"))
+
     // Endpoints are configuration; health checks and update timestamps are not.
     internal fun stableWorkerConfig(workers: List<WorkerEndpoint>): String =
         workers.sortedBy { it.id }.joinToString("\u0002") { worker ->
@@ -216,13 +223,7 @@ internal object ProxyTileStartPolicy {
             prefs,
         ).resolve(profile)
         val relevant = prefs.all
-            .filterKeys { key ->
-                (key in relevantPreferences && (!stable || key != "cf_upstream_domains")) ||
-                    (key.startsWith("worker_pool_") &&
-                        key != "worker_pool_round_robin_cursor_v1" &&
-                        key != "worker_pool_migration_done_v1" &&
-                        (!stable || key != "worker_pool_workers_v1"))
-            }
+            .filterKeys { key -> isSignaturePreference(key, stable) }
             .toSortedMap()
             .entries.joinToString("|") { (key, value) -> "$key=$value" }
         val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
