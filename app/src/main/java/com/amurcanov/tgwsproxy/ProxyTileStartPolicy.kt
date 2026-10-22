@@ -2,6 +2,8 @@ package com.amurcanov.tgwsproxy
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
+import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
 import java.security.MessageDigest
 
 /**
@@ -16,6 +18,7 @@ internal enum class ProxyTileStartDecision {
 
 internal object ProxyTileStartPolicy {
     private const val KEY_CONFIRMED_SIGNATURE = "quick_settings_confirmed_start_v1"
+    private const val KEY_CONFIRMED_SIGNATURE_V2 = "quick_settings_confirmed_start_v2"
 
     private val relevantPreferences = setOf(
         "connection_mode",
@@ -55,9 +58,23 @@ internal object ProxyTileStartPolicy {
             return@runCatching ProxyTileStartDecision.SETUP_REQUIRED
         }
 
-        val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
-        val currentSignature = signature(context, prefs, saved)
-        val legacyReusable = if (storedSignature == null && currentSignature != null) {
+        val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE_V2, null)
+        val previousSignature = if (storedSignature == null) {
+            prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
+        } else {
+            null
+        }
+        val currentSignature = signature(context, prefs, saved, stable = true)
+        val oldSignatureMatches = previousSignature != null &&
+            isConfirmed(
+                saved,
+                previousSignature,
+                signature(context, prefs, saved, stable = false),
+            )
+        if (oldSignatureMatches) return@runCatching ProxyTileStartDecision.READY
+        val legacyReusable = if (storedSignature == null &&
+            previousSignature == null && currentSignature != null
+        ) {
             // Only a successful configuration from older versions may be migrated.
             val profile = NetworkProfileProvider.current(context)
             val effective = EffectiveRoutePolicyResolver(
@@ -89,7 +106,11 @@ internal object ProxyTileStartPolicy {
         } else {
             false
         }
-        decide(saved, storedSignature, currentSignature, legacyReusable)
+        if (previousSignature != null) {
+            ProxyTileStartDecision.CONFIG_CHANGED
+        } else {
+            decide(saved, storedSignature, currentSignature, legacyReusable)
+        }
     }.getOrDefault(ProxyTileStartDecision.CONFIG_CHANGED)
 
     internal fun decide(
@@ -109,9 +130,9 @@ internal object ProxyTileStartPolicy {
         runCatching {
             val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
             val saved = ProxySavedConfigStore(prefs).load()
-            val signature = signature(context, prefs, saved)
+            val signature = signature(context, prefs, saved, stable = true)
             if (saved.isSufficientForStart() && signature != null) {
-                prefs.edit().putString(KEY_CONFIRMED_SIGNATURE, signature).apply()
+                prefs.edit().putString(KEY_CONFIRMED_SIGNATURE_V2, signature).apply()
             }
         }
     }
@@ -150,10 +171,26 @@ internal object ProxyTileStartPolicy {
             tokens["@awg_warp_config_path"].orEmpty() == currentAwgPath
     }
 
+    // Endpoints are configuration; health checks and update timestamps are not.
+    internal fun stableWorkerConfig(workers: List<WorkerEndpoint>): String =
+        workers.sortedBy { it.id }.joinToString("\u0002") { worker ->
+            listOf(
+                worker.id,
+                worker.name,
+                worker.url,
+                worker.transport.prefValue,
+                worker.enabled.toString(),
+                worker.priority.toString(),
+                worker.weight.toString(),
+                worker.createdAt.toString(),
+            ).joinToString("\u0001")
+        }
+
     private fun signature(
         context: Context,
         prefs: SharedPreferences,
         saved: ProxySavedConfig,
+        stable: Boolean,
     ): String? {
         if (!saved.isSufficientForStart()) return null
         val mtProto = if (saved.frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
@@ -180,16 +217,23 @@ internal object ProxyTileStartPolicy {
         ).resolve(profile)
         val relevant = prefs.all
             .filterKeys { key ->
-                key in relevantPreferences ||
+                (key in relevantPreferences && (!stable || key != "cf_upstream_domains")) ||
                     (key.startsWith("worker_pool_") &&
                         key != "worker_pool_round_robin_cursor_v1" &&
-                        key != "worker_pool_migration_done_v1")
+                        key != "worker_pool_migration_done_v1" &&
+                        (!stable || key != "worker_pool_workers_v1"))
             }
             .toSortedMap()
             .entries.joinToString("|") { (key, value) -> "$key=$value" }
         val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
         val awgModified = awgPath.takeIf { it.isNotBlank() }
             ?.let { java.io.File(it).lastModified() } ?: 0L
+        val workerConfig = if (stable) {
+            val workers = SharedPreferencesWorkerPoolPersistence(prefs).loadWorkers()
+            stableWorkerConfig(workers)
+        } else {
+            null
+        }
         val text = listOf(
             saved.frontendType.prefValue,
             saved.port.toString(),
@@ -202,9 +246,9 @@ internal object ProxyTileStartPolicy {
             effective.legacyMode.name,
             effective.policy.toString(),
             relevant,
-            awgPath,
-            awgModified.toString(),
-        ).joinToString("\u0000")
+        ).let { base ->
+            if (workerConfig != null) base + workerConfig else base
+        }.plus(listOf(awgPath, awgModified.toString())).joinToString("\u0000")
         return MessageDigest.getInstance("SHA-256")
             .digest(text.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
