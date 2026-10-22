@@ -43,11 +43,43 @@ internal object ProxyTileStartPolicy {
         return runCatching {
             val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
             val saved = ProxySavedConfigStore(prefs).load()
-            isConfirmed(
-                saved = saved,
-                storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE, null),
-                currentSignature = signature(context, prefs, saved),
-            )
+            val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
+            val currentSignature = signature(context, prefs, saved)
+            if (isConfirmed(saved, storedSignature, currentSignature)) {
+                true
+            } else if (storedSignature != null || currentSignature == null) {
+                false
+            } else {
+                // Pre-tile versions saved these fields only after a successful frontend start.
+                // Permit a one-time migration only on the same network and route policy.
+                val profile = NetworkProfileProvider.current(context)
+                val effective = EffectiveRoutePolicyResolver(
+                    NetworkRoutePolicyRepository(prefs),
+                    prefs,
+                ).resolve(profile)
+                val policy = effective.policy
+                val expected = mapOf(
+                    "@network_profile_id" to profile.id,
+                    "@network_profile_type" to profile.type.prefValue,
+                    "@connection_mode" to effective.legacyMode.prefValue,
+                    "@auto_strategy" to policy.autoStrategy.prefValue,
+                    "@route_direct_ws" to flag(RouteKind.DIRECT_WS in policy.enabledRoutes),
+                    "@route_worker_ws" to flag(RouteKind.WORKER_WS in policy.enabledRoutes),
+                    "@route_cf_proxy_ws" to flag(RouteKind.CF_PROXY_WS in policy.enabledRoutes),
+                    "@route_awg_warp" to flag(RouteKind.AWG_WARP in policy.enabledRoutes),
+                    "@route_tcp_fallback" to flag(RouteKind.TCP_FALLBACK in policy.enabledRoutes),
+                    "@preferred_route" to policy.preferredRoute?.prefValue.orEmpty(),
+                    "@route_fallback" to flag(policy.allowFallback),
+                )
+                isLegacyReusable(
+                    saved = saved,
+                    savedBySuccessfulStart = prefs.contains("last_proxy_port") &&
+                        prefs.contains("last_proxy_pool") &&
+                        prefs.contains("last_runtime_ips"),
+                    expectedTokens = expected,
+                    currentAwgPath = AwgWarpConfigStore.configPath(context).orEmpty(),
+                )
+            }
         }.getOrDefault(false)
     }
 
@@ -71,6 +103,26 @@ internal object ProxyTileStartPolicy {
             !storedSignature.isNullOrBlank() &&
             currentSignature != null &&
             storedSignature == currentSignature
+    }
+
+    private fun flag(enabled: Boolean) = if (enabled) "1" else "0"
+
+    // Compatibility for previously running installations without a tile confirmation hash.
+    // Every required route/profile token must match the currently selected policy.
+    internal fun isLegacyReusable(
+        saved: ProxySavedConfig,
+        savedBySuccessfulStart: Boolean,
+        expectedTokens: Map<String, String>,
+        currentAwgPath: String,
+    ): Boolean {
+        if (!savedBySuccessfulStart || !saved.isSufficientForStart() ||
+            saved.runtimeConfig.isBlank() || expectedTokens.isEmpty()
+        ) return false
+        val tokens = saved.runtimeConfig.split(',')
+            .filter { it.startsWith("@") && '=' in it }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+        return expectedTokens.all { (key, value) -> tokens[key] == value } &&
+            tokens["@awg_warp_config_path"].orEmpty() == currentAwgPath
     }
 
     private fun signature(
