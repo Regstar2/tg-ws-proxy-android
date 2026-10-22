@@ -79,7 +79,15 @@ internal object ProxyTileStartPolicy {
                 prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) ==
                     java.io.File(currentAwgPath).lastModified()
             )
-        if (currentSignature != null && isLegacyReusable(
+        val validFrontend = if (saved.frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            isFrontendValid(
+                saved,
+                MtProtoProxyConfigRepository(prefs).loadForDiagnostics(),
+            )
+        } else {
+            isFrontendValid(saved, null)
+        }
+        if (validFrontend && isLegacyReusable(
                 saved = saved,
                 savedBySuccessfulStart = confirmedByService,
                 expectedTokens = expected,
@@ -145,6 +153,19 @@ internal object ProxyTileStartPolicy {
             !storedSignature.isNullOrBlank() &&
             currentSignature != null &&
             storedSignature == currentSignature
+    }
+
+    internal fun isFrontendValid(
+        saved: ProxySavedConfig,
+        mtProto: MtProtoProxyConfig?,
+    ): Boolean {
+        if (!saved.isSufficientForStart()) return false
+        if (saved.frontendType == LocalProxyFrontendType.SOCKS5) return true
+        return mtProto != null &&
+            mtProto.enabled &&
+            mtProto.experimentalAcknowledged &&
+            mtProto.port == saved.port &&
+            MtProtoProxyConfigValidator.validate(mtProto).isValid
     }
 
     private fun expectedRuntimeTokens(
