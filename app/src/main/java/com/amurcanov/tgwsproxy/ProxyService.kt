@@ -94,6 +94,7 @@ class ProxyService : Service() {
                 startForegroundWithNotification()
             } catch (error: RuntimeException) {
                 ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.ERROR) }
+                ProxyTileCommandGate.release()
                 ProxyQuickSettingsTileService.requestRefresh(this)
                 stopSelfResult(startId)
                 return START_NOT_STICKY
