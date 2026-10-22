@@ -1,5 +1,9 @@
 package com.amurcanov.tgwsproxy
 
+import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
+import com.amurcanov.tgwsproxy.worker.WorkerHealthState
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -141,6 +145,60 @@ class ProxyQuickSettingsTileTest {
             ProxyTileStartPolicy.decide(missing, null, null, false) ==
                 ProxyTileStartDecision.SETUP_REQUIRED,
         )
+    }
+
+    @Test
+    fun workerHealthAndCacheUpdatesDoNotInvalidateConfirmedSettings() {
+        val worker = WorkerEndpoint(
+            id = "worker-1",
+            name = "Primary",
+            url = "https://worker.example",
+            enabled = true,
+            createdAt = 100L,
+            updatedAt = 100L,
+        )
+        val healthUpdate = worker.copy(
+            state = WorkerHealthState.HEALTHY,
+            latencyMs = 50L,
+            failureCount = 2,
+            lastCheckedAt = 500L,
+            updatedAt = 500L,
+        )
+        assertEquals(
+            ProxyTileStartPolicy.stableWorkerConfig(listOf(worker)),
+            ProxyTileStartPolicy.stableWorkerConfig(listOf(healthUpdate)),
+        )
+        assertFalse(ProxyTileStartPolicy.isSignaturePreference("cf_upstream_domains", true))
+        assertFalse(ProxyTileStartPolicy.isSignaturePreference("worker_pool_workers_v1", true))
+        assertTrue(ProxyTileStartPolicy.isSignaturePreference("worker_pool_workers_v1", false))
+    }
+
+    @Test
+    fun changingWorkerEndpointOrRoutingSettingsInvalidatesConfirmation() {
+        val worker = WorkerEndpoint(
+            id = "worker-1",
+            name = "Primary",
+            url = "https://first.example",
+            enabled = true,
+            createdAt = 100L,
+            updatedAt = 100L,
+        )
+        val expected = ProxyTileStartPolicy.stableWorkerConfig(listOf(worker))
+        assertNotEquals(
+            expected,
+            ProxyTileStartPolicy.stableWorkerConfig(
+                listOf(worker.copy(url = "https://different.example")),
+            ),
+        )
+        assertNotEquals(
+            expected,
+            ProxyTileStartPolicy.stableWorkerConfig(
+                listOf(worker.copy(enabled = false)),
+            ),
+        )
+        assertTrue(ProxyTileStartPolicy.isSignaturePreference("connection_mode", true))
+        assertTrue(ProxyTileStartPolicy.isSignaturePreference("worker_pool_selected_id_v1", true))
+        assertTrue(ProxyTileStartPolicy.isSignaturePreference("worker_pool_workers_v1", false))
     }
 
     @Test
