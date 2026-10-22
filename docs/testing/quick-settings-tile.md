@@ -21,7 +21,7 @@ An invalid or missing configuration never opens MainActivity implicitly. The use
 
 ## Diagnosing an inactive tile
 
-After pressing the tile, a short message explains whether the proxy needs initial setup, a fresh confirmation from the app, or failed to start. On a supported device, capture only the safe tile log tag:
+After pressing the tile, a short message explains whether the proxy needs initial setup, a fresh confirmation from the app, or failed to start. A stale v1 confirmation may need a one-time normal start in the app; after that v2 confirmation ignores automatic Worker health and CF cache updates without allowing changed endpoints or routing options. On a supported device, capture only the safe tile log tag:
 
 ```powershell
 adb logcat -c
