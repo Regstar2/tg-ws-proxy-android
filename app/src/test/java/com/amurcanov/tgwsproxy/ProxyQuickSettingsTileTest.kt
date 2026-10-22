@@ -202,6 +202,56 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun savedRuntimeCanBeReusedWithoutMatchingVolatileFingerprint() {
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.SOCKS5,
+            runtimeConfig = "@network_profile_id=wifi-known,@network_profile_type=wifi," +
+                "@connection_mode=cf_first,@auto_strategy=balanced," +
+                "@route_cf_proxy_ws=1,@route_awg_warp=0",
+        )
+        val expected = mapOf(
+            "@network_profile_id" to "wifi-known",
+            "@network_profile_type" to "wifi",
+            "@connection_mode" to "cf_first",
+            "@auto_strategy" to "balanced",
+            "@route_cf_proxy_ws" to "1",
+            "@route_awg_warp" to "0",
+        )
+        assertTrue(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected, "",
+        ))
+        assertFalse(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected + ("@route_awg_warp" to "1"), "",
+        ))
+        assertFalse(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected + ("@network_profile_id" to "mobile-other"), "",
+        ))
+    }
+
+    @Test
+    fun importedWarpConfigurationMustBeConfirmedBeforeReuse() {
+        val path = "/data/user/0/app/files/awg-warp/profile.conf"
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
+            runtimeConfig = "@network_profile_id=wifi-known," +
+                "@network_profile_type=wifi,@awg_warp_config_path=$path",
+        )
+        val expected = mapOf(
+            "@network_profile_id" to "wifi-known",
+            "@network_profile_type" to "wifi",
+        )
+        assertFalse(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected, path,
+        ))
+        assertTrue(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected, path, awgPreviouslyConfirmed = true,
+        ))
+        assertFalse(ProxyTileStartPolicy.isLegacyReusable(
+            saved, true, expected, "$path.changed", awgPreviouslyConfirmed = true,
+        ))
+    }
+
+    @Test
     fun rapidTileClicksHaveOneCommandUntilCompletion() {
         ProxyTileCommandGate.release()
         try {
