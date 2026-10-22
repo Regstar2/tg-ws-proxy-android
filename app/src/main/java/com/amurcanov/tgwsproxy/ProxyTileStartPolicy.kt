@@ -8,6 +8,12 @@ import java.security.MessageDigest
  * Tile starts are fail-closed: only the last successfully started configuration on the
  * same network and effective route policy can be reused outside the settings screen.
  */
+internal enum class ProxyTileStartDecision {
+    READY,
+    SETUP_REQUIRED,
+    CONFIG_CHANGED,
+}
+
 internal object ProxyTileStartPolicy {
     private const val KEY_CONFIRMED_SIGNATURE = "quick_settings_confirmed_start_v1"
 
@@ -39,48 +45,64 @@ internal object ProxyTileStartPolicy {
         ProxyRuntimeConfigFactory.KEY_FLOWSEAL_MEDIA_FIX_IP,
     )
 
-    fun canStart(context: Context): Boolean {
-        return runCatching {
-            val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
-            val saved = ProxySavedConfigStore(prefs).load()
-            val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
-            val currentSignature = signature(context, prefs, saved)
-            if (isConfirmed(saved, storedSignature, currentSignature)) {
-                true
-            } else if (storedSignature != null || currentSignature == null) {
-                false
-            } else {
-                // Pre-tile versions saved these fields only after a successful frontend start.
-                // Permit a one-time migration only on the same network and route policy.
-                val profile = NetworkProfileProvider.current(context)
-                val effective = EffectiveRoutePolicyResolver(
-                    NetworkRoutePolicyRepository(prefs),
-                    prefs,
-                ).resolve(profile)
-                val policy = effective.policy
-                val expected = mapOf(
-                    "@network_profile_id" to profile.id,
-                    "@network_profile_type" to profile.type.prefValue,
-                    "@connection_mode" to effective.legacyMode.prefValue,
-                    "@auto_strategy" to policy.autoStrategy.prefValue,
-                    "@route_direct_ws" to flag(RouteKind.DIRECT_WS in policy.enabledRoutes),
-                    "@route_worker_ws" to flag(RouteKind.WORKER_WS in policy.enabledRoutes),
-                    "@route_cf_proxy_ws" to flag(RouteKind.CF_PROXY_WS in policy.enabledRoutes),
-                    "@route_awg_warp" to flag(RouteKind.AWG_WARP in policy.enabledRoutes),
-                    "@route_tcp_fallback" to flag(RouteKind.TCP_FALLBACK in policy.enabledRoutes),
-                    "@preferred_route" to policy.preferredRoute?.prefValue.orEmpty(),
-                    "@route_fallback" to flag(policy.allowFallback),
-                )
-                isLegacyReusable(
-                    saved = saved,
-                    savedBySuccessfulStart = prefs.contains("last_proxy_port") &&
-                        prefs.contains("last_proxy_pool") &&
-                        prefs.contains("last_runtime_ips"),
-                    expectedTokens = expected,
-                    currentAwgPath = AwgWarpConfigStore.configPath(context).orEmpty(),
-                )
-            }
-        }.getOrDefault(false)
+    fun canStart(context: Context): Boolean =
+        startDecision(context) == ProxyTileStartDecision.READY
+
+    fun startDecision(context: Context): ProxyTileStartDecision = runCatching {
+        val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = ProxySavedConfigStore(prefs).load()
+        if (!saved.isSufficientForStart()) {
+            return@runCatching ProxyTileStartDecision.SETUP_REQUIRED
+        }
+
+        val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
+        val currentSignature = signature(context, prefs, saved)
+        val legacyReusable = if (storedSignature == null && currentSignature != null) {
+            // Only a successful configuration from older versions may be migrated.
+            val profile = NetworkProfileProvider.current(context)
+            val effective = EffectiveRoutePolicyResolver(
+                NetworkRoutePolicyRepository(prefs),
+                prefs,
+            ).resolve(profile)
+            val policy = effective.policy
+            val expected = mapOf(
+                "@network_profile_id" to profile.id,
+                "@network_profile_type" to profile.type.prefValue,
+                "@connection_mode" to effective.legacyMode.prefValue,
+                "@auto_strategy" to policy.autoStrategy.prefValue,
+                "@route_direct_ws" to flag(RouteKind.DIRECT_WS in policy.enabledRoutes),
+                "@route_worker_ws" to flag(RouteKind.WORKER_WS in policy.enabledRoutes),
+                "@route_cf_proxy_ws" to flag(RouteKind.CF_PROXY_WS in policy.enabledRoutes),
+                "@route_awg_warp" to flag(RouteKind.AWG_WARP in policy.enabledRoutes),
+                "@route_tcp_fallback" to flag(RouteKind.TCP_FALLBACK in policy.enabledRoutes),
+                "@preferred_route" to policy.preferredRoute?.prefValue.orEmpty(),
+                "@route_fallback" to flag(policy.allowFallback),
+            )
+            isLegacyReusable(
+                saved = saved,
+                savedBySuccessfulStart = prefs.contains("last_proxy_port") &&
+                    prefs.contains("last_proxy_pool") &&
+                    prefs.contains("last_runtime_ips"),
+                expectedTokens = expected,
+                currentAwgPath = AwgWarpConfigStore.configPath(context).orEmpty(),
+            )
+        } else {
+            false
+        }
+        decide(saved, storedSignature, currentSignature, legacyReusable)
+    }.getOrDefault(ProxyTileStartDecision.CONFIG_CHANGED)
+
+    internal fun decide(
+        saved: ProxySavedConfig,
+        storedSignature: String?,
+        currentSignature: String?,
+        legacyReusable: Boolean,
+    ): ProxyTileStartDecision = when {
+        !saved.isSufficientForStart() -> ProxyTileStartDecision.SETUP_REQUIRED
+        isConfirmed(saved, storedSignature, currentSignature) -> ProxyTileStartDecision.READY
+        storedSignature == null && currentSignature != null && legacyReusable ->
+            ProxyTileStartDecision.READY
+        else -> ProxyTileStartDecision.CONFIG_CHANGED
     }
 
     fun confirmSuccessfulStart(context: Context) {
