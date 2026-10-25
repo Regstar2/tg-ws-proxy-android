@@ -15,7 +15,7 @@ import androidx.compose.ui.window.Dialog
 @Composable
 fun OnboardingDialog(
     onComplete: (dontShowAgain: Boolean) -> Unit,
-    onDismiss: () -> Unit,
+    onDismiss: (dontShowAgain: Boolean) -> Unit,
 ) {
     val pages = listOf(
         stringResource(R.string.onboarding_page1),
@@ -27,7 +27,7 @@ fun OnboardingDialog(
     var page by remember { mutableIntStateOf(0) }
     var dontShowAgain by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = { onDismiss(dontShowAgain) }) {
         Surface(shape = RoundedCornerShape(24.dp)) {
             Column(
                 modifier = Modifier
@@ -77,7 +77,7 @@ fun OnboardingDialog(
                             Text(stringResource(R.string.onboarding_back))
                         }
                     }
-                    TextButton(onClick = onDismiss) {
+                    TextButton(onClick = { onDismiss(dontShowAgain) }) {
                         Text(stringResource(R.string.onboarding_skip))
                     }
                     TextButton(

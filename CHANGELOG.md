@@ -3,6 +3,7 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- Fixed onboarding opt-out: selecting "Don't show again" now persists when closing via Skip, Back/outside dismiss, or Done, while Help can still reopen the guide (#118).
 - Fixed the Quick Settings tile long-press intent routing to MainActivity, including returning to the main screen when an existing activity is reused. Xiaomi/HyperOS SystemUI behavior remains pending device verification (#114).
 
 ## 1.11.3 - 2026-10-22
