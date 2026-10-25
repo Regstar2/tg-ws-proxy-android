@@ -34,7 +34,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Source version:** `1.11.3` (`versionCode 59`)  
+**Source version:** `1.11.4` (`versionCode 60`)  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
 | Area | Status |
@@ -281,7 +281,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.3
+.\scripts\release.ps1 -Version v1.11.4
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
