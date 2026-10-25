@@ -140,6 +140,10 @@ else {
 
 Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
 
+$quickSettingsManifestTest = Join-Path $PSScriptRoot 'tests\quick-settings-preferences-manifest-test.ps1'
+Write-Host "`n==> Verify merged Android Quick Settings preferences manifest"
+& $quickSettingsManifestTest
+
 $debugApk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
 if (-not (Test-Path $debugApk)) {
     throw "Expected debug APK was not produced: $debugApk"

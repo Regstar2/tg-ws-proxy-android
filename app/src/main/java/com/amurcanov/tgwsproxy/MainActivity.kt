@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.LocaleList
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import android.service.quicksettings.TileService
 import android.util.Log
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -169,6 +170,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_STATUS = "extra_open_status"
     }
 
+    private var tilePreferencesOpenRequest by mutableIntStateOf(0)
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
@@ -178,10 +181,16 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.action == TileService.ACTION_QS_TILE_PREFERENCES) {
+            tilePreferencesOpenRequest++
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.action == TileService.ACTION_QS_TILE_PREFERENCES) {
+            tilePreferencesOpenRequest++
+        }
 
         val activityPrefs = getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE)
         applyLanguageMode(parseLanguageMode(activityPrefs.getString("language_mode", LanguageMode.System.name)))
@@ -226,6 +235,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     ProxyScreen(
+                        openMainRequest = tilePreferencesOpenRequest,
                         themeMode = themeMode,
                         onThemeModeChange = {
                             themeModeName = it.name
@@ -265,6 +275,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProxyScreen(
+    openMainRequest: Int,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
     languageMode: LanguageMode,
@@ -344,6 +355,11 @@ private fun ProxyScreen(
         mutableStateOf(!prefs.getBoolean("onboarding_completed", false))
     }
     var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
+    LaunchedEffect(openMainRequest) {
+        if (openMainRequest > 0) {
+            currentPage = ProxyScreenPage.Main
+        }
+    }
     var flowsealDcOnlyEnabled by remember {
         mutableStateOf(prefs.getBoolean(FlowsealDcPreset.PREF_ENABLED, false))
     }
