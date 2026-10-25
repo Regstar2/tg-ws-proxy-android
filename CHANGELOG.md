@@ -3,8 +3,11 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
-- Fixed onboarding opt-out: selecting "Don't show again" now persists when closing via Skip, Back/outside dismiss, or Done, while Help can still reopen the guide (#118).
-- Fixed the Quick Settings tile long-press intent routing to MainActivity, including returning to the main screen when an existing activity is reused. Xiaomi/HyperOS SystemUI behavior remains pending device verification (#114).
+
+## 1.11.4 - pending publication
+- Fixed Android Quick Settings long-press routing toward MainActivity and return to its main screen, without toggling the proxy; physical Xiaomi/HyperOS long-press behavior still needs device verification (#114, PR #116).
+- Reduced redundant foreground notification updates: unchanged presentations are suppressed, periodic changes are throttled, and a stable timestamp is retained per foreground session. Xiaomi/Android 14 notification ordering with competing VPN speed notifications was verified (#115, PR #117).
+- Fixed onboarding opt-out: "Don't show again" persists after Skip, Done, Back and outside dismissal. Users may reopen the guide via Help, and the existing preference is preserved (#118, PR #119).
 
 ## 1.11.3 - 2026-10-22
 - Added an Android Quick Settings tile for starting and stopping the existing local TgWsProxy service without opening the main app (Android 8.0+), with a simplified monochrome icon and RU/EN status messages.
