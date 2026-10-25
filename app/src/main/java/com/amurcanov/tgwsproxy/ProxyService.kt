@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +37,8 @@ class ProxyService : Service() {
     private val pendingCommands = AtomicInteger()
     private var allowTileConfirmation = false
     private val speedSampler = SpeedSampler()
+    private val notificationUpdateGate = ProxyNotificationUpdateGate()
+    private var foregroundNotificationActive = false
     private var currentFrontend: LocalProxyFrontend = localProxyFrontendFor(LocalProxyFrontendType.DEFAULT)
 
     companion object {
@@ -258,7 +261,7 @@ class ProxyService : Service() {
         _isRunning.value = true
         ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RUNNING) }
         startMetricsLoop()
-        updateNotification()
+        updateNotification(force = true)
         ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
@@ -311,7 +314,7 @@ class ProxyService : Service() {
             )
         }
         startMetricsLoop()
-        updateNotification()
+        updateNotification(force = true)
         ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
@@ -338,8 +341,12 @@ class ProxyService : Service() {
         )
     }
 
+    @Synchronized
     private fun startForegroundWithNotification() {
-        val notification = buildNotification()
+        if (foregroundNotificationActive) return
+        val snapshot = notificationSnapshot()
+        val startedAtMillis = System.currentTimeMillis()
+        val notification = buildNotification(snapshot, startedAtMillis)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
@@ -349,15 +356,25 @@ class ProxyService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        foregroundNotificationActive = true
+        notificationUpdateGate.onForegroundStarted(
+            snapshot,
+            wallTimeMillis = startedAtMillis,
+            elapsedTimeMillis = SystemClock.elapsedRealtime(),
+        )
     }
 
+    @Synchronized
     private fun stopForegroundServiceNotification() {
+        if (!foregroundNotificationActive) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
+        foregroundNotificationActive = false
+        notificationUpdateGate.onForegroundStopped()
     }
 
     private fun logFrontendSelected(
@@ -477,7 +494,7 @@ class ProxyService : Service() {
     ) {
         ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RECONNECTING) }
         ProxyQuickSettingsTileService.requestRefresh(this)
-        updateNotification()
+        updateNotification(force = true)
         stopNativeOnly()
         _isRunning.value = false
         Thread.sleep(400)
@@ -500,7 +517,7 @@ class ProxyService : Service() {
         speedSampler.reset()
         _isRunning.value = true
         ProxyRuntimeState.update { it.copy(serviceStatus = ProxyServiceStatus.RUNNING) }
-        updateNotification()
+        updateNotification(force = true)
         ProxyQuickSettingsTileService.requestRefresh(this)
     }
 
@@ -612,26 +629,46 @@ class ProxyService : Service() {
         }
     }
 
-    private fun buildNotification(): android.app.Notification {
+    private fun notificationSnapshot(): ProxyNotificationSnapshot {
         val prefs = NotificationPreferences.load(this)
         val ui = ProxyRuntimeState.uiMetrics.value
-        val title = getString(R.string.app_name)
-        val content = notificationContentText(prefs, ui)
-        val expanded = notificationExpandedText(prefs, ui)
+        return ProxyNotificationSnapshot(
+            title = getString(R.string.app_name),
+            contentText = notificationContentText(prefs, ui),
+            expandedText = notificationExpandedText(prefs, ui),
+            displayMode = prefs.displayMode,
+            actionsEnabled = prefs.notificationActionsEnabled,
+            proxyRunning = _isRunning.value,
+        )
+    }
+
+    private fun buildNotification(
+        snapshot: ProxyNotificationSnapshot,
+        startedAtMillis: Long,
+    ): android.app.Notification {
         return ProxyNotificationBuilder.build(
             context = this,
-            prefs = prefs,
-            title = title,
-            contentText = content,
-            expandedText = expanded,
+            displayMode = snapshot.displayMode,
+            notificationActionsEnabled = snapshot.actionsEnabled,
+            title = snapshot.title,
+            contentText = snapshot.contentText,
+            expandedText = snapshot.expandedText,
+            startedAtMillis = startedAtMillis,
             contentIntent = openAppPendingIntent(),
             actions = buildActions(),
         )
     }
 
-    private fun updateNotification() {
+    @Synchronized
+    private fun updateNotification(force: Boolean = false) {
+        if (!foregroundNotificationActive) return
+        val snapshot = notificationSnapshot()
+        val elapsedTimeMillis = SystemClock.elapsedRealtime()
+        if (!notificationUpdateGate.shouldPublish(snapshot, elapsedTimeMillis, force)) return
+        val startedAtMillis = notificationUpdateGate.startedAtMillis ?: return
         val manager = getSystemService(NotificationManager::class.java) ?: return
-        manager.notify(NOTIFICATION_ID, buildNotification())
+        manager.notify(NOTIFICATION_ID, buildNotification(snapshot, startedAtMillis))
+        notificationUpdateGate.onPublished(snapshot, elapsedTimeMillis)
     }
 
     private fun notificationContentText(
