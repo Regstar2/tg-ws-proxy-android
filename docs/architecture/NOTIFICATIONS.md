@@ -53,6 +53,34 @@ When enabled in Settings → Notifications:
 - **Latency** — last successful route connect latency when available
 - **Connections** — runtime session counter from native stats
 
+## Publication stability
+
+The foreground notification keeps ID `3` and channel `tgwsproxy_service_status_v3`
+for the lifetime of a service session. Rebuilding it retains the timestamp from
+the first `startForeground` call (`Notification.when`); that timestamp is not
+displayed in the notification.
+
+The runtime metrics sampler continues to run every 2 seconds in normal/compact
+mode or 3 seconds in minimal mode for the app's UI and diagnostics.
+Notification publication is separate: an unchanged presentation does not
+call `NotificationManager.notify`, and changed periodic content is limited to
+one update per 3 seconds. Start, reconnect and other lifecycle status changes
+can update immediately; duplicate content remains suppressed. Notification
+presentation includes visible text, expanded text, display mode and available
+actions. Disabling notification metrics leaves sampling enabled for the app
+but prevents new notifications when the displayed presentation is unchanged.
+
+Foreground promotion runs once per active session. Stopping the service
+removes the mandatory foreground notification and clears the publication
+session, so a later start obtains a new timestamp.
+
+**Xiaomi / Android 14 acceptance (issue #115):** with the proxy running
+alongside a VPN that updates its own speed notification, inspect both the status
+bar icons and notification cards for several minutes, first with notification
+metrics enabled, then with them disabled. Also check reconnect, Stop, and
+subsequent Start. Notification ranking is ultimately OS/OEM-controlled,
+so this device smoke must pass before closing the issue.
+
 ## Display modes
 
 | Mode | Behavior |
