@@ -2,7 +2,7 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The latest published prerelease is `v1.11.0-beta.1`; `v1.11.0` is the current stable release target. Do not mark a stable check as passed unless it was run against the corresponding integrated build.
+The latest verified published stable release before this preparation is `v1.11.3`; `v1.11.4` is the next stable patch candidate. Do not mark a release check as passed unless it was run against the corresponding integrated candidate or exact tagged build. For v1.11.4, the Xiaomi/HyperOS Quick Settings long-press smoke remains NOT RUN; see [quick-settings-long-press.md](quick-settings-long-press.md).
 
 ## Automated checks
 

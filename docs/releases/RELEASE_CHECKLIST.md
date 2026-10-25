@@ -1,30 +1,43 @@
-# Release checklist — v1.11.3 stable patch
+# Release checklist — v1.11.4 stable patch
 
-## Метаданные и исходники
+Статус: **подготовка, не опубликовано**. Не отмечать gate PASS по результатам другого commit или Debug APK вместо подписанного финального Release.
 
-- [ ] `main` содержит только проверенные изменения версии 1.11.3.
-- [ ] `releaseVersionName = "1.11.3"` и `releaseVersionCode = 59`.
-- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.3 -ExpectedVersionCode 59` — PASS.
-- [ ] RU/EN release notes и CHANGELOG соответствуют исходникам.
-- [ ] Проверено отсутствие keystore, токенов и пользовательских логов в Git.
+## Метаданные, исходники и текст
 
-## Проверки
+- [ ] Release-prep PR влит в `main`; известен итоговый release commit SHA.
+- [ ] `releaseVersionName = "1.11.4"`, `releaseVersionCode = 60`, README RU/EN и CHANGELOG согласованы.
+- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.4 -ExpectedVersionCode 60` — PASS на release source.
+- [ ] `scripts/release.ps1 -Version v1.11.4 -PreflightOnly` — PASS на release source.
+- [x] Подготовлены RU/EN полные release notes и краткий GitHub Release body.
+- [ ] Проверено отсутствие secrets, приватных логов и keystore в tracked files.
+- [ ] Перепроверены ссылки на tag, известные ограничения и факты device acceptance.
 
-- [ ] `scripts/ci.ps1` на итоговом release commit — PASS.
-- [ ] JVM unit tests, native tests и debug APK build — PASS.
-- [ ] `scripts/release.ps1 -Version v1.11.3 -PreflightOnly` — PASS.
-- [x] Плитка запускала, останавливала и повторно запускала локальный прокси на Android 14 / Xiaomi HyperOS (логи владельца от 2026-10-22).
-- [ ] Проверка финального подписанного release APK на том же устройстве.
-- [ ] Запуск после изменения сети, после перезагрузки и невалидных настроек.
-- [ ] Сообщения/медиа Telegram через рабочий маршрут после обновления.
-- [ ] Проверка RU/EN иконки и текста плитки без clipping.
+## Автоматические проверки
 
-## Артефакты и публикация
+- [x] CI PR #116, #117, #119 по отдельным изменениям — PASS.
+- [x] Android JVM-тесты / Debug build / Worker regression для PR #119 — PASS (GitHub Actions #40180676121).
+- [ ] `scripts/ci.ps1` и GitHub Actions CI на **итоговом release-prep merge commit** — PASS.
+- [ ] Подтверждено, что `release.yml` собирает именно tagged source и публикация не дублирует существующий release.
+- [ ] `versionName/versionCode` финального подписанного APK проверены посредством `aapt`; подпись — посредством `apksigner`.
 
-- [ ] Tag `v1.11.3` указывает на итоговый проверенный `main`.
-- [ ] Release workflow повторно проверил исходники и создал подписанный release APK.
-- [ ] APK имеет `versionName 1.11.3`, `versionCode 59`, корректный package и подпись.
-- [ ] В GitHub Release приложены ровно APK и `.sha256`; проверены их фактические hash и размер.
-- [ ] Страница релиза доступна; загрузка и установка APK проверены.
+## Android device smoke
 
-Flowseal Legacy WebSocket остаётся экспериментальным. Не обозначайте промежуточный Debug/smoke APK как стабильный релизный артефакт.
+- [x] Xiaomi / Android 14: конкурентное VPN speed notification, статистика уведомлений on/off, Telegram сообщения/медиа, reconnect, stop/start и notification actions — PASS по acceptance PR #117.
+- [x] Подписанный Debug APK PR #119 установлен без удаления приложения, исправление onboarding подтверждено пользователем — PASS.
+- [ ] **Release blocker #114:** на Xiaomi/HyperOS long-press плитки открывает главную страницу TgWsProxy вместо «О приложении» при остановленном/запущенном прокси, закрытой/открытой Activity, не переключает состояние; короткий тап и launcher остаются рабочими — **NOT RUN** (см. `docs/testing/quick-settings-long-press.md`).
+- [ ] Подключение Telegram, сообщения/медиа, запуск/остановка/переподключение на интегрированной кандидатной версии `v1.11.4`.
+- [ ] Установка **финального подписанного Release APK** поверх предыдущей официальной версии без потери настроек — проверяется после формирования publishable artifact.
+- [ ] Проверены RU/EN экранов и текста плитки в кандидатной сборке, без clipping.
+- [ ] Проверена работа после смены сети/перезапуска приложения (соответствующие поддерживаемые сценарии).
+
+## Артефакты, публикация и post-release
+
+- [ ] Тег `v1.11.4` ещё не существует и ставится только на **итоговый проверенный `main` commit** после device gate.
+- [ ] Release workflow для точного tag — PASS, включая signed APK и верификацию manifest/signature.
+- [ ] GitHub Release опубликован только один раз; assets — APK и `.sha256`; SHA-256 совпадает с фактическим APK.
+- [ ] `versionName 1.11.4`, `versionCode 60`, `com.amurcanov.tgwsproxy` подтверждены у итогового APK.
+- [ ] RU/EN release links из опубликованного tag доступны и корректны.
+- [ ] **Только после публикации и проверки:** закрыть исходные баг-репорты #112 и #113; не комментировать и не закрывать ранее.
+- [ ] Релиз доступен для загрузки, установка/первый запуск проверены.
+
+**Ограничения:** Flowseal Legacy WebSocket остаётся экспериментальным. Debug/smoke APK не является подписанным финальным Release APK. `git push` release tag **немедленно запускает автоматическую публикацию**.

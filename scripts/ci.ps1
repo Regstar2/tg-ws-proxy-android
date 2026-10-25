@@ -102,7 +102,7 @@ Invoke-CheckedCommand `
 & $dc2ABTest
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
-& $releaseAudit -ExpectedVersion '1.11.3' -ExpectedVersionCode 59
+& $releaseAudit -ExpectedVersion '1.11.4' -ExpectedVersionCode 60
 if ($LASTEXITCODE -ne 0) {
     throw "Release audit failed with exit code $LASTEXITCODE."
 }
@@ -114,12 +114,12 @@ Invoke-CheckedCommand `
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', $releaseAudit,
-        '-ExpectedVersion', '1.11.3',
-        '-ExpectedVersionCode', '59'
+        '-ExpectedVersion', '1.11.4',
+        '-ExpectedVersionCode', '60'
     )
 
 Write-Host "`n==> Validate release-script metadata preflight"
-& $releaseScript -Version 'v1.11.3' -PreflightOnly
+& $releaseScript -Version 'v1.11.4' -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
     throw "Release-script preflight failed with exit code $LASTEXITCODE."
 }
