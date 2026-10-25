@@ -351,8 +351,13 @@ private fun ProxyScreen(
     var autostartOnBoot by remember {
         mutableStateOf(autostartPreferences.isEnabled())
     }
+    val onboardingPreferences = remember(prefs) { OnboardingPreferences(prefs) }
     var showOnboarding by remember {
-        mutableStateOf(!prefs.getBoolean("onboarding_completed", false))
+        mutableStateOf(onboardingPreferences.shouldShowOnLaunch())
+    }
+    val closeOnboarding: (Boolean) -> Unit = { dontShowAgain ->
+        onboardingPreferences.rememberDismissal(dontShowAgain)
+        showOnboarding = false
     }
     var currentPage by rememberSaveable { mutableStateOf(ProxyScreenPage.Main) }
     LaunchedEffect(openMainRequest) {
@@ -3054,13 +3059,8 @@ private fun ProxyScreen(
 
     if (showOnboarding) {
         OnboardingDialog(
-            onComplete = { dontShow ->
-                if (dontShow) {
-                    prefs.edit().putBoolean("onboarding_completed", true).apply()
-                }
-                showOnboarding = false
-            },
-            onDismiss = { showOnboarding = false },
+            onComplete = closeOnboarding,
+            onDismiss = closeOnboarding,
         )
     }
 
