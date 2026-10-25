@@ -3,6 +3,7 @@
 All notable user-facing changes are listed here. Detailed notes for older releases: [docs/releases/](docs/releases/).
 
 ## Unreleased
+- Fixed the Quick Settings tile long-press intent routing to MainActivity, including returning to the main screen when an existing activity is reused. Xiaomi/HyperOS SystemUI behavior remains pending device verification (#114).
 
 ## 1.11.3 - 2026-10-22
 - Added an Android Quick Settings tile for starting and stopping the existing local TgWsProxy service without opening the main app (Android 8.0+), with a simplified monochrome icon and RU/EN status messages.
