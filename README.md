@@ -32,7 +32,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.3` (`versionCode 59`)  
+**Версия исходников:** `1.11.4` (`versionCode 60`)  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 | Область | Статус |
@@ -282,7 +282,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.3
+.\scripts\release.ps1 -Version v1.11.4
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
