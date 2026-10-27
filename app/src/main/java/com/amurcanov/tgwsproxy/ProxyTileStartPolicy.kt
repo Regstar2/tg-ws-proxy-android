@@ -96,49 +96,37 @@ internal object ProxyTileStartPolicy {
                 return ProxyTileStartCheck(ProxyTileStartDecision.SETUP_REQUIRED)
             }
 
-            // A recorded v2 signature always takes precedence over legacy runtime tokens.
-            // Legacy tokens cannot prove that Worker endpoints and other preferences stayed intact.
-            val decision = when {
-                confirmedV2 != null -> {
-                    val current = signature(context, prefs, saved, stable = true)
-                    when {
-                        current == null -> ProxyTileStartDecision.VALIDATION_FAILED
-                        isConfirmed(saved, confirmedV2, current) -> ProxyTileStartDecision.READY
-                        else -> mismatchReason(context, prefs, saved)
-                    }
-                }
-                confirmedV1 != null -> {
-                    val current = signature(context, prefs, saved, stable = false)
-                    when {
-                        current == null -> ProxyTileStartDecision.VALIDATION_FAILED
-                        isConfirmed(saved, confirmedV1, current) -> ProxyTileStartDecision.READY
-                        else -> mismatchReason(context, prefs, saved)
-                    }
-                }
-                else -> {
-                    // Only older installations without any signature use legacy migration.
-                    // A Worker pool cannot be validated from route tokens alone.
-                    val workerPoolConfigured = prefs.getBoolean("worker_pool_enabled_v1", false) ||
-                        prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_WORKER_ENABLED, false)
-                    val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
-                    val awgConfirmed = awgPath.isBlank() ||
-                        (prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
-                            prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) ==
-                                java.io.File(awgPath).lastModified())
-                    if (!workerPoolConfigured && isLegacyReusable(
-                            saved = saved,
-                            savedBySuccessfulStart = confirmedByService,
-                            expectedTokens = expectedRuntimeTokens(context, prefs),
-                            currentAwgPath = awgPath,
-                            awgPreviouslyConfirmed = awgConfirmed,
-                        )
-                    ) {
-                        ProxyTileStartDecision.READY
-                    } else {
-                        ProxyTileStartDecision.CONFIRMATION_MISSING
-                    }
-                }
-            }
+            val currentV2 = if (confirmedV2 != null) {
+                signature(context, prefs, saved, stable = true)
+            } else null
+            val currentV1 = if (confirmedV1 != null) {
+                signature(context, prefs, saved, stable = false)
+            } else null
+
+            // No unsigned legacy fallback is allowed once a v1/v2 confirmation exists.
+            val legacyReusable = if (confirmedV2 == null && confirmedV1 == null) {
+                // A Worker pool cannot be validated from route tokens alone.
+                val workerPoolConfigured = prefs.getBoolean("worker_pool_enabled_v1", false) ||
+                    prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_WORKER_ENABLED, false)
+                val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
+                val awgConfirmed = awgPath.isBlank() ||
+                    (prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
+                        prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) ==
+                            java.io.File(awgPath).lastModified())
+                !workerPoolConfigured && isLegacyReusable(
+                    saved = saved,
+                    savedBySuccessfulStart = confirmedByService,
+                    expectedTokens = expectedRuntimeTokens(context, prefs),
+                    currentAwgPath = awgPath,
+                    awgPreviouslyConfirmed = awgConfirmed,
+                )
+            } else false
+            val checkedDecision = decideVersioned(
+                saved, confirmedV2, currentV2, confirmedV1, currentV1, legacyReusable,
+            )
+            val decision = if (checkedDecision == ProxyTileStartDecision.CONFIG_CHANGED) {
+                mismatchReason(context, prefs, saved)
+            } else checkedDecision
             ProxyTileStartCheck(decision, if (decision == ProxyTileStartDecision.READY) saved else null)
         } catch (error: Exception) {
             Log.w("ProxyTileStartPolicy", "TILE_VALIDATION_FAILED exception=${error.javaClass.simpleName}")
@@ -173,6 +161,26 @@ internal object ProxyTileStartPolicy {
         return ProxyTileStartDecision.CONFIG_CHANGED
     }
 
+    // Versioned confirmations must be checked before any legacy reuse.
+    internal fun decideVersioned(
+        saved: ProxySavedConfig,
+        confirmedV2: String?,
+        currentV2: String?,
+        confirmedV1: String?,
+        currentV1: String?,
+        legacyReusable: Boolean,
+    ): ProxyTileStartDecision = when {
+        !saved.isSufficientForStart() -> ProxyTileStartDecision.SETUP_REQUIRED
+        confirmedV2 != null -> if (currentV2 == null) {
+            ProxyTileStartDecision.VALIDATION_FAILED
+        } else decide(saved, confirmedV2, currentV2, false)
+        confirmedV1 != null -> if (currentV1 == null) {
+            ProxyTileStartDecision.VALIDATION_FAILED
+        } else decide(saved, confirmedV1, currentV1, false)
+        legacyReusable -> ProxyTileStartDecision.READY
+        else -> ProxyTileStartDecision.CONFIRMATION_MISSING
+    }
+
     internal fun decide(
         saved: ProxySavedConfig,
         storedSignature: String?,
@@ -193,13 +201,14 @@ internal object ProxyTileStartPolicy {
             val signature = signature(context, prefs, saved, stable = true)
             if (saved.isSufficientForStart() && signature != null) {
                 val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
-                prefs.edit()
+                val persisted = prefs.edit()
                     .putString(KEY_CONFIRMED_SIGNATURE_V2, signature)
                     .putLong(
                         KEY_AWG_CONFIRMED_MTIME,
                         if (awgPath.isBlank()) -1L else java.io.File(awgPath).lastModified(),
                     )
                     .commit()
+                check(persisted) { "Tile confirmation persistence failed" }
             }
         }.onFailure { error ->
             Log.w("ProxyTileStartPolicy", "TILE_CONFIRMATION_FAILED exception=${error.javaClass.simpleName}")
