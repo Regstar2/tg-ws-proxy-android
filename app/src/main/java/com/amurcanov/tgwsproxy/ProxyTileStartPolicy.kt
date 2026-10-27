@@ -2,6 +2,7 @@ package com.amurcanov.tgwsproxy
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
 import com.amurcanov.tgwsproxy.worker.WorkerEndpoint
 import java.security.MessageDigest
@@ -14,7 +15,18 @@ internal enum class ProxyTileStartDecision {
     READY,
     SETUP_REQUIRED,
     CONFIG_CHANGED,
+    CONFIRMATION_MISSING,
+    FRONTEND_INVALID,
+    NETWORK_CHANGED,
+    ROUTE_POLICY_CHANGED,
+    AWG_CHANGED,
+    VALIDATION_FAILED,
 }
+
+internal data class ProxyTileStartCheck(
+    val decision: ProxyTileStartDecision,
+    val saved: ProxySavedConfig? = null,
+)
 
 internal object ProxyTileStartPolicy {
     private const val KEY_CONFIRMED_SIGNATURE = "quick_settings_confirmed_start_v1"
@@ -52,66 +64,114 @@ internal object ProxyTileStartPolicy {
     fun canStart(context: Context): Boolean =
         startDecision(context) == ProxyTileStartDecision.READY
 
-    fun startDecision(context: Context): ProxyTileStartDecision = runCatching {
-        val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = ProxySavedConfigStore(prefs).load()
-        if (!saved.isSufficientForStart()) {
-            return@runCatching ProxyTileStartDecision.SETUP_REQUIRED
-        }
+    fun startDecision(context: Context): ProxyTileStartDecision = startCheck(context).decision
 
-        val storedSignature = prefs.getString(KEY_CONFIRMED_SIGNATURE_V2, null)
-        val previousSignature = if (storedSignature == null) {
-            prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
-        } else {
-            null
+    fun startCheck(context: Context): ProxyTileStartCheck {
+        return try {
+            val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
+            val saved = ProxySavedConfigStore(prefs).load()
+            if (!saved.isSufficientForStart()) {
+                return ProxyTileStartCheck(ProxyTileStartDecision.SETUP_REQUIRED)
+            }
+
+            val mtProto = if (saved.frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+                MtProtoProxyConfigRepository(prefs).loadForDiagnostics()
+            } else {
+                null
+            }
+            if (!isFrontendValid(saved, mtProto)) {
+                return ProxyTileStartCheck(ProxyTileStartDecision.FRONTEND_INVALID)
+            }
+
+            val confirmedV2 = prefs.getString(KEY_CONFIRMED_SIGNATURE_V2, null)
+            val confirmedV1 = if (confirmedV2 == null) {
+                prefs.getString(KEY_CONFIRMED_SIGNATURE, null)
+            } else {
+                null
+            }
+            val confirmedByService = prefs.contains("last_proxy_port") &&
+                prefs.contains("last_proxy_pool") &&
+                prefs.contains("last_runtime_ips")
+            if (confirmedV2 == null && confirmedV1 == null && !confirmedByService) {
+                return ProxyTileStartCheck(ProxyTileStartDecision.SETUP_REQUIRED)
+            }
+
+            // A recorded v2 signature always takes precedence over legacy runtime tokens.
+            // Legacy tokens cannot prove that Worker endpoints and other preferences stayed intact.
+            val decision = when {
+                confirmedV2 != null -> {
+                    val current = signature(context, prefs, saved, stable = true)
+                    when {
+                        current == null -> ProxyTileStartDecision.VALIDATION_FAILED
+                        isConfirmed(saved, confirmedV2, current) -> ProxyTileStartDecision.READY
+                        else -> mismatchReason(context, prefs, saved)
+                    }
+                }
+                confirmedV1 != null -> {
+                    val current = signature(context, prefs, saved, stable = false)
+                    when {
+                        current == null -> ProxyTileStartDecision.VALIDATION_FAILED
+                        isConfirmed(saved, confirmedV1, current) -> ProxyTileStartDecision.READY
+                        else -> mismatchReason(context, prefs, saved)
+                    }
+                }
+                else -> {
+                    // Only older installations without any signature use legacy migration.
+                    // A Worker pool cannot be validated from route tokens alone.
+                    val workerPoolConfigured = prefs.getBoolean("worker_pool_enabled_v1", false) ||
+                        prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_WORKER_ENABLED, false)
+                    val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
+                    val awgConfirmed = awgPath.isBlank() ||
+                        (prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
+                            prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) ==
+                                java.io.File(awgPath).lastModified())
+                    if (!workerPoolConfigured && isLegacyReusable(
+                            saved = saved,
+                            savedBySuccessfulStart = confirmedByService,
+                            expectedTokens = expectedRuntimeTokens(context, prefs),
+                            currentAwgPath = awgPath,
+                            awgPreviouslyConfirmed = awgConfirmed,
+                        )
+                    ) {
+                        ProxyTileStartDecision.READY
+                    } else {
+                        ProxyTileStartDecision.CONFIRMATION_MISSING
+                    }
+                }
+            }
+            ProxyTileStartCheck(decision, if (decision == ProxyTileStartDecision.READY) saved else null)
+        } catch (error: Exception) {
+            Log.w("ProxyTileStartPolicy", "TILE_VALIDATION_FAILED exception=${error.javaClass.simpleName}")
+            ProxyTileStartCheck(ProxyTileStartDecision.VALIDATION_FAILED)
         }
-        val currentSignature = signature(context, prefs, saved, stable = true)
-        // A successful frontend start already persisted these fields. Reuse that
-        // runtime when its recorded network and route policy still match, even if
-        // unrelated preferences have changed since the last start.
-        val confirmedByService = prefs.contains("last_proxy_port") &&
-            prefs.contains("last_proxy_pool") &&
-            prefs.contains("last_runtime_ips")
-        val currentAwgPath = AwgWarpConfigStore.configPath(context).orEmpty()
+    }
+
+    private fun mismatchReason(
+        context: Context,
+        prefs: SharedPreferences,
+        saved: ProxySavedConfig,
+    ): ProxyTileStartDecision {
         val expected = expectedRuntimeTokens(context, prefs)
-        val awgConfirmed = currentAwgPath.isBlank() || (
-            prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
-                prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) ==
-                    java.io.File(currentAwgPath).lastModified()
-            )
-        val validFrontend = if (saved.frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
-            isFrontendValid(
-                saved,
-                MtProtoProxyConfigRepository(prefs).loadForDiagnostics(),
-            )
-        } else {
-            isFrontendValid(saved, null)
-        }
-        if (validFrontend && isLegacyReusable(
-                saved = saved,
-                savedBySuccessfulStart = confirmedByService,
-                expectedTokens = expected,
-                currentAwgPath = currentAwgPath,
-                awgPreviouslyConfirmed = awgConfirmed,
-            )
-        ) {
-            return@runCatching ProxyTileStartDecision.READY
-        }
-        val oldSignatureMatches = previousSignature != null &&
-            isConfirmed(
-                saved,
-                previousSignature,
-                signature(context, prefs, saved, stable = false),
-            )
-        if (oldSignatureMatches) return@runCatching ProxyTileStartDecision.READY
-        // No previous confirmation: an incomplete or freshly installed setup
-        // must never acquire trust solely by having default MTProto settings.
-        if (previousSignature != null) {
-            ProxyTileStartDecision.CONFIG_CHANGED
-        } else {
-            decide(saved, storedSignature, currentSignature, false)
-        }
-    }.getOrDefault(ProxyTileStartDecision.CONFIG_CHANGED)
+        val tokens = saved.runtimeConfig.split(',')
+            .filter { it.startsWith("@") && '=' in it }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+        if (listOf("@network_profile_id", "@network_profile_type").any {
+                tokens[it] != expected[it]
+            }
+        ) return ProxyTileStartDecision.NETWORK_CHANGED
+        if (expected.any { (key, value) ->
+                key !in setOf("@network_profile_id", "@network_profile_type") && tokens[key] != value
+            }
+        ) return ProxyTileStartDecision.ROUTE_POLICY_CHANGED
+
+        val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
+        if (tokens["@awg_warp_config_path"].orEmpty() != awgPath ||
+            (awgPath.isNotBlank() && prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
+                prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) !=
+                    java.io.File(awgPath).lastModified())
+        ) return ProxyTileStartDecision.AWG_CHANGED
+        return ProxyTileStartDecision.CONFIG_CHANGED
+    }
 
     internal fun decide(
         saved: ProxySavedConfig,
@@ -139,8 +199,10 @@ internal object ProxyTileStartPolicy {
                         KEY_AWG_CONFIRMED_MTIME,
                         if (awgPath.isBlank()) -1L else java.io.File(awgPath).lastModified(),
                     )
-                    .apply()
+                    .commit()
             }
+        }.onFailure { error ->
+            Log.w("ProxyTileStartPolicy", "TILE_CONFIRMATION_FAILED exception=${error.javaClass.simpleName}")
         }
     }
 
