@@ -12,7 +12,7 @@ Use an Android 8+ arm64-v8a device or emulator with the debug APK. Record Androi
 4. Tap again to start. Verify no Activity opens, a single ProxyService foreground notification appears, tile becomes active only after frontend success.
 5. Start/stop via MainActivity and foreground notification. Reopen Quick Settings and verify the same state.
 6. Rapidly tap the tile; repeat while frontend is starting and reconnecting. Verify a single native runtime, no duplicate notifications, no stale active state.
-7. With the proxy confirmed as running from the main screen, stop it and tap the tile without changing network or route settings. Expected: the previously successful runtime starts even if the old preference fingerprint was invalidated by unrelated background updates. Repeat after Wi-Fi/mobile, route policy or MTProto configuration changes: the tile must reject a stale runtime. With AWG/WARP in use, do one successful app start on this version to record the profile modification timestamp; changing that profile afterward must prevent a stale tile start.
+7. After one successful app start, stop and tap the tile with unchanged settings. Then stop, switch Wi-Fi/mobile or change route policy, and tap the tile **without starting from the app again**. Expected: a new runtime is built from persisted settings and the current network; the old runtime is never reused. If the new policy is usable, the tile starts. Repeat with a changed Worker endpoint or AWG/WARP profile: the new values must be used and any invalid configuration must be rejected rather than silently falling back.
 8. Test no network, frontend port conflict, and OS foreground-service denial (if reproducible). Tile must never show active for a failed start. Reopen app to inspect error.
 9. Kill the app process (avoid force-stop for service tests), reopen the shade, reboot with autostart enabled and disabled, then compare tile against the real service and notification.
 10. Repeat on Android 8, 13 and 14+ where available; test MIUI/HyperOS separately. Record unsupported or untested variants rather than claiming compatibility.
@@ -21,7 +21,7 @@ An invalid or missing configuration never opens MainActivity implicitly. The use
 
 ## Diagnosing an inactive tile
 
-After pressing the tile, a short message explains whether the proxy needs initial setup, a fresh confirmation from the app, or failed to start. A stale v1 confirmation may need a one-time normal start in the app; after that v2 confirmation ignores automatic Worker health and CF cache updates without allowing changed endpoints or routing options. On a supported device, capture only the safe tile log tag:
+After pressing the tile, a short message explains whether initial setup is required, current settings are invalid, or starting failed. A successful in-app start is required **only for initial setup**, including compatible upgrade installations. Later tile starts always rebuild from persisted preferences and the current network; v1/v2 signatures are not used to reject valid changes. On a supported device, capture only the safe tile log tag:
 
 ```powershell
 adb logcat -c
@@ -29,14 +29,10 @@ adb logcat -c
 adb logcat -d -v threadtime -s ProxyQuickSettingsTile:V ProxyTileStartPolicy:V '*:S'
 ```
 
-`TILE_START_REJECTED reason=SETUP_REQUIRED`: no usable previously successful start, or an incomplete saved runtime.
-`CONFIRMATION_MISSING`: persisted runtime exists but cannot be safely trusted; start once from the app.
-`FRONTEND_INVALID`: current MTProto/frontend settings are not valid.
-`NETWORK_CHANGED`: saved runtime network tokens differ from the current network.
-`ROUTE_POLICY_CHANGED`: saved route-policy tokens differ from the current effective policy.
-`AWG_CHANGED`: selected AWG profile path or recorded modification time differs.
-`CONFIG_CHANGED`: the stored v1/v2 confirmation does not match current settings (including Worker endpoints); do not reuse the stale runtime.
-`VALIDATION_FAILED`: storage/validation failed or a signature could not be computed. A separate `TILE_VALIDATION_FAILED` line can include **exception class only**, not values. This is **not** a declaration that settings changed.
+`TILE_START_REJECTED reason=SETUP_REQUIRED`: no previously successful app start, or the new runtime could not be built safely from current settings.
+`FRONTEND_INVALID`: the current MTProto/frontend configuration is not valid.
+`VALIDATION_FAILED`: storage or fresh config construction threw an exception. `TILE_VALIDATION_FAILED` includes **exception class only**.
+Changed network, route policy, Worker endpoints or AWG profiles do **not** cause signature-based rejection. A valid updated configuration must be started; invalid/missing settings must never fall back to `last_runtime_ips`.
 `TILE_START_REQUESTED` and `TILE_STOP_REQUESTED` indicate dispatch to the existing `ProxyService`, not successful completion. Confirm the foreground notification and real tile state. `TILE_COMMAND_REJECTED` indicates an Android service start failure.
 No proxy tokens, network profile identifiers, secrets, IPs, Worker URLs or hostnames are logged by the tile.
 
@@ -57,8 +53,9 @@ Record only model, Android API, network type (Wi-Fi/mobile/unknown), frontend (M
 1. Confirm version 1.11.4 (60), if available: proxy successfully starts from the app, then stops; observe whether short tile tap is rejected and capture the safe tile tags. This step is `NOT_RUN` if the old signed APK is unavailable.
 2. Install the candidate **over 1.11.4 with app data preserved**. Start via MainActivity, wait for actual `RUNNING`, then stop. Close only the Activity. With the network and settings unchanged, short-tap tile. Expect `TILE_START_REQUESTED`, one foreground notification, actual `RUNNING`, and ACTIVE tile. Tap again and expect STOPPED, notification gone and INACTIVE tile. Repeat after recreating the app process (without Android force-stop).
 3. Repeat on SOCKS5 if configured, and if possible on a second Android version/device. For fresh install, do not trust default MTProto before a successful in-app start.
-4. Negative cases: after a confirmed start and stop, change network Wi-Fi↔mobile, routing preference, Worker endpoint/selection, MTProto port/secret or AWG profile where available. Expect no `TILE_START_REQUESTED` and a meaningful rejection code; start from the app to confirm changed settings.
-5. Tap rapidly and during STARTING/RECONNECTING, and trigger an intentional frontend error where safe. Expect a single native runtime, no duplicate service notification, and never ACTIVE while the runtime is not RUNNING.
-6. Test foreground notification controls and MTProto start directly from the app for regressions. Long press is issue #114, not a completion criterion for #122.
+4. Freshness: after a successful start and stop, switch network Wi-Fi↔mobile or edit the route policy, Worker endpoint/selection or AWG profile. Do **not** start from the app again; tap the tile. Expect `TILE_START_REQUESTED` and an actual RUNNING service when the modified settings are usable. Verify the new network and route are selected via the application's diagnostics (do not export sensitive tokens). MTProto valid port/secret changes must likewise use the new values. A stale runtime must never be reused.
+5. Negative cases: before first successful setup, or with invalid current port, empty runtime/DC settings, invalid MTProto secret or inaccessible AWG profile, tap the tile. Expect a safe `SETUP_REQUIRED`, `FRONTEND_INVALID` or runtime error and no successful start with the older snapshot.
+6. Tap rapidly and during STARTING/RECONNECTING, and trigger an intentional frontend error where safe. Expect a single native runtime, no duplicate service notification, and never ACTIVE while the runtime is not RUNNING.
+7. Test foreground notification controls and MTProto start directly from the app for regressions. Long press is issue #114, not a completion criterion for #122.
 
 The available JVM tests do **not** prove Android 16 SystemUI integration. Leave #122 open until device acceptance is confirmed. Safe collection tags: `ProxyQuickSettingsTile` and `ProxyTileStartPolicy`; review and redact exported artifacts before external sharing.
