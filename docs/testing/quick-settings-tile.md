@@ -29,10 +29,16 @@ adb logcat -c
 adb logcat -d -s ProxyQuickSettingsTile:V '*:S'
 ```
 
-`TILE_START_REJECTED reason=SETUP_REQUIRED` means no valid previously started configuration exists.
-`CONFIG_CHANGED` means that preferences, network profile or routing no longer match the confirmed configuration; start the proxy once from the application.
+`TILE_START_REJECTED reason=SETUP_REQUIRED`: no usable previously successful start, or an incomplete saved runtime.
+`CONFIRMATION_MISSING`: persisted runtime exists but cannot be safely trusted; start once from the app.
+`FRONTEND_INVALID`: current MTProto/frontend settings are not valid.
+`NETWORK_CHANGED`: saved runtime network tokens differ from the current network.
+`ROUTE_POLICY_CHANGED`: saved route-policy tokens differ from the current effective policy.
+`AWG_CHANGED`: selected AWG profile path or recorded modification time differs.
+`CONFIG_CHANGED`: the stored v1/v2 confirmation does not match current settings (including Worker endpoints); do not reuse the stale runtime.
+`VALIDATION_FAILED`: storage/validation failed or a signature could not be computed. A separate `TILE_VALIDATION_FAILED` line can include **exception class only**, not values. This is **not** a declaration that settings changed.
 `TILE_START_REQUESTED` and `TILE_STOP_REQUESTED` indicate dispatch to the existing `ProxyService`, not successful completion. Confirm the foreground notification and real tile state. `TILE_COMMAND_REJECTED` indicates an Android service start failure.
-No proxy tokens, secrets or hostnames are logged by the tile.
+No proxy tokens, network profile identifiers, secrets, IPs, Worker URLs or hostnames are logged by the tile.
 
 ## Build and JVM tests
 
@@ -41,3 +47,18 @@ No proxy tokens, secrets or hostnames are logged by the tile.
 ```
 
 The native preBuild task runs on the repository's supported Windows toolchain. Do not merge on an unknown/failed CI or device acceptance gate.
+
+## v1.11.5 / Issue #122 regression acceptance
+
+Keep the original #121 report intact. Confirm Android 16 (ideally Realme GT Neo 6) **on a build with the same signing certificate as the installed 1.11.4 APK**, so the upgrade preserves data. Do not uninstall the app or clear data for the upgrade test. If signing certificates differ, stop: a fresh debug install is not equivalent to the upgrade scenario.
+
+Record only model, Android API, network type (Wi-Fi/mobile/unknown), frontend (MTProto/SOCKS5), enabled route **kind**, whether this is an upgrade/fresh install, and the observed outcome. Do not record network IDs, server addresses, secrets, fingerprints, profiles or raw runtime settings.
+
+1. Confirm version 1.11.4 (60), if available: proxy successfully starts from the app, then stops; observe whether short tile tap is rejected and capture the safe tile tags. This step is `NOT_RUN` if the old signed APK is unavailable.
+2. Install the candidate **over 1.11.4 with app data preserved**. Start via MainActivity, wait for actual `RUNNING), then stop. Close only the Activity. With the network and settings unchanged, short-tap tile. Expect `TILE_START_REQUESTED`, one foreground notification, actual `RUNNING), and ACTIVE tile. Tap again and expect STOPPED, notification gone and INACTIVE tile. Repeat after recreating the app process (without Android force-stop).
+3. Repeat on SOCKS5 if configured, and if possible on a second Android version/device. For fresh install, do not trust default MTProto before a successful in-app start.
+4. Negative cases: after a confirmed start and stop, change network Wi-Fi↔mobile, routing preference, Worker endpoint/selection, MTProto port/secret or AWG profile where available. Expect no `TILE_START_REQUESTED` and a meaningful rejection code; start from the app to confirm changed settings.
+5. Tap rapidly and during STARTING/RECONNECTING, and trigger an intentional frontend error where safe. Expect a single native runtime, no duplicate service notification, and never ACTIVE while the runtime is not RUNNING.
+6. Test foreground notification controls and MTProto start directly from the app for regressions. Long press is issue #114, not a completion criterion for #122.
+
+The available JVM tests do **not** prove Android 16 SystemUI integration. Leave #122 open until device acceptance is confirmed. Safe collection tags: `ProxyQuickSettingsTile` and `ProxyTileStartPolicy`; review and redact exported artifacts before external sharing.
