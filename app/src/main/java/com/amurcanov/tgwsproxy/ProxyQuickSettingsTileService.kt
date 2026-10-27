@@ -69,29 +69,20 @@ class ProxyQuickSettingsTileService : TileService() {
 
         val running = ProxyService.isRunning.value
         Log.i(TAG, "TILE_TAP running=$running status=${status.name}")
-        val decision = if (running) null else ProxyTileStartPolicy.startDecision(this)
-        val saved = if (decision == ProxyTileStartDecision.READY) {
-            runCatching {
-                ProxySavedConfigStore(
-                    getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE),
-                ).load()
-            }.getOrNull()
-        } else {
-            null
-        }
+        val check = if (running) null else ProxyTileStartPolicy.startCheck(this)
+        val decision = check?.decision
+        val saved = check?.saved
         if (!running && (decision != ProxyTileStartDecision.READY ||
                 saved == null || !saved.isSufficientForStart())
         ) {
             ProxyTileCommandGate.release()
-            val reason = decision ?: ProxyTileStartDecision.CONFIG_CHANGED
+            val reason = if (decision == ProxyTileStartDecision.READY) {
+                ProxyTileStartDecision.VALIDATION_FAILED
+            } else {
+                decision ?: ProxyTileStartDecision.VALIDATION_FAILED
+            }
             Log.w(TAG, "TILE_START_REJECTED reason=${reason.name}")
-            showFeedback(
-                if (reason == ProxyTileStartDecision.SETUP_REQUIRED) {
-                    R.string.quick_tile_setup
-                } else {
-                    R.string.quick_tile_config_changed
-                },
-            )
+            showFeedback(feedbackFor(reason))
             refreshTile()
             return
         }
@@ -119,6 +110,18 @@ class ProxyQuickSettingsTileService : TileService() {
         refreshTile()
     }
 
+    private fun feedbackFor(decision: ProxyTileStartDecision): Int = when (decision) {
+        ProxyTileStartDecision.SETUP_REQUIRED,
+        ProxyTileStartDecision.FRONTEND_INVALID -> R.string.quick_tile_setup
+        ProxyTileStartDecision.CONFIRMATION_MISSING -> R.string.quick_tile_confirm_required
+        ProxyTileStartDecision.VALIDATION_FAILED -> R.string.quick_tile_error
+        ProxyTileStartDecision.NETWORK_CHANGED,
+        ProxyTileStartDecision.ROUTE_POLICY_CHANGED,
+        ProxyTileStartDecision.AWG_CHANGED,
+        ProxyTileStartDecision.CONFIG_CHANGED -> R.string.quick_tile_config_changed
+        ProxyTileStartDecision.READY -> R.string.quick_tile_off
+    }
+
     private fun showFeedback(messageRes: Int) {
         Toast.makeText(applicationContext, messageRes, Toast.LENGTH_SHORT).show()
     }
@@ -136,8 +139,7 @@ class ProxyQuickSettingsTileService : TileService() {
             ProxyTileStateMapper.isTransitioning(status) -> R.string.quick_tile_transitioning
             ProxyTileStateMapper.isActive(status, running) -> R.string.quick_tile_on
             status == ProxyServiceStatus.ERROR -> R.string.quick_tile_error
-            decision == ProxyTileStartDecision.SETUP_REQUIRED -> R.string.quick_tile_setup
-            decision == ProxyTileStartDecision.CONFIG_CHANGED -> R.string.quick_tile_config_changed
+            decision != null -> feedbackFor(decision)
             else -> R.string.quick_tile_off
         }
         tile.state = if (ProxyTileStateMapper.isActive(status, running)) {
