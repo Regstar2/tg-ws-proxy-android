@@ -32,7 +32,29 @@ internal object ProxyTileStartPolicy {
     fun canStart(context: Context): Boolean =
         startDecision(context) == ProxyTileStartDecision.READY
 
-    fun startDecision(context: Context): ProxyTileStartDecision = startCheck(context).decision
+    // Tile subtitle refresh is read-only: building Worker failover advances round-robin.
+    // Full runtime construction happens only in startCheck(), after a real tap.
+    fun startDecision(context: Context): ProxyTileStartDecision {
+        return try {
+            val prefs = context.getSharedPreferences(PROXY_PREFS_NAME, Context.MODE_PRIVATE)
+            if (!hasSuccessfulStart(prefs)) return ProxyTileStartDecision.SETUP_REQUIRED
+            val rawPort = prefs.getString("port", null)
+            val port = if (rawPort == null) DEFAULT_LOCAL_PROXY_PORT else rawPort.toIntOrNull()
+            if (port == null || port !in 1..65535 || prefs.getInt("pool", 4) <= 0) {
+                return ProxyTileStartDecision.SETUP_REQUIRED
+            }
+            val frontendType = LocalProxyFrontendRepository(prefs).load()
+            if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL &&
+                !isMtProtoValid(port, MtProtoProxyConfigRepository(prefs).loadForDiagnostics())
+            ) {
+                return ProxyTileStartDecision.FRONTEND_INVALID
+            }
+            ProxyTileStartDecision.READY
+        } catch (error: Exception) {
+            Log.w("ProxyTileStartPolicy", "TILE_VALIDATION_FAILED exception=${error.javaClass.simpleName}")
+            ProxyTileStartDecision.VALIDATION_FAILED
+        }
+    }
 
     fun startCheck(context: Context): ProxyTileStartCheck {
         return try {
@@ -116,10 +138,13 @@ internal object ProxyTileStartPolicy {
     ): Boolean {
         if (!saved.isSufficientForStart()) return false
         if (saved.frontendType == LocalProxyFrontendType.SOCKS5) return true
-        return mtProto != null &&
+        return isMtProtoValid(saved.port, mtProto)
+    }
+
+    private fun isMtProtoValid(port: Int, mtProto: MtProtoProxyConfig?): Boolean =
+        mtProto != null &&
             mtProto.enabled &&
             mtProto.experimentalAcknowledged &&
-            mtProto.port == saved.port &&
+            mtProto.port == port &&
             MtProtoProxyConfigValidator.validate(mtProto).isValid
-    }
 }
