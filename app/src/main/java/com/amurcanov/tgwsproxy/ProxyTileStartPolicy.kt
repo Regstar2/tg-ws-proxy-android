@@ -139,25 +139,38 @@ internal object ProxyTileStartPolicy {
         prefs: SharedPreferences,
         saved: ProxySavedConfig,
     ): ProxyTileStartDecision {
-        val expected = expectedRuntimeTokens(context, prefs)
-        val tokens = saved.runtimeConfig.split(',')
+        val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
+        val awgMtimeChanged = awgPath.isNotBlank() &&
+            prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
+            prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) !=
+                java.io.File(awgPath).lastModified()
+        return classifyRuntimeMismatch(
+            saved.runtimeConfig,
+            expectedRuntimeTokens(context, prefs),
+            awgPath,
+            awgMtimeChanged,
+        )
+    }
+
+    internal fun classifyRuntimeMismatch(
+        runtimeConfig: String,
+        expectedTokens: Map<String, String>,
+        currentAwgPath: String,
+        awgMtimeChanged: Boolean,
+    ): ProxyTileStartDecision {
+        val tokens = runtimeConfig.split(',')
             .filter { it.startsWith("@") && '=' in it }
             .associate { it.substringBefore('=') to it.substringAfter('=') }
-        if (listOf("@network_profile_id", "@network_profile_type").any {
-                tokens[it] != expected[it]
-            }
-        ) return ProxyTileStartDecision.NETWORK_CHANGED
-        if (expected.any { (key, value) ->
-                key !in setOf("@network_profile_id", "@network_profile_type") && tokens[key] != value
-            }
-        ) return ProxyTileStartDecision.ROUTE_POLICY_CHANGED
-
-        val awgPath = AwgWarpConfigStore.configPath(context).orEmpty()
-        if (tokens["@awg_warp_config_path"].orEmpty() != awgPath ||
-            (awgPath.isNotBlank() && prefs.contains(KEY_AWG_CONFIRMED_MTIME) &&
-                prefs.getLong(KEY_AWG_CONFIRMED_MTIME, -1L) !=
-                    java.io.File(awgPath).lastModified())
-        ) return ProxyTileStartDecision.AWG_CHANGED
+        val networkKeys = setOf("@network_profile_id", "@network_profile_type")
+        if (networkKeys.any { tokens[it] != null && tokens[it] != expectedTokens[it] }) {
+            return ProxyTileStartDecision.NETWORK_CHANGED
+        }
+        if (expectedTokens.any { (key, value) -> key !in networkKeys && tokens[key] != value }) {
+            return ProxyTileStartDecision.ROUTE_POLICY_CHANGED
+        }
+        if (tokens["@awg_warp_config_path"].orEmpty() != currentAwgPath || awgMtimeChanged) {
+            return ProxyTileStartDecision.AWG_CHANGED
+        }
         return ProxyTileStartDecision.CONFIG_CHANGED
     }
 
