@@ -26,7 +26,7 @@ After pressing the tile, a short message explains whether the proxy needs initia
 ```powershell
 adb logcat -c
 # Tap the TgWsProxy Quick Settings tile, then run:
-adb logcat -d -s ProxyQuickSettingsTile:V '*:S'
+adb logcat -d -v threadtime -s ProxyQuickSettingsTile:V ProxyTileStartPolicy:V '*:S'
 ```
 
 `TILE_START_REJECTED reason=SETUP_REQUIRED`: no usable previously successful start, or an incomplete saved runtime.
