@@ -3,6 +3,11 @@ package com.amurcanov.tgwsproxy
 import android.content.Context
 import android.content.SharedPreferences
 import com.amurcanov.tgwsproxy.worker.WorkerDestinationMode
+import com.amurcanov.tgwsproxy.worker.FlowsealDcPreset
+import com.amurcanov.tgwsproxy.worker.SharedPreferencesWorkerPoolPersistence
+import com.amurcanov.tgwsproxy.worker.WorkerFailoverConfigBuilder
+import com.amurcanov.tgwsproxy.worker.WorkerPoolRepository
+import com.amurcanov.tgwsproxy.worker.WorkerRouteResolver
 import com.amurcanov.tgwsproxy.worker.WorkerFailoverPayload
 import com.amurcanov.tgwsproxy.worker.WorkerTransport
 
@@ -72,6 +77,60 @@ class ProxyRuntimeConfigFactory(
     }
 
     companion object {
+        /**
+         * Build from persisted user settings, not the last running snapshot.
+         * Quick Settings has no Activity state and must resolve the current network on every tap.
+         */
+        fun fromPreferences(prefs: SharedPreferences): ProxyRuntimeConfigFactory {
+            val workerPoolRepository = WorkerPoolRepository(
+                SharedPreferencesWorkerPoolPersistence(prefs),
+            )
+            return ProxyRuntimeConfigFactory(
+                prefs = prefs,
+                routePolicyRepository = NetworkRoutePolicyRepository(prefs),
+                adaptiveRouteStatsRepository = AdaptiveRouteStatsRepository(prefs),
+                cfUpstreamDomainsProvider = {
+                    SharedPreferencesCfDomainListPersistence(prefs).load().domains
+                },
+                manualCfDomainsProvider = {
+                    SharedPreferencesManualCfDomainRepository(prefs).load()
+                },
+                workerDomainProvider = {
+                    WorkerRouteResolver.resolveDomain(
+                        workerPoolRepository,
+                        prefs.getString("worker_domain", "").orEmpty(),
+                    )
+                },
+                workerFailoverPayloadProvider = {
+                    WorkerFailoverConfigBuilder.build(workerPoolRepository)
+                },
+                workerDestinationModeProvider = {
+                    WorkerDestinationMode.fromPref(prefs.getString(KEY_WORKER_DESTINATION_MODE, null))
+                },
+                flowsealMediaFixEnabledProvider = {
+                    prefs.getBoolean(KEY_FLOWSEAL_MEDIA_FIX_ENABLED, false)
+                },
+                flowsealMediaFixDcProvider = {
+                    prefs.getInt(KEY_FLOWSEAL_MEDIA_FIX_DC, WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC)
+                },
+                flowsealMediaFixIpProvider = {
+                    prefs.getString(KEY_FLOWSEAL_MEDIA_FIX_IP, WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP)
+                        ?: WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP
+                },
+                dcEntriesProvider = {
+                    FlowsealDcPreset.dcEntries(
+                        FlowsealDcPreset.loadTexts(prefs),
+                        prefs.getBoolean(FlowsealDcPreset.PREF_ENABLED, false),
+                    )
+                },
+                poolSizeProvider = { prefs.getInt("pool", 4) },
+                portProvider = {
+                    val raw = prefs.getString("port", null)
+                    if (raw == null) DEFAULT_LOCAL_PROXY_PORT else raw.toIntOrNull()
+                },
+            )
+        }
+
         const val KEY_CFPROXY_ENABLED = "cfproxy_enabled"
         const val KEY_CFPROXY_PRIORITY = "cfproxy_priority"
         const val KEY_CFPROXY_ONLY = "cfproxy_only"
