@@ -266,6 +266,96 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun mtProtoV2ConfirmationSurvivesReloadButRejectsStaleSettings() {
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
+            runtimeConfig = "@network_profile_type=wifi,@route_cf_proxy_ws=1",
+        )
+        assertEquals(
+            ProxyTileStartDecision.READY,
+            ProxyTileStartPolicy.decideVersioned(saved, "v2", "v2", null, null, false),
+        )
+        // A legacy match must never bypass changed Worker/route/frontend preferences.
+        assertEquals(
+            ProxyTileStartDecision.CONFIG_CHANGED,
+            ProxyTileStartPolicy.decideVersioned(saved, "v2", "changed", "v1", "v1", true),
+        )
+        assertEquals(
+            ProxyTileStartDecision.VALIDATION_FAILED,
+            ProxyTileStartPolicy.decideVersioned(saved, "v2", null, null, null, true),
+        )
+    }
+
+    @Test
+    fun socks5AndLegacyUpgradeHonorTheirRecordedConfirmation() {
+        val saved = ProxySavedConfig(
+            frontendType = LocalProxyFrontendType.SOCKS5,
+            runtimeConfig = "@network_profile_type=mobile,@route_cf_proxy_ws=1",
+        )
+        assertEquals(
+            ProxyTileStartDecision.READY,
+            ProxyTileStartPolicy.decideVersioned(saved, null, null, "v1", "v1", false),
+        )
+        assertEquals(
+            ProxyTileStartDecision.CONFIG_CHANGED,
+            ProxyTileStartPolicy.decideVersioned(saved, null, null, "v1", "changed", true),
+        )
+        assertEquals(
+            ProxyTileStartDecision.READY,
+            ProxyTileStartPolicy.decideVersioned(saved, null, null, null, null, true),
+        )
+        assertEquals(
+            ProxyTileStartDecision.CONFIRMATION_MISSING,
+            ProxyTileStartPolicy.decideVersioned(saved, null, null, null, null, false),
+        )
+    }
+
+    @Test
+    fun runtimeMismatchReasonDoesNotExposeNetworkOrRouteValues() {
+        val original = "@network_profile_id=wifi-1,@network_profile_type=wifi," +
+            "@route_cf_proxy_ws=1"
+        val expected = mapOf(
+            "@network_profile_id" to "wifi-1",
+            "@network_profile_type" to "wifi",
+            "@route_cf_proxy_ws" to "1",
+        )
+        fun reason(runtime: String, expectedTokens: Map<String, String> = expected,
+                   path: String = "", changed: Boolean = false) =
+            ProxyTileStartPolicy.classifyRuntimeMismatch(runtime, expectedTokens, path, changed)
+        assertEquals(ProxyTileStartDecision.CONFIG_CHANGED, reason(original))
+        assertEquals(
+            ProxyTileStartDecision.NETWORK_CHANGED,
+            reason(original, expected + ("@network_profile_id" to "mobile-1")),
+        )
+        assertEquals(
+            ProxyTileStartDecision.ROUTE_POLICY_CHANGED,
+            reason(original, expected + ("@route_cf_proxy_ws" to "0")),
+        )
+        assertEquals(
+            ProxyTileStartDecision.AWG_CHANGED,
+            reason(original, path = "/tmp/profile.conf"),
+        )
+        assertEquals(
+            ProxyTileStartDecision.AWG_CHANGED,
+            reason(original, changed = true),
+        )
+    }
+
+    @Test
+    fun unconfiguredAndInvalidSavedRuntimesRemainBlocked() {
+        val invalidSocks = ProxySavedConfig(frontendType = LocalProxyFrontendType.SOCKS5)
+        assertEquals(
+            ProxyTileStartDecision.SETUP_REQUIRED,
+            ProxyTileStartPolicy.decideVersioned(invalidSocks, "v2", "v2", null, null, true),
+        )
+        val emptyFirstRun = ProxySavedConfig()
+        assertEquals(
+            ProxyTileStartDecision.CONFIRMATION_MISSING,
+            ProxyTileStartPolicy.decideVersioned(emptyFirstRun, null, null, null, null, false),
+        )
+    }
+
+    @Test
     fun rapidTileClicksHaveOneCommandUntilCompletion() {
         ProxyTileCommandGate.release()
         try {
