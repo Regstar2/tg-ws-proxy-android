@@ -222,6 +222,9 @@ internal object ProxyTileStartPolicy {
                     )
                     .commit()
                 check(persisted) { "Tile confirmation persistence failed" }
+                Log.i("ProxyTileStartPolicy", "TILE_CONFIRMATION_SAVED")
+            } else {
+                Log.w("ProxyTileStartPolicy", "TILE_CONFIRMATION_SKIPPED reason=INVALID_SAVED_STATE")
             }
         }.onFailure { error ->
             Log.w("ProxyTileStartPolicy", "TILE_CONFIRMATION_FAILED exception=${error.javaClass.simpleName}")
