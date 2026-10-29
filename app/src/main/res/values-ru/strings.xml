@@ -969,4 +969,5 @@
     <string name="quick_tile_error">Ошибка запуска · откройте приложение</string>
     <string name="quick_tile_setup">Откройте приложение для настройки</string>
     <string name="quick_tile_config_changed">Настройки изменились · запустите прокси в приложении</string>
+    <string name="quick_tile_confirm_required">Запустите прокси в приложении для подтверждения настроек</string>
 </resources>

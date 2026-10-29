@@ -969,4 +969,5 @@
     <string name="quick_tile_error">Start failed · open app</string>
     <string name="quick_tile_setup">Open app to set up</string>
     <string name="quick_tile_config_changed">Proxy settings changed · start once in app</string>
+    <string name="quick_tile_confirm_required">Start proxy once in app to confirm settings</string>
 </resources>

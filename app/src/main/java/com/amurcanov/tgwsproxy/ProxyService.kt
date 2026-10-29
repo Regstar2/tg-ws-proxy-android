@@ -357,6 +357,8 @@ class ProxyService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         foregroundNotificationActive = true
+        // startForeground() submitted the notification; SystemUI may display it later.
+        Log.i("ProxyTileTiming", "FG_NOTIFICATION_SUBMITTED")
         notificationUpdateGate.onForegroundStarted(
             snapshot,
             wallTimeMillis = startedAtMillis,
