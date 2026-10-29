@@ -9,7 +9,7 @@ Use an Android 8+ arm64-v8a device or emulator with the debug APK. Record Androi
 1. Install APK, edit Quick Settings, manually add TgWsProxy. Verify readable localized label and monochrome icon.
 2. Clear app data, then tap the tile. Expected: no Activity opens, no proxy starts and the tile stays inactive with a setup label. Configure the app manually for first use.
 3. Configure MTProto or SOCKS5 in MainActivity and start once. Wait for a confirmed `RUNNING` status. Close Activity. Tap tile to stop; verify tile inactive and foreground notification removed.
-4. Tap again to start. Verify no Activity opens, a single ProxyService foreground notification appears, tile becomes active only after frontend success.
+4. Tap again to start. The tile should promptly display a transitioning subtitle while the current configuration is rebuilt off the main thread; it must remain INACTIVE until the frontend actually reaches RUNNING. Verify no Activity opens and a single ProxyService foreground notification appears.
 5. Start/stop via MainActivity and foreground notification. Reopen Quick Settings and verify the same state.
 6. Rapidly tap the tile; repeat while frontend is starting and reconnecting. Verify a single native runtime, no duplicate notifications, no stale active state.
 7. After one successful app start, stop and tap the tile with unchanged settings. Then stop, switch Wi-Fi/mobile or change route policy, and tap the tile **without starting from the app again**. Expected: a new runtime is built from persisted settings and the current network; the old runtime is never reused. If the new policy is usable, the tile starts. Repeat with a changed Worker endpoint or AWG/WARP profile: the new values must be used and any invalid configuration must be rejected rather than silently falling back.
@@ -26,13 +26,15 @@ After pressing the tile, a short message explains whether initial setup is requi
 ```powershell
 adb logcat -c
 # Tap the TgWsProxy Quick Settings tile, then run:
-adb logcat -d -v threadtime -s ProxyQuickSettingsTile:V ProxyTileStartPolicy:V '*:S'
+adb logcat -d -v threadtime -s ProxyQuickSettingsTile:V ProxyTileStartPolicy:V ProxyTileTiming:V '*:S'
 ```
 
 `TILE_START_REJECTED reason=SETUP_REQUIRED`: no previously successful app start, or the new runtime could not be built safely from current settings.
 `FRONTEND_INVALID`: the current MTProto/frontend configuration is not valid.
 `VALIDATION_FAILED`: storage or fresh config construction threw an exception. `TILE_VALIDATION_FAILED` includes **exception class only**.
 Changed network, route policy, Worker endpoints or AWG profiles do **not** cause signature-based rejection. A valid updated configuration must be started; invalid/missing settings must never fall back to `last_runtime_ips`.
+The tile should show a transitioning subtitle promptly on tap, without claiming an ACTIVE state until the service reports RUNNING. `TILE_START_PREPARED elapsed_ms=...` reports time spent preparing the fresh config off the UI thread. `FG_NOTIFICATION_SUBMITTED` on the safe `ProxyTileTiming` tag means Android accepted `startForeground()`, **not** that SystemUI has displayed the notification yet.
+
 `TILE_START_REQUESTED` and `TILE_STOP_REQUESTED` indicate dispatch to the existing `ProxyService`, not successful completion. Confirm the foreground notification and real tile state. `TILE_COMMAND_REJECTED` indicates an Android service start failure.
 No proxy tokens, network profile identifiers, secrets, IPs, Worker URLs or hostnames are logged by the tile.
 
