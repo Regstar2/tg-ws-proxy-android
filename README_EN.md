@@ -34,7 +34,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Source version:** `1.11.4` (`versionCode 60`)  
+**Source version:** `1.11.5` (`versionCode 61`)  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
 | Area | Status |
