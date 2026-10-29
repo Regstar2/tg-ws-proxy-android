@@ -4,7 +4,13 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
-## 1.11.4 - pending publication
+## 1.11.5 - pending publication
+- Fixed Quick Settings tile refusing to start an already configured proxy after switching Wi-Fi/mobile data or changing the route: each tile start now rebuilds the runtime from current saved settings and the active network rather than reusing stale runtime tokens or signatures (#122, PR #123).
+- Retained the initial requirement for one successful in-app start, validated the new runtime and frontend, and rejected missing or invalid configuration without falling back to an obsolete snapshot.
+- Made Quick Settings more responsive: configuration preparation is performed off the SystemUI-facing main thread, the tile shows a transitional status immediately, and ACTIVE is reserved for the actual RUNNING frontend.
+- Added privacy-safe tile start/foreground notification timing markers and expanded regression tests for network switching, routes, MTProto/SOCKS5 validation, and rapid taps.
+
+## 1.11.4 - 2026-10-25
 - Fixed Android Quick Settings long-press routing toward MainActivity and return to its main screen, without toggling the proxy; physical Xiaomi/HyperOS long-press behavior still needs device verification (#114, PR #116).
 - Reduced redundant foreground notification updates: unchanged presentations are suppressed, periodic changes are throttled, and a stable timestamp is retained per foreground session. Xiaomi/Android 14 notification ordering with competing VPN speed notifications was verified (#115, PR #117).
 - Fixed onboarding opt-out: "Don't show again" persists after Skip, Done, Back and outside dismissal. Users may reopen the guide via Help, and the existing preference is preserved (#118, PR #119).
