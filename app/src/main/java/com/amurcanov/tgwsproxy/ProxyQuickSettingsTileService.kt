@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.SystemClock
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object ProxyTileStateMapper {
@@ -24,9 +27,10 @@ internal object ProxyTileStateMapper {
         return running && status == ProxyServiceStatus.RUNNING
     }
 
-    fun isTransitioning(status: ProxyServiceStatus): Boolean {
+    fun isTransitioning(status: ProxyServiceStatus, preparingStart: Boolean = false): Boolean {
         return status == ProxyServiceStatus.STARTING ||
-            status == ProxyServiceStatus.RECONNECTING
+            status == ProxyServiceStatus.RECONNECTING ||
+            (preparingStart && status == ProxyServiceStatus.STOPPED)
     }
 }
 
@@ -39,6 +43,7 @@ internal object ProxyTileCommandGate {
 class ProxyQuickSettingsTileService : TileService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var listeningJob: Job? = null
+    private var preparingStart = false
 
     override fun onStartListening() {
         super.onStartListening()
@@ -69,45 +74,69 @@ class ProxyQuickSettingsTileService : TileService() {
 
         val running = ProxyService.isRunning.value
         Log.i(TAG, "TILE_TAP running=$running status=${status.name}")
-        val check = if (running) null else ProxyTileStartPolicy.startCheck(this)
-        val decision = check?.decision
-        val saved = check?.saved
-        if (!running && (decision != ProxyTileStartDecision.READY ||
-                saved == null || !saved.isSufficientForStart())
-        ) {
-            ProxyTileCommandGate.release()
-            val reason = if (decision == ProxyTileStartDecision.READY) {
-                ProxyTileStartDecision.VALIDATION_FAILED
-            } else {
-                decision ?: ProxyTileStartDecision.VALIDATION_FAILED
+        if (running) {
+            try {
+                startService(Intent(this, ProxyService::class.java).apply {
+                    action = ProxyService.ACTION_STOP
+                })
+                Log.i(TAG, "TILE_STOP_REQUESTED")
+            } catch (error: RuntimeException) {
+                ProxyTileCommandGate.release()
+                Log.e(TAG, "TILE_COMMAND_REJECTED error=${error.javaClass.simpleName}")
+                showFeedback(R.string.quick_tile_error)
             }
-            Log.w(TAG, "TILE_START_REJECTED reason=${reason.name}")
-            showFeedback(feedbackFor(reason))
             refreshTile()
             return
         }
 
-        val intent = Intent(this, ProxyService::class.java).apply {
-            action = if (running) ProxyService.ACTION_STOP else ProxyService.ACTION_START
-            saved?.let {
-                putExtra(ProxyService.EXTRA_PORT, it.port)
-                putExtra(ProxyService.EXTRA_IPS, it.runtimeConfig)
-                putExtra(ProxyService.EXTRA_POOL_SIZE, it.poolSize)
-            }
-        }
-        try {
-            if (running) {
-                startService(intent)
-            } else {
-                ContextCompat.startForegroundService(this, intent)
-            }
-            Log.i(TAG, if (running) "TILE_STOP_REQUESTED" else "TILE_START_REQUESTED")
-        } catch (error: RuntimeException) {
-            ProxyTileCommandGate.release()
-            Log.e(TAG, "TILE_COMMAND_REJECTED error=${error.javaClass.simpleName}")
-            showFeedback(R.string.quick_tile_error)
-        }
+        // Show pending state immediately; building the current network/route config
+        // may involve I/O and must not block Android SystemUI's tile click callback.
+        preparingStart = true
         refreshTile()
+        val tappedAt = SystemClock.elapsedRealtime()
+        scope.launch {
+            var requested = false
+            try {
+                val check = withContext(Dispatchers.IO) {
+                    ProxyTileStartPolicy.startCheck(applicationContext)
+                }
+                Log.i(TAG, "TILE_START_PREPARED elapsed_ms=${SystemClock.elapsedRealtime() - tappedAt}")
+                val saved = check.saved
+                if (check.decision != ProxyTileStartDecision.READY ||
+                    saved == null || !saved.isSufficientForStart()
+                ) {
+                    val reason = if (check.decision == ProxyTileStartDecision.READY) {
+                        ProxyTileStartDecision.VALIDATION_FAILED
+                    } else {
+                        check.decision
+                    }
+                    Log.w(TAG, "TILE_START_REJECTED reason=${reason.name}")
+                    showFeedback(feedbackFor(reason))
+                    return@launch
+                }
+
+                ContextCompat.startForegroundService(
+                    this@ProxyQuickSettingsTileService,
+                    Intent(this@ProxyQuickSettingsTileService, ProxyService::class.java).apply {
+                        action = ProxyService.ACTION_START
+                        putExtra(ProxyService.EXTRA_PORT, saved.port)
+                        putExtra(ProxyService.EXTRA_IPS, saved.runtimeConfig)
+                        putExtra(ProxyService.EXTRA_POOL_SIZE, saved.poolSize)
+                    },
+                )
+                requested = true
+                Log.i(TAG, "TILE_START_REQUESTED")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "TILE_COMMAND_REJECTED error=${error.javaClass.simpleName}")
+                showFeedback(R.string.quick_tile_error)
+            } finally {
+                if (!requested) ProxyTileCommandGate.release()
+                preparingStart = false
+                refreshTile()
+            }
+        }
     }
 
     private fun feedbackFor(decision: ProxyTileStartDecision): Int = when (decision) {
@@ -130,13 +159,13 @@ class ProxyQuickSettingsTileService : TileService() {
         val tile = qsTile ?: return
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
         val running = ProxyService.isRunning.value
-        val decision = if (!running && status == ProxyServiceStatus.STOPPED) {
+        val decision = if (!preparingStart && !running && status == ProxyServiceStatus.STOPPED) {
             ProxyTileStartPolicy.startDecision(this)
         } else {
             null
         }
         val subtitle = when {
-            ProxyTileStateMapper.isTransitioning(status) -> R.string.quick_tile_transitioning
+            ProxyTileStateMapper.isTransitioning(status, preparingStart) -> R.string.quick_tile_transitioning
             ProxyTileStateMapper.isActive(status, running) -> R.string.quick_tile_on
             status == ProxyServiceStatus.ERROR -> R.string.quick_tile_error
             decision != null -> feedbackFor(decision)
