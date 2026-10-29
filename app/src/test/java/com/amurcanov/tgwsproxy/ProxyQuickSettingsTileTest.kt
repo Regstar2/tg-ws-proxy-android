@@ -27,6 +27,15 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun configurationPreparationShowsTransitionWithoutClaimingProxyIsRunning() {
+        assertTrue(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STOPPED, preparingStart = true))
+        assertFalse(ProxyTileStateMapper.isActive(ProxyServiceStatus.STOPPED, running = false))
+        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STOPPED, preparingStart = false))
+        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.ERROR, preparingStart = true))
+        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.RUNNING, preparingStart = true))
+    }
+
+    @Test
     fun firstUseRequiresOneSuccessfulAppStart() {
         var rebuildCalls = 0
         val check = ProxyTileStartPolicy.evaluateFreshStart(false, null) {
