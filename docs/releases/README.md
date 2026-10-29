@@ -2,10 +2,11 @@
 
 | Файл | Описание |
 |------|----------|
-| [release.md](release.md) | Краткий workflow и сборка APK |
-| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Подробный чеклист перед релизом |
-| [RELEASE_NOTES_v1.11.4.md](RELEASE_NOTES_v1.11.4.md) | Краткое описание запланированного v1.11.4 для GitHub Release |
-| [v1.11.4.md](v1.11.4.md) · [English](v1.11.4_EN.md) | Полные двуязычные заметки к v1.11.4 |
+| [release.md](release.md) | Пошаговый workflow подготовки и публикации v1.11.5 |
+| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Контроль качества и обязательные проверочные gate |
+| [RELEASE_NOTES_v1.11.5.md](RELEASE_NOTES_v1.11.5.md) | Текст GitHub Release v1.11.5 |
+| [v1.11.5.md](v1.11.5.md) · [English](v1.11.5_EN.md) | Полные двуязычные заметки v1.11.5 |
+| [v1.11.4.md](v1.11.4.md) · [English](v1.11.4_EN.md) | Предыдущий опубликованный релиз |
 | [RELEASE_NOTES_v*.md](.) | Архив заметок по версиям |
 
 История: [CHANGELOG.md](../../CHANGELOG.md).

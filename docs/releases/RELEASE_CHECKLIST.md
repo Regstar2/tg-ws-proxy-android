@@ -1,43 +1,42 @@
-# Release checklist — v1.11.4 stable patch
+# Release checklist — v1.11.5 stable patch
 
-Статус: **подготовка, не опубликовано**. Не отмечать gate PASS по результатам другого commit или Debug APK вместо подписанного финального Release.
+Статус: **подготовка; Git tag и GitHub Release ещё не созданы**. Любая отметка PASS относится только к указанной сборке/коммиту.
 
-## Метаданные, исходники и текст
+## Метаданные, репозиторий и текст
 
-- [ ] Release-prep PR влит в `main`; известен итоговый release commit SHA.
-- [ ] `releaseVersionName = "1.11.4"`, `releaseVersionCode = 60`, README RU/EN и CHANGELOG согласованы.
-- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.4 -ExpectedVersionCode 60` — PASS на release source.
-- [ ] `scripts/release.ps1 -Version v1.11.4 -PreflightOnly` — PASS на release source.
-- [x] Подготовлены RU/EN полные release notes и краткий GitHub Release body.
-- [ ] Проверено отсутствие secrets, приватных логов и keystore в tracked files.
-- [ ] Перепроверены ссылки на tag, известные ограничения и факты device acceptance.
+- [ ] Release-prep PR влит в `main`, известен итоговый release commit SHA.
+- [ ] `releaseVersionName 1.11.5` / `releaseVersionCode 61`, README RU/EN, CHANGELOG и три release notes согласованы.
+- [ ] `./scripts/audit-release.ps1 -ExpectedVersion 1.11.5 -ExpectedVersionCode 61` — PASS на release source.
+- [ ] `./scripts/release.ps1 -Version v1.11.5 -PreflightOnly` — PASS.
+- [x] Тексты на русском и английском и краткое описание GitHub Release подготовлены на release-prep ветке (требуется финальный обзор).
+- [ ] Нет секретов, приватных конфигураций и случайных отслеживаемых файлов; согласованы ссылки/известные ограничения.
+- [ ] Выбран точный tag commit, `v1.11.5` ещё не существует ни в Git, ни в GitHub Releases.
 
-## Автоматические проверки
+## CI и автоматизация
 
-- [x] CI PR #116, #117, #119 по отдельным изменениям — PASS.
-- [x] Android JVM-тесты / Debug build / Worker regression для PR #119 — PASS (GitHub Actions #40180676121).
-- [ ] `scripts/ci.ps1` и GitHub Actions CI на **итоговом release-prep merge commit** — PASS.
-- [ ] Подтверждено, что `release.yml` собирает именно tagged source и публикация не дублирует существующий release.
-- [ ] `versionName/versionCode` финального подписанного APK проверены посредством `aapt`; подпись — посредством `apksigner`.
+- [x] [PR #123](https://github.com/Regstar2/tg-ws-proxy-android/pull/123), HEAD a7a97052: [CI #40837472081](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/40837472081) Windows CI и Worker transport regression — PASS.
+- [ ] Windows CI и Worker transport regression — PASS **на итоговом release-prep merge commit**.
+- [ ] `scripts/ci.ps1`: Android unit tests, debug build, release metadata audit и native regression — PASS на итоговом source.
+- [ ] `.github/workflows/release.yml` использует точный tag, нет существующего GitHub Release; Actions release-signing secrets доступны.
+- [ ] `aapt` и `apksigner` подтверждают versionName, versionCode, package и release-подпись финального APK.
 
-## Android device smoke
+## Реальное Android-устройство
 
-- [x] Xiaomi / Android 14: конкурентное VPN speed notification, статистика уведомлений on/off, Telegram сообщения/медиа, reconnect, stop/start и notification actions — PASS по acceptance PR #117.
-- [x] Подписанный Debug APK PR #119 установлен без удаления приложения, исправление onboarding подтверждено пользователем — PASS.
-- [ ] **Release blocker #114:** на Xiaomi/HyperOS long-press плитки открывает главную страницу TgWsProxy вместо «О приложении» при остановленном/запущенном прокси, закрытой/открытой Activity, не переключает состояние; короткий тап и launcher остаются рабочими — **NOT RUN** (см. `docs/testing/quick-settings-long-press.md`).
-- [ ] Подключение Telegram, сообщения/медиа, запуск/остановка/переподключение на интегрированной кандидатной версии `v1.11.4`.
-- [ ] Установка **финального подписанного Release APK** поверх предыдущей официальной версии без потери настроек — проверяется после формирования publishable artifact.
-- [ ] Проверены RU/EN экранов и текста плитки в кандидатной сборке, без clipping.
-- [ ] Проверена работа после смены сети/перезапуска приложения (соответствующие поддерживаемые сценарии).
+- [x] На устройстве пользователя подписанный тестовый APK установлен поверх v1.11.4 без удаления данных; локальная Debug-сборка PASS.
+- [x] Пользователь подтвердил запуск плиткой после переключения Wi-Fi → mobile без `CONFIG_CHANGED`, а также приемлемую скорость реакции после обновления.
+- [x] Диагностика тестовой сборки показывает `TILE_START_REQUESTED`, `FG_NOTIFICATION_SUBMITTED` и `TILE_CONFIRMATION_SAVED`. Фактическое отображение SystemUI отдельно от факта отправки уведомления.
+- [ ] На **финальном v1.11.5 Release APK** проверены сохранение данных при обновлении с v1.11.4, реальный RUNNING, Telegram сообщения/медиа, остановка и перезапуск через плитку.
+- [ ] Свежая установка: сначала требуется успешный запуск из приложения; без него плитка не запускает прокси.
+- [ ] Другие версии Android/OEM, отдельные SOCKS5/AWG/WARP device-сценарии — NOT RUN, не считать PASS.
+- [ ] Проверены ru/en подписи плитки/уведомлений в финальной сборке.
 
-## Артефакты, публикация и post-release
+## Публикация и post-release
 
-- [ ] Тег `v1.11.4` ещё не существует и ставится только на **итоговый проверенный `main` commit** после device gate.
-- [ ] Release workflow для точного tag — PASS, включая signed APK и верификацию manifest/signature.
-- [ ] GitHub Release опубликован только один раз; assets — APK и `.sha256`; SHA-256 совпадает с фактическим APK.
-- [ ] `versionName 1.11.4`, `versionCode 60`, `com.amurcanov.tgwsproxy` подтверждены у итогового APK.
-- [ ] RU/EN release links из опубликованного tag доступны и корректны.
-- [ ] **Только после публикации и проверки:** закрыть исходные баг-репорты #112 и #113; не комментировать и не закрывать ранее.
-- [ ] Релиз доступен для загрузки, установка/первый запуск проверены.
+- [ ] Аннотированный tag `v1.11.5` отправлен ровно один раз на проверенный `main`.
+- [ ] Release workflow успешно завершился на tagged source и создал **два** файла: `TgWsProxy-Android-v1.11.5-arm64-v8a.apk` и `.apk.sha256`.
+- [ ] Checksum соответствует опубликованному APK; выпуск не содержит Debug APK или локальные данные.
+- [ ] GitHub Release содержит краткий RU body, обе ссылки на полные RU/EN заметки из tag, compare с v1.11.4.
+- [ ] Подтверждены запуск, настройка, уведомление и смена сети **на опубликованном APK**.
+- [ ] После успешной публикации и проверки закрыт исходный report [#121](https://github.com/Regstar2/tg-ws-proxy-android/issues/121); до этого он остаётся открытым.
 
-**Ограничения:** Flowseal Legacy WebSocket остаётся экспериментальным. Debug/smoke APK не является подписанным финальным Release APK. `git push` release tag **немедленно запускает автоматическую публикацию**.
+Ограничения: Flowseal Legacy WebSocket экспериментален; на OEM SystemUI возможны особенности. Успешный Debug smoke **не подтверждает** опубликованный Release APK. `git push origin refs/tags/v1.11.5` запускает **автоматическую публикацию**.
