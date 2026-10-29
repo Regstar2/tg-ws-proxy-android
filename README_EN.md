@@ -281,7 +281,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.4
+.\scripts\release.ps1 -Version v1.11.5
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -302,7 +302,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Manual pre-tag validation must cover signed-APK upgrade over `v1.10.14` and `v1.11.0-beta.1`, proxy start/stop, the regular MTProto/CF route, automatic WARP provisioning, `awg_warp` messages and media, Wi-Fi ↔ mobile switching, reconnect, Feedback/Updates, and review of exported diagnostics for secrets.
+Before tagging v1.11.5, verify a data-preserving signed upgrade from v1.11.4, proxy start/stop from the app and tile, Wi-Fi ↔ mobile switching, notification state and Telegram connectivity. Test the final signed Release APK separately from the pre-release Debug APK. See the [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
@@ -316,7 +316,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.1` release notes | [docs/releases/v1.11.1_EN.md](docs/releases/v1.11.1_EN.md) |
+| `1.11.5` release notes | [docs/releases/v1.11.5_EN.md](docs/releases/v1.11.5_EN.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -328,11 +328,11 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
 AI tools were used for selected parts of the code, tests, and documentation. The resulting changes are checked by tests and the release audit; manual device acceptance remains a required final step.
 
-## Android Quick Settings (v1.11.3)
+## Android Quick Settings (v1.11.5)
 
 Open Android's Quick Settings editor (Edit / pencil icon), find **TgWsProxy** and drag it into the panel. Tapping the tile starts or stops the **local proxy service**; it does not configure Telegram or provide a system-wide VPN.
 
-The tile directly starts or stops the proxy using the last successfully running configuration, without opening the app. After upgrading, an existing saved configuration can be reused only when its recorded network and route policy match the current one. Configure and start the proxy in the app initially. With missing or stale settings, the tile stays off and never opens the app automatically; start it in the app to confirm updated settings. Repeated taps while switching are ignored. Tile placement and styling depend on the Android/OEM UI.
+As of **v1.11.5**, every tile start rebuilds the runtime from **current saved settings and the active network**. Changing Wi-Fi ↔ mobile data or the route no longer requires another in-app start when the new settings are valid. Initial setup still requires one successful in-app proxy start; invalid current settings are rejected without falling back to an old runtime. The tile shows “Connecting” during preparation and only becomes ACTIVE once the frontend is truly RUNNING. Duplicate taps while starting/reconnecting are ignored. Tile layout and update timing depend on Android/OEM SystemUI.
 
 ## Limitations
 
