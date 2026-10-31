@@ -364,10 +364,10 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 	if err == nil {
 		return ws, nil
 	}
-	logDomainConnectFailure(logPrefix, domain, domain, err)
 	if cancelled := ctx.Err(); cancelled != nil {
 		return nil, cancelled
 	}
+	logDomainConnectFailure(logPrefix, domain, domain, err)
 
 	resolved, resolveErr := resolvePreferredIPsContext(ctx, domain, 10)
 	if resolveErr != nil {
@@ -382,6 +382,9 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 		ws, lastErr = dialer.connect(ip, domain, path, 10)
 		if lastErr == nil {
 			return ws, nil
+		}
+		if cancelled := ctx.Err(); cancelled != nil {
+			return nil, cancelled
 		}
 		logDomainConnectFailure(logPrefix, domain, ip, lastErr)
 		var wsErr *WsHandshakeError
