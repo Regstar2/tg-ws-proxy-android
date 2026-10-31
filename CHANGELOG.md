@@ -4,10 +4,10 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
-## 1.11.6 - pending publication
-- Fixed CF domain pool exhaustion handling: reconnects fail promptly when no domains are eligible, without redundant TLS dials; DC-specific cooldown and configured fallback policies remain respected (#125, PR #129).
-- Cancelled obsolete CF DNS/TCP/TLS/WebSocket attempts on stop or route changes, preventing stale results from altering newer route-generation telemetry (#126, PR #130).
-- Changed the Android application ID to `io.github.regstar2.tgwsproxy` to avoid an installation collision with upstream; this is a separate installation without automatic settings migration. The app display name remains TgWsProxy (PR #131).
+## 1.11.6 — готовится к публикации
+- Исправлена обработка полного исчерпания пула доменов Cloudflare Proxy: при отсутствии доступных доменов повторное подключение завершается контролируемым отказом без лишних TLS-соединений. Сохраняются независимые cooldown для DC и заданная политика резервных маршрутов (#125, PR #129).
+- Незавершённые DNS/TCP/TLS/WebSocket-подключения Cloudflare Proxy отменяются при остановке прокси или смене маршрута. Результаты старых попыток не смешиваются с диагностикой нового поколения маршрута (#126, PR #130).
+- Изменён Android `applicationId` на `io.github.regstar2.tgwsproxy`, чтобы приложение устанавливалось отдельно от исходного `com.amurcanov.tgwsproxy`. Это новая установка, а не обновление поверх прежней версии: настройки, Worker и AWG/WARP-профили автоматически не переносятся. Название приложения `TgWsProxy` не изменено (PR #131).
 
 ## 1.11.5 - 2026-10-29
 - Fixed Quick Settings tile refusing to start an already configured proxy after switching Wi-Fi/mobile data or changing the route: each tile start now rebuilds the runtime from current saved settings and the active network rather than reusing stale runtime tokens or signatures (#122, PR #123).
