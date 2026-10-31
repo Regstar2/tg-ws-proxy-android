@@ -346,6 +346,7 @@ func (c *mtProtoWorkerConnector) Connect(
 			mediaTag(request.IsMedia),
 		)
 		logMtProtoRouteAttempt(
+			ctx,
 			request,
 			routeCFWorkerWS,
 			"session_id=%s signed_dc=%d effective_dc=%d effective_media=%t worker_host=%s worker_dst=%s destination_mode=%s effective_destination_mode=%s worker_transport=%s attempt=%d",
