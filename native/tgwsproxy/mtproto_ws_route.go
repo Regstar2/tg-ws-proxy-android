@@ -43,7 +43,7 @@ func (c *mtProtoDirectWSConnector) Capability() mtproxyfrontend.OutboundCapabili
 }
 
 func (c *mtProtoDirectWSConnector) Connect(
-	_ context.Context,
+	ctx context.Context,
 	request mtproxyfrontend.OutboundRequest,
 ) (net.Conn, mtproxyfrontend.OutboundResult) {
 	result := mtproxyfrontend.OutboundResult{
@@ -88,6 +88,7 @@ func (c *mtProtoDirectWSConnector) Connect(
 	for _, domain := range domains {
 		prefix := fmt.Sprintf("[MTProto] DC%d%s direct_ws", request.DCID, mediaTag(request.IsMedia))
 		logMtProtoRouteAttempt(
+			ctx,
 			request,
 			routeDirectWS,
 			"target=%s domain=%s",
@@ -262,6 +263,7 @@ func (c *mtProtoCFProxyConnector) Connect(
 		host := cfProxyHost(wsDC, baseDomain)
 		prefix := fmt.Sprintf("[MTProto] DC%d%s cfproxy", request.DCID, mediaTag(request.IsMedia))
 		logMtProtoRouteAttempt(
+			ctx,
 			request,
 			routeCFProxyWS,
 			"host=%s pool_domain=%s source=%s",
@@ -304,7 +306,9 @@ func (c *mtProtoCFProxyConnector) Connect(
 			continue
 		}
 
+		stopCancel := context.AfterFunc(ctx, ws.Close)
 		stream, err := mtProtoWebSocketConn(ws, request.RelayInit, host)
+		stopCancel()
 		if cancelled := ctx.Err(); cancelled != nil {
 			ws.Close()
 			cfPool.ReleaseReservation(wsDC, baseDomain)
@@ -365,7 +369,7 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 		return nil, cancelled
 	}
 
-	resolved, resolveErr := resolvePreferredIPs(domain, 10)
+	resolved, resolveErr := resolvePreferredIPsContext(ctx, domain, 10)
 	if resolveErr != nil {
 		return nil, err
 	}
