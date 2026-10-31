@@ -467,6 +467,10 @@ func directIPCooldownFallbackAvailable(settings runtimeSettings) bool {
 }
 
 func resolvePreferredIPs(domain string, timeout float64) (resolvedIPs, error) {
+	return resolvePreferredIPsContext(context.Background(), domain, timeout)
+}
+
+func resolvePreferredIPsContext(parent context.Context, domain string, timeout float64) (resolvedIPs, error) {
 	resolveTimeout := timeout
 	if resolveTimeout <= 0 {
 		resolveTimeout = 5
@@ -475,7 +479,7 @@ func resolvePreferredIPs(domain string, timeout float64) (resolvedIPs, error) {
 		resolveTimeout = 5
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(resolveTimeout*float64(time.Second)))
+	ctx, cancel := context.WithTimeout(parent, time.Duration(resolveTimeout*float64(time.Second)))
 	defer cancel()
 
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
@@ -718,7 +722,13 @@ type compatibleWebSocketTLSDialer struct {
 func (d *compatibleWebSocketTLSDialer) connect(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
 	dial := d.dial
 	if dial == nil {
-		dial = wsConnectWithCurves
+		ctx := d.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		dial = func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
+			return wsConnectWithCurvesContext(ctx, ip, domain, path, timeout, curves)
+		}
 	}
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
 	ws, err := dial(ip, domain, path, timeout, classicalTLSCurves())
@@ -749,6 +759,10 @@ func webSocketTLSConfig(domain string, curves []tls.CurveID) *tls.Config {
 }
 
 func wsConnectWithCurves(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
+	return wsConnectWithCurvesContext(context.Background(), ip, domain, path, timeout, curves)
+}
+
+func wsConnectWithCurvesContext(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -767,15 +781,17 @@ func wsConnectWithCurves(ip, domain, path string, timeout float64, curves []tls.
 
 	tlsCfg := webSocketTLSConfig(domain, curves)
 
-	rawConn, err := dialer.Dial("tcp", joinAddr(ip, 443))
+	rawConn, err := dialer.DialContext(ctx, "tcp", joinAddr(ip, 443))
 	if err != nil {
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
 	setSockOpts(rawConn)
+	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	defer stopCancel()
 
 	tlsConn := tls.Client(rawConn, tlsCfg)
 	_ = tlsConn.SetDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = tlsConn.Close()
 		return nil, &wsStageError{Stage: "tls_handshake", Err: err}
 	}
@@ -845,6 +861,10 @@ func wsConnectWithCurves(ip, domain, path string, timeout float64, curves []tls.
 	}
 
 	if statusCode == 101 {
+		if err := ctx.Err(); err != nil {
+			_ = tlsConn.Close()
+			return nil, err
+		}
 		ws := &RawWebSocket{
 			conn:      tlsConn,
 			bufReader: bufReader,
