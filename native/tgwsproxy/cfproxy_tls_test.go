@@ -84,3 +84,18 @@ func TestCFProxyTLSDoesNotRetryNonTLSFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestCFProxyTLSDoesNotStartFallbackAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	d := cfProxyTLSDialer{ctx: ctx, dial: func(_, _, _ string, _ float64, _ []tls.CurveID) (*RawWebSocket, error) {
+		calls++
+		cancel()
+		return nil, &wsStageError{Stage: "tls_handshake", Err: errors.New("handshake timeout")}
+	}}
+	_, err := d.connect("target", "example.test", "/apiws", 1)
+	if err == nil || calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}

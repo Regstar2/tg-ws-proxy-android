@@ -784,7 +784,7 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 	var ws *RawWebSocket
 	var lastErr error
 	usedTarget := "hostname"
-	dialer := cfProxyTLSDialer{}
+	dialer := cfProxyTLSDialer{ctx: ctx}
 
 	ws, lastErr = dialer.connect(host, host, "/apiws", 10)
 	if lastErr != nil {

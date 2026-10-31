@@ -711,6 +711,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 
 type cfProxyTLSDialer struct {
 	defaultAttempted bool
+	ctx              context.Context
 	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
 }
 
@@ -722,7 +723,7 @@ func (d *cfProxyTLSDialer) connect(ip, domain, path string, timeout float64) (*R
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
 	ws, err := dial(ip, domain, path, timeout, cfProxyTLSCurves())
 	var stageErr *wsStageError
-	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) {
+	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) || (d.ctx != nil && d.ctx.Err() != nil) {
 		return ws, err
 	}
 	d.defaultAttempted = true

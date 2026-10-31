@@ -151,7 +151,8 @@ func defaultMtProtoDirectWSDial(targetIP, domain, path string, timeout float64) 
 }
 
 type mtProtoCFProxyConnector struct {
-	dial mtProtoRouteDial
+	dial        mtProtoRouteDial
+	dialContext func(context.Context, string, string, string) (mtProtoFrameSocket, error)
 }
 
 type cfPoolMissWindow struct {
@@ -179,7 +180,7 @@ func countCFPoolMiss(dc int, now time.Time) int64 {
 
 func newMtProtoCFProxyConnector() *mtProtoCFProxyConnector {
 	return &mtProtoCFProxyConnector{
-		dial: defaultMtProtoCFProxyDial,
+		dialContext: defaultMtProtoCFProxyDial,
 	}
 }
 
@@ -191,7 +192,7 @@ func (c *mtProtoCFProxyConnector) Capability() mtproxyfrontend.OutboundCapabilit
 }
 
 func (c *mtProtoCFProxyConnector) Connect(
-	_ context.Context,
+	ctx context.Context,
 	request mtproxyfrontend.OutboundRequest,
 ) (net.Conn, mtproxyfrontend.OutboundResult) {
 	result := mtproxyfrontend.OutboundResult{
@@ -253,7 +254,13 @@ func (c *mtProtoCFProxyConnector) Connect(
 			candidate.Source,
 		)
 
-		ws, err := c.dial(host, "/apiws", prefix)
+		var ws mtProtoFrameSocket
+		var err error
+		if c.dialContext != nil {
+			ws, err = c.dialContext(ctx, host, "/apiws", prefix)
+		} else {
+			ws, err = c.dial(host, "/apiws", prefix)
+		}
 		if err != nil {
 			lastErr = err
 			kind := classifyCFFailure(err)
@@ -312,8 +319,8 @@ func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error
 		dc, len(selection.Candidates), len(selection.SkippedCooldown), len(selection.SkippedInFlight), selection.RetryAfterSeconds)
 }
 
-func defaultMtProtoCFProxyDial(domain, path, logPrefix string) (mtProtoFrameSocket, error) {
-	dialer := cfProxyTLSDialer{}
+func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
+	dialer := cfProxyTLSDialer{ctx: ctx}
 	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
