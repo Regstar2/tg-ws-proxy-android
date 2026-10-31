@@ -250,6 +250,7 @@ func (r *Runtime) Stop() error {
 	r.listener = nil
 	r.status = StatusStopped
 	r.lastError = ""
+	r.activeConnections.Store(0)
 	r.mu.Unlock()
 
 	cancel()
