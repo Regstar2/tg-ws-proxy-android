@@ -313,7 +313,7 @@ func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error
 }
 
 func defaultMtProtoCFProxyDial(domain, path, logPrefix string) (mtProtoFrameSocket, error) {
-	ws, err := wsConnect(domain, domain, path, 10)
+	ws, err := wsConnectCFProxy(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
 	}
@@ -326,7 +326,7 @@ func defaultMtProtoCFProxyDial(domain, path, logPrefix string) (mtProtoFrameSock
 
 	lastErr := err
 	for _, ip := range resolved.Preferred() {
-		ws, lastErr = wsConnect(ip, domain, path, 10)
+		ws, lastErr = wsConnectCFProxy(ip, domain, path, 10)
 		if lastErr == nil {
 			return ws, nil
 		}

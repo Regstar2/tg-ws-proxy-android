@@ -706,6 +706,25 @@ type RawWebSocket struct {
 }
 
 func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+	return wsConnectWithCurves(ip, domain, path, timeout, nil)
+}
+
+func wsConnectCFProxy(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
+	return wsConnectWithCurves(ip, domain, path, timeout, cfProxyTLSCurves())
+}
+
+func cfProxyTLSCurves() []tls.CurveID { return []tls.CurveID{tls.X25519, tls.CurveP256} }
+
+func webSocketTLSConfig(domain string, curves []tls.CurveID) *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         domain,
+		CurvePreferences:   curves,
+	}
+}
+
+func wsConnectWithCurves(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -722,10 +741,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 		Timeout: time.Duration(dialTimeout * float64(time.Second)),
 	}
 
-	tlsCfg := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         domain,
-	}
+	tlsCfg := webSocketTLSConfig(domain, curves)
 
 	rawConn, err := dialer.Dial("tcp", joinAddr(ip, 443))
 	if err != nil {

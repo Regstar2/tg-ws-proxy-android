@@ -1,5 +1,14 @@
 # CF Domain Pool
 
+## CF Proxy TLS compatibility
+
+CF Proxy WebSocket connections offer X25519 and P-256 key exchange groups. Some
+networks time out when Go offers its larger hybrid post-quantum ClientHello,
+while accepting a classical-only ClientHello to the same endpoint. This applies
+to CF Proxy connections from both frontends; direct WebSocket and Worker TLS
+settings are unchanged. The CF Proxy connection no longer offers hybrid
+post-quantum key exchange, and endpoint availability still depends on the network.
+
 ## v1.4.0 CF domain auto-update
 
 The Android fork can update its Cloudflare proxy domain list from Flowseal upstream:
