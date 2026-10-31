@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TgWsProxy (Regstar)</string>
+    <string name="app_name">TgWsProxy</string>
     <string name="screen_main_title">TgWsProxy</string>
     <string name="screen_settings_title">Настройки</string>
     <string name="action_info">инфо</string>
