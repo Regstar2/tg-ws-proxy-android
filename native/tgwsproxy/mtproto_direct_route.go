@@ -109,7 +109,7 @@ func (c *mtProtoDirectConnector) Connect(
 		return nil, result
 	}
 
-	logMtProtoRouteAttempt(request, routeTCPFallback, "target=%s", address)
+	logMtProtoRouteAttempt(ctx,request, routeTCPFallback, "target=%s", address)
 
 	conn, err := c.dialContext(ctx, "tcp", address)
 	if err != nil {
