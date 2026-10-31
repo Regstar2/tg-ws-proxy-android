@@ -60,6 +60,7 @@ type OutboundCapability struct {
 }
 
 type OutboundResult struct {
+	RouteGeneration uint64
 	SelectedBackend string
 	ActualBackend   string
 	FallbackUsed    bool
