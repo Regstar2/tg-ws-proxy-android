@@ -198,6 +198,11 @@ func (c *mtProtoCFProxyConnector) Connect(
 	result := mtproxyfrontend.OutboundResult{
 		SelectedBackend: mtProtoCFProxyBackend,
 	}
+	if err := ctx.Err(); err != nil {
+		result.Reason = "cancelled"
+		result.Err = err
+		return nil, result
+	}
 
 	if request.IsTestDC {
 		result.Reason = "test_dc_cfproxy_unsupported"
@@ -232,6 +237,11 @@ func (c *mtProtoCFProxyConnector) Connect(
 	attempted := false
 	skipCachedUpstream := false
 	for _, candidate := range selection.Candidates {
+		if err := ctx.Err(); err != nil {
+			result.Reason = "cancelled"
+			result.Err = err
+			return nil, result
+		}
 		if skipCachedUpstream && candidate.Source == tgwsroute.CFDomainSourceCachedUpstream {
 			if logDebug != nil {
 				logDebug.Printf("MTProto CF cached upstream skipped domain=%s reason=previous_dns_failure", candidate.Domain)
@@ -241,6 +251,12 @@ func (c *mtProtoCFProxyConnector) Connect(
 		baseDomain := candidate.Domain
 		if !cfPool.TryReserve(wsDC, baseDomain) {
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			cfPool.ReleaseReservation(wsDC, baseDomain)
+			result.Reason = "cancelled"
+			result.Err = err
+			return nil, result
 		}
 		attempted = true
 		host := cfProxyHost(wsDC, baseDomain)
@@ -261,6 +277,15 @@ func (c *mtProtoCFProxyConnector) Connect(
 		} else {
 			ws, err = c.dial(host, "/apiws", prefix)
 		}
+		if cancelled := ctx.Err(); cancelled != nil {
+			if ws != nil {
+				ws.Close()
+			}
+			cfPool.ReleaseReservation(wsDC, baseDomain)
+			result.Reason = "cancelled"
+			result.Err = cancelled
+			return nil, result
+		}
 		if err != nil {
 			lastErr = err
 			kind := classifyCFFailure(err)
@@ -280,6 +305,13 @@ func (c *mtProtoCFProxyConnector) Connect(
 		}
 
 		stream, err := mtProtoWebSocketConn(ws, request.RelayInit, host)
+		if cancelled := ctx.Err(); cancelled != nil {
+			ws.Close()
+			cfPool.ReleaseReservation(wsDC, baseDomain)
+			result.Reason = "cancelled"
+			result.Err = cancelled
+			return nil, result
+		}
 		if err != nil {
 			ws.Close()
 			lastErr = err
@@ -320,12 +352,18 @@ func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error
 }
 
 func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	dialer := compatibleWebSocketTLSDialer{ctx: ctx}
 	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
 	}
 	logDomainConnectFailure(logPrefix, domain, domain, err)
+	if cancelled := ctx.Err(); cancelled != nil {
+		return nil, cancelled
+	}
 
 	resolved, resolveErr := resolvePreferredIPs(domain, 10)
 	if resolveErr != nil {
@@ -334,6 +372,9 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 
 	lastErr := err
 	for _, ip := range resolved.Preferred() {
+		if cancelled := ctx.Err(); cancelled != nil {
+			return nil, cancelled
+		}
 		ws, lastErr = dialer.connect(ip, domain, path, 10)
 		if lastErr == nil {
 			return ws, nil
