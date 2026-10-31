@@ -1,42 +1,43 @@
-# Release checklist — v1.11.5 stable patch
+# Release checklist — v1.11.6
 
-Статус: **подготовка; Git tag и GitHub Release ещё не созданы**. Любая отметка PASS относится только к указанной сборке/коммиту.
+**Стадия:** подготовка stable patch. CI и подпись итогового Release APK должны проверяться по точному release commit. Отметки ниже относятся только к явно указанным проверкам.
 
-## Метаданные, репозиторий и текст
+## Изменения и документация
 
-- [ ] Release-prep PR влит в `main`, известен итоговый release commit SHA.
-- [ ] `releaseVersionName 1.11.5` / `releaseVersionCode 61`, README RU/EN, CHANGELOG и три release notes согласованы.
-- [ ] `./scripts/audit-release.ps1 -ExpectedVersion 1.11.5 -ExpectedVersionCode 61` — PASS на release source.
-- [ ] `./scripts/release.ps1 -Version v1.11.5 -PreflightOnly` — PASS.
-- [x] Тексты на русском и английском и краткое описание GitHub Release подготовлены на release-prep ветке (требуется финальный обзор).
-- [ ] Нет секретов, приватных конфигураций и случайных отслеживаемых файлов; согласованы ссылки/известные ограничения.
-- [ ] Выбран точный tag commit, `v1.11.5` ещё не существует ни в Git, ни в GitHub Releases.
+- [x] #125 / PR #129: CF pool exhaustion и ограниченные reconnect интегрированы.
+- [x] #126 / PR #130: отмена устаревших CF TLS-попыток и route generation интегрированы.
+- [ ] PR #131: отдельный Android `applicationId` интегрирован в `main`; имя `TgWsProxy` сохранено.
+- [x] `versionName 1.11.6`, `versionCode 62` и новый package согласованы в исходниках/релизных скриптах.
+- [x] Подготовлены CHANGELOG, README RU/EN, полные заметки RU/EN, краткие Release notes и процесс публикации.
+- [ ] Проверена совместимость установки нового APK и принято решение по [#128](https://github.com/Regstar2/tg-ws-proxy-android/issues/128) без раскрытия конфигураций или иных данных.
 
-## CI и автоматизация
+## Сборка, CI, безопасность
 
-- [x] [PR #123](https://github.com/Regstar2/tg-ws-proxy-android/pull/123), HEAD a7a97052: [CI #40837472081](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/40837472081) Windows CI и Worker transport regression — PASS.
-- [ ] Windows CI и Worker transport regression — PASS **на итоговом release-prep merge commit**.
-- [ ] `scripts/ci.ps1`: Android unit tests, debug build, release metadata audit и native regression — PASS на итоговом source.
-- [ ] `.github/workflows/release.yml` использует точный tag, нет существующего GitHub Release; Actions release-signing secrets доступны.
-- [ ] `aapt` и `apksigner` подтверждают versionName, versionCode, package и release-подпись финального APK.
+- [ ] Windows CI, Android unit tests, Debug build и Worker transport regression PASS на **итоговом PR HEAD**.
+- [ ] Те же обязательные проверки PASS на интегрированном release commit.
+- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.6 -ExpectedVersionCode 62` — PASS.
+- [ ] `scripts/release.ps1 -Version v1.11.6 -PreflightOnly` — PASS.
+- [ ] Финальный Release APK: `aapt` подтверждает package `io.github.regstar2.tgwsproxy`, versionName `1.11.6`, versionCode `62`.
+- [ ] `apksigner` подтверждает релизную подпись; SHA-256 вычислен по финальному APK.
+- [ ] Проверены RU/EN resources, отсутствие секретов, приватных конфигураций и чувствительных сетевых сведений.
 
-## Реальное Android-устройство
+## Приёмка приложения и маршрутов
 
-- [x] На устройстве пользователя подписанный тестовый APK установлен поверх v1.11.4 без удаления данных; локальная Debug-сборка PASS.
-- [x] Пользователь подтвердил запуск плиткой после переключения Wi-Fi → mobile без `CONFIG_CHANGED`, а также приемлемую скорость реакции после обновления.
-- [x] Диагностика тестовой сборки показывает `TILE_START_REQUESTED`, `FG_NOTIFICATION_SUBMITTED` и `TILE_CONFIRMATION_SAVED`. Фактическое отображение SystemUI отдельно от факта отправки уведомления.
-- [ ] На **финальном v1.11.5 Release APK** проверены сохранение данных при обновлении с v1.11.4, реальный RUNNING, Telegram сообщения/медиа, остановка и перезапуск через плитку.
-- [ ] Свежая установка: сначала требуется успешный запуск из приложения; без него плитка не запускает прокси.
-- [ ] Другие версии Android/OEM, отдельные SOCKS5/AWG/WARP device-сценарии — NOT RUN, не считать PASS.
-- [ ] Проверены ru/en подписи плитки/уведомлений в финальной сборке.
+- [x] Подписанный Debug APK с новым `applicationId` устанавливается и запускается.
+- [ ] Финальный подписанный Release APK устанавливается независимо от старого package и запускается.
+- [ ] Подтверждён MTProto: запуск/остановка прокси, двусторонние сообщения и медиа.
+- [ ] CF-only exhaustion, восстановление после cooldown, отсутствие неразрешённого fallback.
+- [ ] Отмена старого CF TLS после stop, запуск AWG без устаревшего CF в новом поколении.
+- [ ] Не регрессировали Worker Chunk Relay и Legacy WebSocket в поддерживаемых тестовых сценариях.
+- [ ] Quick Settings, переключение сетей и локализации не регрессировали.
 
-## Публикация и post-release
+## Публикация
 
-- [ ] Аннотированный tag `v1.11.5` отправлен ровно один раз на проверенный `main`.
-- [ ] Release workflow успешно завершился на tagged source и создал **два** файла: `TgWsProxy-Android-v1.11.5-arm64-v8a.apk` и `.apk.sha256`.
-- [ ] Checksum соответствует опубликованному APK; выпуск не содержит Debug APK или локальные данные.
-- [ ] GitHub Release содержит краткий RU body, обе ссылки на полные RU/EN заметки из tag, compare с v1.11.4.
-- [ ] Подтверждены запуск, настройка, уведомление и смена сети **на опубликованном APK**.
-- [ ] После успешной публикации и проверки закрыт исходный report [#121](https://github.com/Regstar2/tg-ws-proxy-android/issues/121); до этого он остаётся открытым.
+- [ ] PR #131 слит и известен SHA интегрированного `main`.
+- [ ] Tag `v1.11.6` отсутствует до публикации, target SHA подтверждён.
+- [ ] Отправлен один аннотированный tag `v1.11.6` без force.
+- [ ] Release workflow PASS, опубликованы ровно APK и `.apk.sha256`.
+- [ ] Проверены SHA-256 опубликованного файла, tag commit и оба языка Release notes.
+- [ ] Финальный опубликованный APK проверен, milestone закрыт только по фактическим результатам.
 
-Ограничения: Flowseal Legacy WebSocket экспериментален; на OEM SystemUI возможны особенности. Успешный Debug smoke **не подтверждает** опубликованный Release APK. `git push origin refs/tags/v1.11.5` запускает **автоматическую публикацию**.
+Подписанный Debug APK и старый CI не заменяют проверку финального Release APK.
