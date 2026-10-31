@@ -62,10 +62,23 @@ func (c *mtProtoRouteConnector) Connect(
 	ctx context.Context,
 	request mtproxyfrontend.OutboundRequest,
 ) (net.Conn, mtproxyfrontend.OutboundResult) {
-	routes := mtProtoRoutesForRequest(getRuntimeSettings(), request)
+	settings := getRuntimeSettings()
+	routes := mtProtoRoutesForRequest(settings, request)
+	ctx = context.WithValue(ctx, mtProtoRouteDecisionKey{}, mtProtoRouteDecision{
+		Routes: routes,
+		Generation: settings.PolicyGen,
+	})
+	if err := ctx.Err(); err != nil {
+		return nil, mtproxyfrontend.OutboundResult{
+			RouteGeneration: settings.PolicyGen,
+			Reason: "cancelled",
+			Err: err,
+		}
+	}
 	if len(routes) == 0 {
 		return nil, mtproxyfrontend.OutboundResult{
 			SelectedBackend: "",
+			RouteGeneration: settings.PolicyGen,
 			Reason:          "no_mtproto_route_available",
 			Err:             fmt.Errorf("no MTProto route available"),
 		}
@@ -77,6 +90,14 @@ func (c *mtProtoRouteConnector) Connect(
 	attempts := 0
 
 	for _, route := range routes {
+		if err := ctx.Err(); err != nil {
+			return nil, mtproxyfrontend.OutboundResult{
+				SelectedBackend: selectedBackend,
+				RouteGeneration: settings.PolicyGen,
+				Reason: "cancelled",
+				Err: err,
+			}
+		}
 		connector := c.connectorForRoute(route)
 		if connector == nil {
 			lastErr = fmt.Errorf("MTProto route %s is unsupported", route)
@@ -91,12 +112,22 @@ func (c *mtProtoRouteConnector) Connect(
 		attemptBackend := mtProtoBackendForRoute(route)
 		fallbackUsed := attempts > 0
 		if fallbackUsed && logInfo != nil {
-			logInfo.Printf("MTProto fallback activated selected_backend=%s attempt_backend=%s previous_reason=%s",
-				selectedBackend, attemptBackend, mtProtoStatusField(lastResult.Reason))
+			logInfo.Printf("MTProto fallback activated route_generation=%d selected_backend=%s attempt_backend=%s previous_reason=%s",
+				settings.PolicyGen, selectedBackend, attemptBackend, mtProtoStatusField(lastResult.Reason))
 		}
 		attempts++
 
 		conn, result := connector.Connect(ctx, request)
+		if err := ctx.Err(); err != nil {
+			if conn != nil { _ = conn.Close() }
+			return nil, mtproxyfrontend.OutboundResult{
+				SelectedBackend: selectedBackend,
+				RouteGeneration: settings.PolicyGen,
+				Reason: "cancelled",
+				Err: err,
+			}
+		}
+		result.RouteGeneration = settings.PolicyGen
 		result.SelectedBackend = selectedBackend
 		result.FallbackUsed = fallbackUsed
 		if result.ActualBackend == "" && conn != nil && result.Err == nil {
@@ -115,8 +146,8 @@ func (c *mtProtoRouteConnector) Connect(
 			lastErr = fmt.Errorf("MTProto route %s failed: %s", route, result.Reason)
 		}
 		if logInfo != nil && (result.Reason != "cfproxy_unavailable" || mtproxyfrontend.LogCFPoolMiss(result.CFPoolMissCount)) {
-			logInfo.Printf("MTProto route candidate failed route=%s selected_backend=%s attempt_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
-				route, selectedBackend, attemptBackend, fallbackUsed, mtProtoStatusField(lastResult.Reason), result.CFPoolMissCount, lastErr)
+			logInfo.Printf("MTProto route candidate failed route_generation=%d route=%s selected_backend=%s attempt_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
+				settings.PolicyGen, route, selectedBackend, attemptBackend, fallbackUsed, mtProtoStatusField(lastResult.Reason), result.CFPoolMissCount, lastErr)
 		}
 	}
 
@@ -124,6 +155,7 @@ func (c *mtProtoRouteConnector) Connect(
 		lastResult.Reason = "all_mtproto_routes_failed"
 	}
 	lastResult.SelectedBackend = selectedBackend
+	lastResult.RouteGeneration = settings.PolicyGen
 	lastResult.ActualBackend = ""
 	lastResult.FallbackUsed = attempts > 1
 	if lastErr == nil {
