@@ -763,6 +763,10 @@ func wsConnectWithCurves(ip, domain, path string, timeout float64, curves []tls.
 }
 
 func wsConnectWithCurvesContext(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
+	return wsConnectWithCurvesContextDial(ctx, ip, domain, path, timeout, curves, nil)
+}
+
+func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -781,7 +785,10 @@ func wsConnectWithCurvesContext(ctx context.Context, ip, domain, path string, ti
 
 	tlsCfg := webSocketTLSConfig(domain, curves)
 
-	rawConn, err := dialer.DialContext(ctx, "tcp", joinAddr(ip, 443))
+	if dialContext == nil {
+		dialContext = dialer.DialContext
+	}
+	rawConn, err := dialContext(ctx, "tcp", joinAddr(ip, 443))
 	if err != nil {
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
