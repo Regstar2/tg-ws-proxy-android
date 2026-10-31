@@ -276,7 +276,8 @@ func classifyWorkerConnectFailure(err error) string {
 }
 
 func dialWorkerCandidate(domain, path, logPrefix string) (*RawWebSocket, error) {
-	ws, err := wsConnect(domain, domain, path, 10)
+	dialer := compatibleWebSocketTLSDialer{}
+	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
 	}
@@ -286,7 +287,7 @@ func dialWorkerCandidate(domain, path, logPrefix string) (*RawWebSocket, error) 
 	}
 	lastErr := err
 	for _, ip := range resolved.Preferred() {
-		ws, lastErr = wsConnect(ip, domain, path, 10)
+		ws, lastErr = dialer.connect(ip, domain, path, 10)
 		if lastErr == nil {
 			return ws, nil
 		}

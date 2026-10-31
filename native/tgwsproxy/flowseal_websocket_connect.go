@@ -8,10 +8,10 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -77,30 +77,18 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 	if timeout <= 0 {
 		timeout = 10
 	}
-	dialTimeout := timeout
-	if dialTimeout > 10 {
-		dialTimeout = 10
-	}
-
-	dialer := &net.Dialer{Timeout: time.Duration(dialTimeout * float64(time.Second))}
-	rawConn, err := dialer.DialContext(ctx, "tcp", joinAddr(host, 443))
+	var profileState atomic.Int32
+	tlsNetConn, err := dialWorkerTLS(ctx, "tcp", joinAddr(host, 443), flowsealWorkerVerifiedTLSConfig(domain), time.Duration(timeout*float64(time.Second)), &profileState)
 	if err != nil {
-		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
+		return nil, err
 	}
-	setSockOpts(rawConn)
-	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	tlsConn := tlsNetConn.(*tls.Conn)
+	stopCancel := context.AfterFunc(ctx, func() { _ = tlsConn.Close() })
 	defer stopCancel()
 
 	// The deployed Worker is authenticated by its DNS name. Do not reuse the
 	// historical insecure Flowseal test profile for production connections.
-	tlsConn := tls.Client(rawConn, flowsealWorkerVerifiedTLSConfig(domain))
 	deadline := time.Now().Add(time.Duration(timeout * float64(time.Second)))
-	_ = tlsConn.SetDeadline(deadline)
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = tlsConn.Close()
-		return nil, &wsStageError{Stage: "tls_handshake", Err: err}
-	}
-	_ = tlsConn.SetDeadline(time.Time{})
 
 	keyBytes := make([]byte, 16)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -155,7 +143,7 @@ func connectFlowsealRawWebSocketContext(ctx context.Context, host, domain, path 
 		if logInfo != nil {
 			state := tlsConn.ConnectionState()
 			logInfo.Printf("MTProto Worker transport ready session_id=%s remote=%s tls_version=%x cipher=%x tls_record_sizing=fixed worker_revision=%s",
-				flowsealSessionIDFromPath(path), rawConn.RemoteAddr(), state.Version, state.CipherSuite,
+				flowsealSessionIDFromPath(path), tlsConn.RemoteAddr(), state.Version, state.CipherSuite,
 				flowsealResponseHeader(responseLines, "X-Tgws-Worker-Revision"))
 		}
 		return &flowsealRawWebSocket{

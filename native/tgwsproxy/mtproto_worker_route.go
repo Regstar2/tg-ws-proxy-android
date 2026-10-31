@@ -114,9 +114,9 @@ func (c *mtProtoRouteConnector) Connect(
 		if lastErr == nil {
 			lastErr = fmt.Errorf("MTProto route %s failed: %s", route, result.Reason)
 		}
-		if logInfo != nil {
-			logInfo.Printf("MTProto route candidate failed route=%s selected_backend=%s attempt_backend=%s fallback_used=%t reason=%s error=%v",
-				route, selectedBackend, attemptBackend, fallbackUsed, mtProtoStatusField(lastResult.Reason), lastErr)
+		if logInfo != nil && (result.Reason != "cfproxy_unavailable" || mtproxyfrontend.LogCFPoolMiss(result.CFPoolMissCount)) {
+			logInfo.Printf("MTProto route candidate failed route=%s selected_backend=%s attempt_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
+				route, selectedBackend, attemptBackend, fallbackUsed, mtProtoStatusField(lastResult.Reason), result.CFPoolMissCount, lastErr)
 		}
 	}
 

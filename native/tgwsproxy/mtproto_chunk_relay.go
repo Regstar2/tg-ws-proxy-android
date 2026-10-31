@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tg-ws-proxy/mtproxyfrontend"
@@ -67,8 +68,9 @@ type mtProtoChunkRelayConn struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 
-	closeMu sync.Mutex
-	closed  bool
+	closeMu         sync.Mutex
+	closed          bool
+	tlsProfileState atomic.Int32
 }
 
 func chunkRelayQuotaResetFromHeaders(headers http.Header, now time.Time) time.Time {
@@ -220,19 +222,21 @@ func (c *mtProtoChunkRelayConn) freshHTTPRequest(
 		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true, // Match the existing Flowseal Worker TLS policy in this experiment.
+		ServerName:         c.domain,
+		NextProtos:         []string{"http/1.1"},
+		ClientSessionCache: mtProtoChunkRelayTLSCache,
+	}
 	transport := &http.Transport{
 		Proxy:               nil,
-		DialContext:         dialer.DialContext,
+		DialTLSContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialWorkerTLS(ctx, network, address, tlsConfig, 10*time.Second, &c.tlsProfileState)
+		},
 		DisableKeepAlives:   true,
 		ForceAttemptHTTP2:   false,
 		TLSHandshakeTimeout: 10 * time.Second,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // Match the existing Flowseal Worker TLS policy in this experiment.
-			ServerName:         c.domain,
-			NextProtos:         []string{"http/1.1"},
-			ClientSessionCache: mtProtoChunkRelayTLSCache,
-		},
+		TLSClientConfig: tlsConfig,
 	}
 	client := &http.Client{Transport: transport}
 	defer transport.CloseIdleConnections()
