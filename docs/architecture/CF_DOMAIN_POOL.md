@@ -10,10 +10,11 @@ endpoint, even when multiple IP addresses are tried. DNS, TCP and HTTP failures
 do not trigger this TLS fallback. The endpoint reservation and cooldown still
 apply to the complete attempt.
 
-This applies to CF Proxy connections from both frontends; direct WebSocket and
-Worker TLS settings are unchanged. The primary CF Proxy ClientHello does not
+This applies to CF Proxy connections from both frontends; direct WebSocket TLS
+settings are unchanged. The primary CF Proxy ClientHello does not
 offer hybrid post-quantum key exchange, and endpoint availability still depends
-on the network.
+on the network. Telegram Worker TLS compatibility is described separately in
+`docs/cloudflare-worker.md`.
 
 ## v1.4.0 CF domain auto-update
 

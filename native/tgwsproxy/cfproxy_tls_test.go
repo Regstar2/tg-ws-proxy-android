@@ -19,7 +19,7 @@ func TestCFProxyTLSClientHelloUsesClassicalGroups(t *testing.T) {
 		return nil, errors.New("captured ClientHello")
 	}})
 	go serverTLS.Handshake()
-	config := webSocketTLSConfig("example.test", cfProxyTLSCurves())
+	config := webSocketTLSConfig("example.test", classicalTLSCurves())
 	_ = tls.Client(client, config).Handshake()
 	curves := <-got
 	if !reflect.DeepEqual(curves, []tls.CurveID{tls.X25519, tls.CurveP256}) {
@@ -33,7 +33,7 @@ func TestCFProxyTLSClientHelloUsesClassicalGroups(t *testing.T) {
 func TestCFProxyTLSFallbackIsBoundedPerDomain(t *testing.T) {
 	primaryErr := &wsStageError{Stage: "tls_handshake", Err: errors.New("handshake timeout")}
 	var calls [][]tls.CurveID
-	d := cfProxyTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
+	d := compatibleWebSocketTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
 		calls = append(calls, curves)
 		if curves == nil {
 			return nil, &wsStageError{Stage: "tcp_dial", Err: errors.New("offline")}
@@ -53,7 +53,7 @@ func TestCFProxyTLSFallbackIsBoundedPerDomain(t *testing.T) {
 func TestCFProxyTLSFallbackSuccess(t *testing.T) {
 	socket := &RawWebSocket{}
 	count := 0
-	d := cfProxyTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
+	d := compatibleWebSocketTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
 		count++
 		if curves != nil {
 			return nil, &wsStageError{Stage: "tls_handshake", Err: errors.New("handshake failed")}
@@ -74,7 +74,7 @@ func TestCFProxyTLSDoesNotRetryNonTLSFailures(t *testing.T) {
 		&WsHandshakeError{StatusCode: 503},
 	} {
 		calls := 0
-		d := cfProxyTLSDialer{dial: func(_, _, _ string, _ float64, _ []tls.CurveID) (*RawWebSocket, error) {
+		d := compatibleWebSocketTLSDialer{dial: func(_, _, _ string, _ float64, _ []tls.CurveID) (*RawWebSocket, error) {
 			calls++
 			return nil, failure
 		}}
@@ -89,7 +89,7 @@ func TestCFProxyTLSDoesNotStartFallbackAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	calls := 0
-	d := cfProxyTLSDialer{ctx: ctx, dial: func(_, _, _ string, _ float64, _ []tls.CurveID) (*RawWebSocket, error) {
+	d := compatibleWebSocketTLSDialer{ctx: ctx, dial: func(_, _, _ string, _ float64, _ []tls.CurveID) (*RawWebSocket, error) {
 		calls++
 		cancel()
 		return nil, &wsStageError{Stage: "tls_handshake", Err: errors.New("handshake timeout")}

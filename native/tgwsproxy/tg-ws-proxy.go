@@ -709,26 +709,26 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 	return wsConnectWithCurves(ip, domain, path, timeout, nil)
 }
 
-type cfProxyTLSDialer struct {
+type compatibleWebSocketTLSDialer struct {
 	defaultAttempted bool
 	ctx              context.Context
 	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
 }
 
-func (d *cfProxyTLSDialer) connect(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+func (d *compatibleWebSocketTLSDialer) connect(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
 	dial := d.dial
 	if dial == nil {
 		dial = wsConnectWithCurves
 	}
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
-	ws, err := dial(ip, domain, path, timeout, cfProxyTLSCurves())
+	ws, err := dial(ip, domain, path, timeout, classicalTLSCurves())
 	var stageErr *wsStageError
 	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) || (d.ctx != nil && d.ctx.Err() != nil) {
 		return ws, err
 	}
 	d.defaultAttempted = true
 	if logDebug != nil {
-		logDebug.Printf("CF proxy TLS fallback profile=go_default reason=classical_handshake_failed")
+		logDebug.Printf("WebSocket TLS fallback profile=go_default reason=classical_handshake_failed")
 	}
 	fallback, fallbackErr := dial(ip, domain, path, timeout, nil)
 	if fallbackErr == nil {
@@ -738,7 +738,7 @@ func (d *cfProxyTLSDialer) connect(ip, domain, path string, timeout float64) (*R
 	return nil, err
 }
 
-func cfProxyTLSCurves() []tls.CurveID { return []tls.CurveID{tls.X25519, tls.CurveP256} }
+func classicalTLSCurves() []tls.CurveID { return []tls.CurveID{tls.X25519, tls.CurveP256} }
 
 func webSocketTLSConfig(domain string, curves []tls.CurveID) *tls.Config {
 	return &tls.Config{
@@ -1724,7 +1724,8 @@ type defaultWorkerPoolDialer struct{}
 
 func (defaultWorkerPoolDialer) DialWorker(key WorkerPoolKey) (*RawWebSocket, error) {
 	path := buildWorkerWSPath(key.DC, key.Dst, key.Media, "")
-	ws, err := wsConnect(key.WorkerDomain, key.WorkerDomain, path, 10)
+	dialer := compatibleWebSocketTLSDialer{}
+	ws, err := dialer.connect(key.WorkerDomain, key.WorkerDomain, path, 10)
 	if err == nil {
 		return ws, nil
 	}
@@ -1735,7 +1736,7 @@ func (defaultWorkerPoolDialer) DialWorker(key WorkerPoolKey) (*RawWebSocket, err
 	}
 	lastErr := err
 	for _, ip := range resolved.Preferred() {
-		ws, lastErr = wsConnect(ip, key.WorkerDomain, path, 10)
+		ws, lastErr = dialer.connect(ip, key.WorkerDomain, path, 10)
 		if lastErr == nil {
 			return ws, nil
 		}

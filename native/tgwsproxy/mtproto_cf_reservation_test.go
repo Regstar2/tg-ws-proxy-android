@@ -79,7 +79,7 @@ func TestMtProtoCFProxyFallbackKeepsReservationDuringReconnectBurst(t *testing.T
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var dials atomic.Int32
 	connector := &mtProtoCFProxyConnector{dial: func(_, _, _ string) (mtProtoFrameSocket, error) {
-		dialer := cfProxyTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
+		dialer := compatibleWebSocketTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
 			dials.Add(1)
 			if curves != nil {
 				close(started)

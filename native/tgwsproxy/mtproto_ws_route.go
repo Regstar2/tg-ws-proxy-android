@@ -320,7 +320,7 @@ func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error
 }
 
 func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
-	dialer := cfProxyTLSDialer{ctx: ctx}
+	dialer := compatibleWebSocketTLSDialer{ctx: ctx}
 	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
