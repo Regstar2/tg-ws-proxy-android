@@ -37,6 +37,8 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 **Source version:** `1.11.5` (`versionCode 61`)  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
+**Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
+
 | Area | Status |
 |---|---|
 | MTProto Proxy over `cf_proxy_ws` | Primary use case; manually verified on mobile data and Wi-Fi |

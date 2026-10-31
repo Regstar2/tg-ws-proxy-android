@@ -47,7 +47,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.amurcanov.tgwsproxy"
+        applicationId = "io.github.regstar2.tgwsproxy"
         minSdk = 26
         targetSdk = 35
         versionCode = releaseVersionCode

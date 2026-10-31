@@ -3,7 +3,7 @@
     <application>
         <!-- ADB/shell-only helper for controlled Worker transport acceptance. Never in release. -->
         <receiver
-            android:name=".WorkerSmokeConfigReceiver"
+            android:name="com.amurcanov.tgwsproxy.WorkerSmokeConfigReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
     </application>

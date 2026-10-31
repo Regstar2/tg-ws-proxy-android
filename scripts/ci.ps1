@@ -149,6 +149,10 @@ if (-not (Test-Path $debugApk)) {
     throw "Expected debug APK was not produced: $debugApk"
 }
 
+Write-Host "`n==> Verify packaged Android application identity"
+& (Join-Path $PSScriptRoot 'tests\application-identity-test.ps1') -ApkPath $debugApk
+if ($LASTEXITCODE -ne 0) { throw "Android application identity verification failed." }
+
 $nativeLib = Join-Path $root 'app\src\main\jniLibs\arm64-v8a\libtgwsproxy.so'
 if (-not (Test-Path $nativeLib)) {
     throw "Expected native library was not produced: $nativeLib"
