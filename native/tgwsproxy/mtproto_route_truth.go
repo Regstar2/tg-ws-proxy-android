@@ -1,11 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"tg-ws-proxy/mtproxyfrontend"
 )
+
+type mtProtoRouteDecisionKey struct{}
+
+type mtProtoRouteDecision struct {
+	Routes []routeKind
+	Generation uint64
+}
 
 type mtProtoAttemptTruth struct {
 	SelectedBackend string
@@ -29,6 +37,7 @@ func mtProtoAttemptTruthForRoutes(routes []routeKind, attempt routeKind) mtProto
 }
 
 func logMtProtoRouteAttempt(
+	ctx context.Context,
 	request mtproxyfrontend.OutboundRequest,
 	attempt routeKind,
 	detailsFormat string,
@@ -37,16 +46,23 @@ func logMtProtoRouteAttempt(
 	if logInfo == nil {
 		return
 	}
-	truth := mtProtoAttemptTruthForRoutes(
-		mtProtoRoutesForRequest(getRuntimeSettings(), request),
-		attempt,
-	)
+	decision, ok := ctx.Value(mtProtoRouteDecisionKey{}).(mtProtoRouteDecision)
+	if !ok {
+		settings := getRuntimeSettings()
+		decision = mtProtoRouteDecision{
+			Routes: mtProtoRoutesForRequest(settings, request),
+			Generation: settings.PolicyGen,
+		}
+	}
+	truth := mtProtoAttemptTruthForRoutes(decision.Routes, attempt)
 	details := strings.TrimSpace(fmt.Sprintf(detailsFormat, detailsArgs...))
 	if details != "" {
 		details = " " + details
 	}
 	logInfo.Printf(
-		"MTProto route truth frontend=MTProto selected_backend=%s attempt_backend=%s actual_backend=none fallback_used=%t reason=connecting dc=%d media=%t transport=%s%s",
+		"MTProto route truth frontend=MTProto session_id=%s route_generation=%d selected_backend=%s attempt_backend=%s actual_backend=none fallback_used=%t reason=connecting dc=%d media=%t transport=%s%s",
+		mtproxyfrontend.SessionIDForRequest(request),
+		decision.Generation,
 		truth.SelectedBackend,
 		truth.AttemptBackend,
 		truth.FallbackUsed,

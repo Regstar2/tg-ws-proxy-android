@@ -84,6 +84,7 @@ type Runtime struct {
 	mu        sync.Mutex
 	listener  net.Listener
 	cancel    context.CancelFunc
+	runCtx    context.Context
 	logger    Logger
 	connector OutboundConnector
 
@@ -223,6 +224,7 @@ func (r *Runtime) Start(config Config) StartResult {
 
 	r.listener = listener
 	r.cancel = cancel
+	r.runCtx = ctx
 	if r.connector == nil {
 		r.status = StatusListeningLocalOnly
 	} else {
@@ -244,9 +246,11 @@ func (r *Runtime) Stop() error {
 		return ErrNotRunning
 	}
 	r.cancel = nil
+	r.runCtx = nil
 	r.listener = nil
 	r.status = StatusStopped
 	r.lastError = ""
+	r.activeConnections.Store(0)
 	r.mu.Unlock()
 
 	cancel()
@@ -336,6 +340,10 @@ func (r *Runtime) acceptLoop(ctx context.Context, listener net.Listener, config 
 				continue
 			}
 		}
+		if ctx.Err() != nil {
+			_ = conn.Close()
+			return
+		}
 		r.totalConnections.Add(1)
 		r.activeConnections.Add(1)
 		go r.handleConnection(ctx, conn, config)
@@ -380,8 +388,16 @@ func (r *Runtime) restartListener(
 }
 
 func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Config) {
-	defer r.activeConnections.Add(-1)
+	defer func() {
+		r.mu.Lock()
+		if r.runCtx == ctx {
+			r.activeConnections.Add(-1)
+		}
+		r.mu.Unlock()
+	}()
 	defer conn.Close()
+	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopCancel()
 	remote := conn.RemoteAddr()
 	if r.connector == nil {
 		r.log("MTProto frontend accepted local connection remote=%s outbound=%s", remote, OutboundUnsupported)
@@ -396,11 +412,14 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		config.FakeTLSMaskingPassthrough,
 		config.ForceTestDC,
 	)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		var passthrough *FakeTLSPassthroughRequest
 		if errors.As(err, &passthrough) {
 			r.noteFakeTLSPassthrough()
-			r.updateRouteTruth(OutboundResult{
+			r.updateRouteTruthFor(ctx,OutboundResult{
 				SelectedBackend: r.connector.Capability().SelectedBackend,
 				Reason:          "fake_tls_masking_passthrough",
 			})
@@ -408,7 +427,7 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 				remote, passthrough.Domain, len(passthrough.InitialData))
 			if passErr := proxyFakeTLSPassthrough(ctx, conn, passthrough.Domain, passthrough.InitialData); passErr != nil {
 				r.noteFakeTLSPassthroughFailure(passErr)
-				r.updateRouteTruth(OutboundResult{
+				r.updateRouteTruthFor(ctx,OutboundResult{
 					SelectedBackend: r.connector.Capability().SelectedBackend,
 					Reason:          "fake_tls_masking_passthrough_failed",
 					Err:             passErr,
@@ -428,7 +447,7 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 				r.noteFakeTLSError(err)
 			}
 		}
-		r.updateRouteTruth(OutboundResult{
+		r.updateRouteTruthFor(ctx,OutboundResult{
 			SelectedBackend: r.connector.Capability().SelectedBackend,
 			Reason:          "handshake_failed",
 			Err:             err,
@@ -442,7 +461,7 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 
 	sessionID := SessionIDForRequest(request)
 	outbound, result := r.connector.Connect(ctx, request)
-	r.updateRouteTruth(result)
+	r.updateRouteTruthFor(ctx,result)
 	logRequest := result.Reason != "cfproxy_unavailable" || LogCFPoolMiss(result.CFPoolMissCount)
 	if logRequest {
 		r.log("MTProto route request session_id=%s remote=%s signed_dc=%d dc=%d media=%t test_dc=%t transport=%s selected_backend=%s",
@@ -450,8 +469,8 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 	}
 	if result.Err != nil || outbound == nil {
 		if logRequest {
-			r.log("MTProto route failed frontend=MTProto session_id=%s signed_dc=%d dc=%d media=%t worker_dst=none selected_backend=%s actual_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
-				sessionID, request.SignedDC, request.DCID, request.IsMedia,
+			r.log("MTProto route failed frontend=MTProto session_id=%s route_generation=%d signed_dc=%d dc=%d media=%t worker_dst=none selected_backend=%s actual_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
+				sessionID, result.RouteGeneration, request.SignedDC, request.DCID, request.IsMedia,
 				emptyStatusField(result.SelectedBackend), emptyStatusField(result.ActualBackend),
 				result.FallbackUsed, emptyStatusField(result.Reason), result.CFPoolMissCount, result.Err)
 		}
@@ -465,8 +484,8 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 	}
 	workerDst := emptyStatusField(diagnostics.WorkerDst)
 
-	r.log("MTProto route connected frontend=MTProto session_id=%s signed_dc=%d dc=%d media=%t worker_dst=%s selected_backend=%s actual_backend=%s fallback_used=%t reason=%s",
-		sessionID, request.SignedDC, request.DCID, request.IsMedia, workerDst,
+	r.log("MTProto route connected frontend=MTProto session_id=%s route_generation=%d signed_dc=%d dc=%d media=%t worker_dst=%s selected_backend=%s actual_backend=%s fallback_used=%t reason=%s",
+		sessionID, result.RouteGeneration, request.SignedDC, request.DCID, request.IsMedia, workerDst,
 		result.SelectedBackend, result.ActualBackend, result.FallbackUsed, result.Reason)
 	bridge := bridgeTransformedStreams(ctx, clientConn, outbound, request.ClientToRelay, request.RelayToClient)
 	bridgeError := "none"
@@ -474,8 +493,9 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		bridgeError = sanitizeStatusField(bridge.Err.Error())
 	}
 	r.log(
-		"MTProto bridge closed frontend=MTProto session_id=%s signed_dc=%d dc=%d media=%t worker_dst=%s selected_backend=%s actual_backend=%s fallback_used=%t first_terminator=%s close_reason=%s up_bytes=%d down_bytes=%d up_chunks=%d down_chunks=%d duration_ms=%d error=%s",
+		"MTProto bridge closed frontend=MTProto session_id=%s route_generation=%d signed_dc=%d dc=%d media=%t worker_dst=%s selected_backend=%s actual_backend=%s fallback_used=%t first_terminator=%s close_reason=%s up_bytes=%d down_bytes=%d up_chunks=%d down_chunks=%d duration_ms=%d error=%s",
 		sessionID,
+		result.RouteGeneration,
 		request.SignedDC,
 		request.DCID,
 		request.IsMedia,
@@ -492,7 +512,7 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		bridge.Duration.Milliseconds(),
 		bridgeError,
 	)
-	r.updateRouteTruth(OutboundResult{
+	r.updateRouteTruthFor(ctx,OutboundResult{
 		SelectedBackend: result.SelectedBackend,
 		ActualBackend:   result.ActualBackend,
 		FallbackUsed:    result.FallbackUsed,
@@ -500,9 +520,12 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 	})
 }
 
-func (r *Runtime) updateRouteTruth(result OutboundResult) {
+func (r *Runtime) updateRouteTruthFor(ctx context.Context, result OutboundResult) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.runCtx != ctx || ctx.Err() != nil {
+		return
+	}
 	r.selectedBackend = result.SelectedBackend
 	r.actualBackend = result.ActualBackend
 	r.fallbackUsed = result.FallbackUsed

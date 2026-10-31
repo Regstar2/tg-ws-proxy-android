@@ -70,7 +70,7 @@ func (c *mtProtoAWGWarpConnector) Connect(
 	}
 
 	address := net.JoinHostPort(host, strconv.Itoa(port))
-	logMtProtoRouteAttempt(request, routeAWGWarp, "target=%s", address)
+	logMtProtoRouteAttempt(ctx,request, routeAWGWarp, "target=%s", address)
 
 	connectCtx, cancelConnect := context.WithTimeout(ctx, c.effectiveConnectTimeout())
 	defer cancelConnect()
