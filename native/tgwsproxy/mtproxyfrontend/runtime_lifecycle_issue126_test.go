@@ -1,15 +1,26 @@
 package mtproxyfrontend
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"testing"
 	"time"
 )
 
+type issue126WaitingConnector struct{}
+
+func (issue126WaitingConnector) Capability() OutboundCapability {
+	return OutboundCapability{Status: "READY", SelectedBackend: "awg_warp"}
+}
+
+func (issue126WaitingConnector) Connect(context.Context, OutboundRequest) (net.Conn, OutboundResult) {
+	return nil, OutboundResult{Reason: "unexpected_connect"}
+}
+
 func TestFrontendStopClosesPendingHandshakeAndRejectsLateState(t *testing.T) {
 	port := reservePort(t)
-	runtime := NewRuntime(nil)
+	runtime := NewRuntime(nil, issue126WaitingConnector{})
 	config := Config{Host: "127.0.0.1", Port: port, Secret: testSecret}
 	if result := runtime.Start(config); result.Err != nil {
 		t.Fatalf("initial start: %v", result.Err)
@@ -48,7 +59,7 @@ func TestFrontendStopClosesPendingHandshakeAndRejectsLateState(t *testing.T) {
 		Reason: "tls_handshake_timeout",
 	})
 	if got := runtime.Status(); got.RouteReason != "awaiting_connection" ||
-		got.SelectedBackend != "" || got.ActiveConnections != 0 {
+		got.SelectedBackend != "awg_warp" || got.ActiveConnections != 0 {
 		t.Fatalf("old session contaminated new frontend: %+v", got)
 	}
 }
