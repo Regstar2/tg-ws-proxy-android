@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
@@ -65,6 +66,47 @@ func TestMtProtoCFProxyConcurrentRequestsReserveEndpoint(t *testing.T) {
 	}
 	if got := sampled.Load(); got > 8 {
 		t.Fatalf("sampled %d of 100 pool misses", got)
+	}
+}
+
+func TestMtProtoCFProxyFallbackKeepsReservationDuringReconnectBurst(t *testing.T) {
+	withRuntimeSettings(t, func(settings runtimeSettings) runtimeSettings {
+		settings.CF.Enabled = true
+		settings.PolicyPresent = false
+		return settings
+	})
+	withTestCFPool(t, []string{"pool.example"})
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var dials atomic.Int32
+	connector := &mtProtoCFProxyConnector{dial: func(_, _, _ string) (mtProtoFrameSocket, error) {
+		dialer := cfProxyTLSDialer{dial: func(_, _, _ string, _ float64, curves []tls.CurveID) (*RawWebSocket, error) {
+			dials.Add(1)
+			if curves != nil {
+				close(started)
+				<-release
+			}
+			return nil, &wsStageError{Stage: "tls_handshake", Err: errors.New("test outage")}
+		}}
+		return dialer.connect("target", "pool.example", "/apiws", 1)
+	}}
+	request := mtproxyfrontend.OutboundRequest{DCID: 2}
+	go func() { defer close(done); connector.Connect(context.Background(), request) }()
+	<-started
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, result := connector.Connect(context.Background(), request); result.Reason != "cfproxy_unavailable" {
+				t.Errorf("unexpected result: %+v", result)
+			}
+		}()
+	}
+	wg.Wait()
+	close(release)
+	<-done
+	if got := dials.Load(); got != 2 {
+		t.Fatalf("dials=%d, want one primary and one fallback", got)
 	}
 }
 

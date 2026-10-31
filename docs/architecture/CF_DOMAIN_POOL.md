@@ -2,12 +2,18 @@
 
 ## CF Proxy TLS compatibility
 
-CF Proxy WebSocket connections offer X25519 and P-256 key exchange groups. Some
-networks time out when Go offers its larger hybrid post-quantum ClientHello,
-while accepting a classical-only ClientHello to the same endpoint. This applies
-to CF Proxy connections from both frontends; direct WebSocket and Worker TLS
-settings are unchanged. The CF Proxy connection no longer offers hybrid
-post-quantum key exchange, and endpoint availability still depends on the network.
+CF Proxy WebSocket connections first offer X25519 and P-256 key exchange groups.
+Some networks time out when Go offers its larger hybrid post-quantum ClientHello,
+while accepting a classical-only ClientHello to the same endpoint. If that TLS
+handshake fails, the runtime can try Go's default ClientHello once per selected
+endpoint, even when multiple IP addresses are tried. DNS, TCP and HTTP failures
+do not trigger this TLS fallback. The endpoint reservation and cooldown still
+apply to the complete attempt.
+
+This applies to CF Proxy connections from both frontends; direct WebSocket and
+Worker TLS settings are unchanged. The primary CF Proxy ClientHello does not
+offer hybrid post-quantum key exchange, and endpoint availability still depends
+on the network.
 
 ## v1.4.0 CF domain auto-update
 

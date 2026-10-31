@@ -709,9 +709,32 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 	return wsConnectWithCurves(ip, domain, path, timeout, nil)
 }
 
-func wsConnectCFProxy(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+type cfProxyTLSDialer struct {
+	defaultAttempted bool
+	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
+}
+
+func (d *cfProxyTLSDialer) connect(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+	dial := d.dial
+	if dial == nil {
+		dial = wsConnectWithCurves
+	}
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
-	return wsConnectWithCurves(ip, domain, path, timeout, cfProxyTLSCurves())
+	ws, err := dial(ip, domain, path, timeout, cfProxyTLSCurves())
+	var stageErr *wsStageError
+	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) {
+		return ws, err
+	}
+	d.defaultAttempted = true
+	if logDebug != nil {
+		logDebug.Printf("CF proxy TLS fallback profile=go_default reason=classical_handshake_failed")
+	}
+	fallback, fallbackErr := dial(ip, domain, path, timeout, nil)
+	if fallbackErr == nil {
+		return fallback, nil
+	}
+	// Preserve the original failure classification for cooldown and DNS fast-skip.
+	return nil, err
 }
 
 func cfProxyTLSCurves() []tls.CurveID { return []tls.CurveID{tls.X25519, tls.CurveP256} }
