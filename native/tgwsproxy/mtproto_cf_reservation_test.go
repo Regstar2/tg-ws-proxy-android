@@ -211,3 +211,87 @@ func TestMtProtoCFPoolExhaustionRespectsFallbackPolicy(t *testing.T) {
 		})
 	}
 }
+
+
+func TestMtProtoCFProxyCancelledDialPreservesPool(t *testing.T) {
+	withRuntimeSettings(t, func(settings runtimeSettings) runtimeSettings {
+		settings.CF.Enabled = true
+		settings.PolicyPresent = false
+		return settings
+	})
+	withTestCFPool(t, []string{"first.example", "second.example"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	completed := make(chan mtproxyfrontend.OutboundResult, 1)
+	var dials atomic.Int32
+	connector := &mtProtoCFProxyConnector{
+		dialContext: func(context.Context, string, string, string) (mtProtoFrameSocket, error) {
+			dials.Add(1)
+			close(started)
+			<-release
+			return nil, errors.New("late TLS timeout")
+		},
+	}
+	go func() {
+		_, result := connector.Connect(ctx, mtproxyfrontend.OutboundRequest{DCID: 2})
+		completed <- result
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first candidate did not start")
+	}
+	cancel()
+	close(release)
+
+	select {
+	case result := <-completed:
+		if result.Reason != "cancelled" || !errors.Is(result.Err, context.Canceled) {
+			t.Fatalf("cancelled connection result=%+v", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled candidate did not return")
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("started %d TLS candidates after cancellation, want 1", got)
+	}
+	availability := cfPool.AvailabilityForDC(2)
+	if len(availability.Candidates) != 2 || len(availability.SkippedCooldown) != 0 || len(availability.SkippedInFlight) != 0 {
+		t.Fatalf("cancelled TLS dial changed domain health or leaked reservation: %+v", availability)
+	}
+
+	recoveryDials := 0
+	recovery := &mtProtoCFProxyConnector{dial: func(_, _, _ string) (mtProtoFrameSocket, error) {
+		recoveryDials++
+		return &fakeMtProtoFrameSocket{}, nil
+	}}
+	conn, result := recovery.Connect(context.Background(), mtproxyfrontend.OutboundRequest{
+		DCID: 2, RelayInit: buildTestInitWithSignedDC(t, 2),
+	})
+	if conn == nil || result.Err != nil || result.ActualBackend != mtProtoCFProxyBackend || recoveryDials != 1 {
+		t.Fatalf("healthy subsequent request failed: result=%+v dials=%d", result, recoveryDials)
+	}
+	conn.Close()
+}
+
+func TestMtProtoCFProxyAlreadyCancelledDoesNotDial(t *testing.T) {
+	withRuntimeSettings(t, func(settings runtimeSettings) runtimeSettings {
+		settings.CF.Enabled = true
+		settings.PolicyPresent = false
+		return settings
+	})
+	withTestCFPool(t, []string{"first.example"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dials := 0
+	connector := &mtProtoCFProxyConnector{dial: func(_, _, _ string) (mtProtoFrameSocket, error) {
+		dials++
+		return nil, errors.New("must not connect")
+	}}
+	conn, result := connector.Connect(ctx, mtproxyfrontend.OutboundRequest{DCID: 2})
+	if conn != nil || result.Reason != "cancelled" || !errors.Is(result.Err, context.Canceled) || dials != 0 {
+		t.Fatalf("cancelled request=%+v dials=%d", result, dials)
+	}
+}
