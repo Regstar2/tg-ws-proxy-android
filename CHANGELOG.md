@@ -4,7 +4,12 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
-## 1.11.5 - pending publication
+## 1.11.6 - pending publication
+- Fixed CF domain pool exhaustion handling: reconnects fail promptly when no domains are eligible, without redundant TLS dials; DC-specific cooldown and configured fallback policies remain respected (#125, PR #129).
+- Cancelled obsolete CF DNS/TCP/TLS/WebSocket attempts on stop or route changes, preventing stale results from altering newer route-generation telemetry (#126, PR #130).
+- Changed the Android application ID to `io.github.regstar2.tgwsproxy` to avoid an installation collision with upstream; this is a separate installation without automatic settings migration. The app display name remains TgWsProxy (PR #131).
+
+## 1.11.5 - 2026-10-29
 - Fixed Quick Settings tile refusing to start an already configured proxy after switching Wi-Fi/mobile data or changing the route: each tile start now rebuilds the runtime from current saved settings and the active network rather than reusing stale runtime tokens or signatures (#122, PR #123).
 - Retained the initial requirement for one successful in-app start, validated the new runtime and frontend, and rejected missing or invalid configuration without falling back to an obsolete snapshot.
 - Made Quick Settings more responsive: configuration preparation is performed off the SystemUI-facing main thread, the tile shows a transitional status immediately, and ACTIVE is reserved for the actual RUNNING frontend.

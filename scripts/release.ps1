@@ -127,8 +127,8 @@ if ($LASTEXITCODE -ne 0) {
 $badging = $badgingLines -join "`n"
 $escapedVersionName = [regex]::Escape($versionName)
 $escapedVersionCode = [regex]::Escape($expectedVersionCode.ToString())
-if ($badging -notmatch "package:\s+name='com\.amurcanov\.tgwsproxy'.*versionCode='$escapedVersionCode'.*versionName='$escapedVersionName'") {
-    throw "Release APK metadata mismatch. Expected com.amurcanov.tgwsproxy versionName=$versionName versionCode=$expectedVersionCode."
+if ($badging -notmatch "package:\s+name='io\.github\.regstar2\.tgwsproxy'.*versionCode='$escapedVersionCode'.*versionName='$escapedVersionName'") {
+    throw "Release APK metadata mismatch. Expected io.github.regstar2.tgwsproxy versionName=$versionName versionCode=$expectedVersionCode."
 }
 Write-Host "Verified package metadata: versionName=$versionName versionCode=$expectedVersionCode"
 

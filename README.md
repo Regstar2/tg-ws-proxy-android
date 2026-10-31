@@ -32,7 +32,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.5` (`versionCode 61`)  
+**Версия исходников:** `1.11.6` (`versionCode 62`)  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
@@ -284,7 +284,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.5
+.\scripts\release.ps1 -Version v1.11.6
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -305,7 +305,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Для v1.11.5 перед тегом проверьте обновление поверх подписанной v1.11.4 без удаления данных, запуск/остановку из приложения и плитки, смену Wi-Fi ↔ mobile, корректность уведомления и соединение Telegram. Финальный подписанный Release APK проверяется отдельно от тестового Debug APK. Актуальные требования перечислены в [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Для v1.11.6 перед тегом проверьте новый Android-пакет, запуск/остановку прокси, Telegram и сетевые маршруты. Из-за нового `applicationId` это отдельная установка без автоматического переноса настроек и профилей. Финальный подписанный Release APK проверяется отдельно от Debug APK. Требования: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
@@ -319,7 +319,7 @@ app\build\outputs\apk\debug\app-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.5` | [docs/releases/v1.11.5.md](docs/releases/v1.11.5.md) |
+| Release notes `1.11.6` | [docs/releases/v1.11.6.md](docs/releases/v1.11.6.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 
