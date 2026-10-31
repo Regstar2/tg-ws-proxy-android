@@ -34,8 +34,10 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Source version:** `1.11.5` (`versionCode 61`)  
+**Source version:** `1.11.6` (`versionCode 62`)  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
+
+**Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
 
 | Area | Status |
 |---|---|
@@ -281,7 +283,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.5
+.\scripts\release.ps1 -Version v1.11.6
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -302,7 +304,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Before tagging v1.11.5, verify a data-preserving signed upgrade from v1.11.4, proxy start/stop from the app and tile, Wi-Fi ↔ mobile switching, notification state and Telegram connectivity. Test the final signed Release APK separately from the pre-release Debug APK. See the [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Before tagging v1.11.6, verify the distinct Android package, proxy start/stop, Telegram and network routes. The new `applicationId` creates a separate installation without automatic settings/profile migration. Test the signed Release APK separately from Debug builds. See the [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
@@ -316,7 +318,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.5` release notes | [docs/releases/v1.11.5_EN.md](docs/releases/v1.11.5_EN.md) |
+| `1.11.6` release notes | [docs/releases/v1.11.6_EN.md](docs/releases/v1.11.6_EN.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 

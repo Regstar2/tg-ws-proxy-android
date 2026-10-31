@@ -2,7 +2,7 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The latest verified published stable release before this preparation is `v1.11.3`; `v1.11.4` is the next stable patch candidate. Do not mark a release check as passed unless it was run against the corresponding integrated candidate or exact tagged build. For v1.11.4, the Xiaomi/HyperOS Quick Settings long-press smoke remains NOT RUN; see [quick-settings-long-press.md](quick-settings-long-press.md).
+The latest published stable release is `v1.11.5`. The planned `v1.11.6` patch includes CF reliability corrections and a distinct Android application ID. Verify the exact release candidate and signed APK before publication; see [the release checklist](../releases/RELEASE_CHECKLIST.md). CI results from an earlier build do not establish final release acceptance.
 
 ## Automated checks
 

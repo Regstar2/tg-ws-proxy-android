@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val releaseVersionCode = 61
-val releaseVersionName = "1.11.5"
+val releaseVersionCode = 62
+val releaseVersionName = "1.11.6"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
 
@@ -47,7 +47,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.amurcanov.tgwsproxy"
+        applicationId = "io.github.regstar2.tgwsproxy"
         minSdk = 26
         targetSdk = 35
         versionCode = releaseVersionCode

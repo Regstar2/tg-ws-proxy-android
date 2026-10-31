@@ -102,7 +102,7 @@ Invoke-CheckedCommand `
 & $dc2ABTest
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
-& $releaseAudit -ExpectedVersion '1.11.5' -ExpectedVersionCode 61
+& $releaseAudit -ExpectedVersion '1.11.6' -ExpectedVersionCode 62
 if ($LASTEXITCODE -ne 0) {
     throw "Release audit failed with exit code $LASTEXITCODE."
 }
@@ -114,12 +114,12 @@ Invoke-CheckedCommand `
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', $releaseAudit,
-        '-ExpectedVersion', '1.11.5',
-        '-ExpectedVersionCode', '61'
+        '-ExpectedVersion', '1.11.6',
+        '-ExpectedVersionCode', '62'
     )
 
 Write-Host "`n==> Validate release-script metadata preflight"
-& $releaseScript -Version 'v1.11.5' -PreflightOnly
+& $releaseScript -Version 'v1.11.6' -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
     throw "Release-script preflight failed with exit code $LASTEXITCODE."
 }
@@ -148,6 +148,10 @@ $debugApk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
 if (-not (Test-Path $debugApk)) {
     throw "Expected debug APK was not produced: $debugApk"
 }
+
+Write-Host "`n==> Verify packaged Android application identity"
+& (Join-Path $PSScriptRoot 'tests\application-identity-test.ps1') -ApkPath $debugApk
+if ($LASTEXITCODE -ne 0) { throw "Android application identity verification failed." }
 
 $nativeLib = Join-Path $root 'app\src\main\jniLibs\arm64-v8a\libtgwsproxy.so'
 if (-not (Test-Path $nativeLib)) {

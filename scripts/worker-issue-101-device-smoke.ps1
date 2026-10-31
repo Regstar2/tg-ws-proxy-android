@@ -69,9 +69,9 @@ if ($connected.Count -ne 1) {
     throw "Expected one authorized Android device, found $($connected.Count)."
 }
 $deviceId = $connected[0]
-$package = 'com.amurcanov.tgwsproxy'
-$receiver = "$package/$package.WorkerSmokeConfigReceiver"
-$activity = "$package/$package.MainActivity"
+$package = 'io.github.regstar2.tgwsproxy'
+$receiver = "$package/com.amurcanov.tgwsproxy.WorkerSmokeConfigReceiver"
+$activity = "$package/com.amurcanov.tgwsproxy.MainActivity"
 
 . (Join-Path $PSScriptRoot 'worker-issue-101-native-command.ps1')
 
@@ -89,7 +89,7 @@ function Invoke-WorkerSmokeBroadcast {
     )
     $arguments = @(
         'shell', 'am', 'broadcast', '--include-stopped-packages',
-        '-n', $receiver, '-a', "com.amurcanov.tgwsproxy.action.$Action"
+        '-n', $receiver, '-a', "$package.action.$Action"
     )
     if ($Action -eq 'WORKER_SMOKE_CONFIGURE') {
         $arguments += @('--es', 'domain', $Domain, '--es', 'transport', $Transport)

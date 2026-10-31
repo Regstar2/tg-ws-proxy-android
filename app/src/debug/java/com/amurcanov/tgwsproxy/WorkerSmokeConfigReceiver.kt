@@ -220,9 +220,9 @@ class WorkerSmokeConfigReceiver : BroadcastReceiver() {
             "last_proxy_port_default_1443_migrated", FlowsealDcPreset.PREF_ENABLED,
         )
         private val INT_KEYS = listOf("last_proxy_port", "last_proxy_pool")
-        const val ACTION_START = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_START"
-        const val ACTION_STOP = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_STOP"
-        const val ACTION_CONFIGURE = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_CONFIGURE"
-        const val ACTION_RESTORE = "com.amurcanov.tgwsproxy.action.WORKER_SMOKE_RESTORE"
+        const val ACTION_START = "io.github.regstar2.tgwsproxy.action.WORKER_SMOKE_START"
+        const val ACTION_STOP = "io.github.regstar2.tgwsproxy.action.WORKER_SMOKE_STOP"
+        const val ACTION_CONFIGURE = "io.github.regstar2.tgwsproxy.action.WORKER_SMOKE_CONFIGURE"
+        const val ACTION_RESTORE = "io.github.regstar2.tgwsproxy.action.WORKER_SMOKE_RESTORE"
     }
 }
