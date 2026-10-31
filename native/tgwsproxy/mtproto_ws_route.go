@@ -203,6 +203,7 @@ func (c *mtProtoCFProxyConnector) Connect(
 
 	var lastErr error
 	var lastReason string
+	attempted := false
 	skipCachedUpstream := false
 	for _, candidate := range selection.Candidates {
 		if skipCachedUpstream && candidate.Source == tgwsroute.CFDomainSourceCachedUpstream {
@@ -212,6 +213,10 @@ func (c *mtProtoCFProxyConnector) Connect(
 			continue
 		}
 		baseDomain := candidate.Domain
+		if !cfPool.TryReserve(wsDC, baseDomain) {
+			continue
+		}
+		attempted = true
 		host := cfProxyHost(wsDC, baseDomain)
 		prefix := fmt.Sprintf("[MTProto] DC%d%s cfproxy", request.DCID, mediaTag(request.IsMedia))
 		logMtProtoRouteAttempt(
@@ -252,6 +257,7 @@ func (c *mtProtoCFProxyConnector) Connect(
 		}
 
 		cfPool.MarkSuccess(wsDC, baseDomain, 0)
+		cfPool.ReleaseReservation(wsDC, baseDomain)
 		stats.connectionsCfProxy.Add(1)
 		result.ActualBackend = mtProtoCFProxyBackend
 		result.Reason = "connected"
@@ -259,6 +265,12 @@ func (c *mtProtoCFProxyConnector) Connect(
 	}
 
 	stats.cfPoolRefillErrors.Add(1)
+	if !attempted {
+		stats.cfPoolMisses.Add(1)
+		result.Reason = "cfproxy_unavailable"
+		result.Err = fmt.Errorf("CF proxy pool has no available domains")
+		return nil, result
+	}
 	if lastReason == "" {
 		lastReason = "cfproxy_all_domains_failed"
 	}
