@@ -62,9 +62,10 @@ type CFDomainCandidate struct {
 }
 
 type CFDomainSelection struct {
-	Candidates      []CFDomainCandidate
-	SkippedCooldown []CFDomainHealth
-	SkippedInFlight []CFDomainHealth
+	Candidates        []CFDomainCandidate
+	SkippedCooldown   []CFDomainHealth
+	SkippedInFlight   []CFDomainHealth
+	RetryAfterSeconds float64
 }
 
 type CFDomainPool struct {
@@ -241,6 +242,37 @@ func (p *CFDomainPool) IsCoolingDown(dc int, domain string) bool {
 	return exists && p.now() < health.CooldownUntil
 }
 
+// AvailabilityForDC observes the pool without advancing rotation or exploration.
+func (p *CFDomainPool) AvailabilityForDC(dc int) CFDomainSelection {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	selection := CFDomainSelection{}
+	seen := make(map[string]struct{})
+	for _, domains := range [][]string{p.manual, p.cachedUpstream, p.builtin} {
+		for _, domain := range domains {
+			if _, ok := seen[domain]; ok {
+				continue
+			}
+			seen[domain] = struct{}{}
+			key := cfDomainHealthKey{DC: dc, Domain: domain}
+			health := p.health[key]
+			if health != nil && now < health.CooldownUntil {
+				selection.SkippedCooldown = append(selection.SkippedCooldown, *health)
+				retry := health.CooldownUntil - now
+				if selection.RetryAfterSeconds == 0 || retry < selection.RetryAfterSeconds {
+					selection.RetryAfterSeconds = retry
+				}
+			} else if _, ok := p.inFlight[key]; ok {
+				selection.SkippedInFlight = append(selection.SkippedInFlight, CFDomainHealth{DC: dc, Domain: domain})
+			} else {
+				selection.Candidates = append(selection.Candidates, CFDomainCandidate{Domain: domain})
+			}
+		}
+	}
+	return selection
+}
+
 func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -262,6 +294,10 @@ func (p *CFDomainPool) SelectionForDC(dc int) CFDomainSelection {
 		health := p.ensureHealthLocked(dc, domain, source)
 		if now < health.CooldownUntil {
 			selection.SkippedCooldown = append(selection.SkippedCooldown, *health)
+			retry := health.CooldownUntil - now
+			if selection.RetryAfterSeconds == 0 || retry < selection.RetryAfterSeconds {
+				selection.RetryAfterSeconds = retry
+			}
 			return
 		}
 		if _, exists := p.inFlight[key]; exists {

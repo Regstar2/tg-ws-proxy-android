@@ -441,16 +441,20 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 	}
 
 	sessionID := SessionIDForRequest(request)
-	r.log("MTProto route request session_id=%s remote=%s signed_dc=%d dc=%d media=%t test_dc=%t transport=%s selected_backend=%s",
-		sessionID, remote, request.SignedDC, request.DCID, request.IsMedia, request.IsTestDC, request.Transport, r.connector.Capability().SelectedBackend)
-
 	outbound, result := r.connector.Connect(ctx, request)
 	r.updateRouteTruth(result)
+	logRequest := result.Reason != "cfproxy_unavailable" || LogCFPoolMiss(result.CFPoolMissCount)
+	if logRequest {
+		r.log("MTProto route request session_id=%s remote=%s signed_dc=%d dc=%d media=%t test_dc=%t transport=%s selected_backend=%s",
+			sessionID, remote, request.SignedDC, request.DCID, request.IsMedia, request.IsTestDC, request.Transport, result.SelectedBackend)
+	}
 	if result.Err != nil || outbound == nil {
-		r.log("MTProto route failed frontend=MTProto session_id=%s signed_dc=%d dc=%d media=%t worker_dst=none selected_backend=%s actual_backend=%s fallback_used=%t reason=%s error=%v",
-			sessionID, request.SignedDC, request.DCID, request.IsMedia,
-			emptyStatusField(result.SelectedBackend), emptyStatusField(result.ActualBackend),
-			result.FallbackUsed, emptyStatusField(result.Reason), result.Err)
+		if logRequest {
+			r.log("MTProto route failed frontend=MTProto session_id=%s signed_dc=%d dc=%d media=%t worker_dst=none selected_backend=%s actual_backend=%s fallback_used=%t reason=%s cf_pool_misses_window=%d error=%v",
+				sessionID, request.SignedDC, request.DCID, request.IsMedia,
+				emptyStatusField(result.SelectedBackend), emptyStatusField(result.ActualBackend),
+				result.FallbackUsed, emptyStatusField(result.Reason), result.CFPoolMissCount, result.Err)
+		}
 		return
 	}
 	defer outbound.Close()

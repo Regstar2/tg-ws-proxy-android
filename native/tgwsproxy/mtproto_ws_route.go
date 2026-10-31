@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
+	"time"
 
 	"tg-ws-proxy/mtproxyfrontend"
 	"tg-ws-proxy/tgwsroute"
@@ -152,6 +154,29 @@ type mtProtoCFProxyConnector struct {
 	dial mtProtoRouteDial
 }
 
+type cfPoolMissWindow struct {
+	started time.Time
+	count   int64
+}
+
+var cfPoolMissSamples = struct {
+	sync.Mutex
+	byDC map[int]cfPoolMissWindow
+}{byDC: make(map[int]cfPoolMissWindow)}
+
+func countCFPoolMiss(dc int, now time.Time) int64 {
+	stats.cfPoolMisses.Add(1)
+	cfPoolMissSamples.Lock()
+	defer cfPoolMissSamples.Unlock()
+	window := cfPoolMissSamples.byDC[dc]
+	if window.started.IsZero() || now.Sub(window.started) >= 30*time.Second || now.Before(window.started) {
+		window = cfPoolMissWindow{started: now}
+	}
+	window.count++
+	cfPoolMissSamples.byDC[dc] = window
+	return window.count
+}
+
 func newMtProtoCFProxyConnector() *mtProtoCFProxyConnector {
 	return &mtProtoCFProxyConnector{
 		dial: defaultMtProtoCFProxyDial,
@@ -194,9 +219,9 @@ func (c *mtProtoCFProxyConnector) Connect(
 	wsDC := effectiveWSHostDC(request.DCID)
 	selection := cfPool.SelectionForDC(wsDC)
 	if len(selection.Candidates) == 0 {
-		stats.cfPoolMisses.Add(1)
+		result.CFPoolMissCount = countCFPoolMiss(wsDC, time.Now())
 		result.Reason = "cfproxy_unavailable"
-		result.Err = fmt.Errorf("CF proxy pool has no available domains")
+		result.Err = cfPoolUnavailableError(wsDC, selection)
 		return nil, result
 	}
 	stats.cfPoolHits.Add(1)
@@ -266,9 +291,9 @@ func (c *mtProtoCFProxyConnector) Connect(
 
 	stats.cfPoolRefillErrors.Add(1)
 	if !attempted {
-		stats.cfPoolMisses.Add(1)
+		result.CFPoolMissCount = countCFPoolMiss(wsDC, time.Now())
 		result.Reason = "cfproxy_unavailable"
-		result.Err = fmt.Errorf("CF proxy pool has no available domains")
+		result.Err = cfPoolUnavailableError(wsDC, cfPool.AvailabilityForDC(wsDC))
 		return nil, result
 	}
 	if lastReason == "" {
@@ -280,6 +305,11 @@ func (c *mtProtoCFProxyConnector) Connect(
 	}
 	result.Err = lastErr
 	return nil, result
+}
+
+func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error {
+	return fmt.Errorf("CF proxy pool unavailable dc=%d eligible=%d cooldown=%d in_flight=%d retry_after_seconds=%.1f",
+		dc, len(selection.Candidates), len(selection.SkippedCooldown), len(selection.SkippedInFlight), selection.RetryAfterSeconds)
 }
 
 func defaultMtProtoCFProxyDial(domain, path, logPrefix string) (mtProtoFrameSocket, error) {
