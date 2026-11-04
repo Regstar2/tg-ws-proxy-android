@@ -48,7 +48,7 @@ class NetworkRoutePolicyRepository(
                 networkType = type,
                 enabledRoutes = active.toSet(),
                 preferredRoute = active.first(),
-                autoStrategy = AutoStrategy.CF_PREFERRED,
+                autoStrategy = parseStrategy(fields["strategy"]) ?: AutoStrategy.CF_PREFERRED,
                 allowFallback = active.size > 1,
                 activeRoutes = active,
                 inactiveRoutes = inactive,
@@ -81,7 +81,7 @@ class NetworkRoutePolicyRepository(
     private fun encodeV2(policy: NetworkRoutePolicy): String {
         val active = policy.activeRoutes.joinToString("|") { it.prefValue }
         val inactive = policy.inactiveRoutes.joinToString("|") { it.prefValue }
-        return "version=2;active=$active;inactive=$inactive"
+        return "version=2;active=$active;inactive=$inactive;strategy=${policy.autoStrategy.prefValue}"
     }
 
     private fun parseRoutes(value: String?): List<RouteKind> {
