@@ -11,6 +11,19 @@
   reset confirmation, restart persistence and accessibility labels.
 - A green unit-test suite does **not** prove real MTProto transport success.
 
+## Isolated Android test installation
+
+Run `scripts/issue-135-device-acceptance.ps1` from the issue branch. It builds
+the debug APK with `-Pissue135IsolatedDeviceTest=true` and installs the separate
+application `io.github.regstar2.tgwsproxy.issue135` using its own data storage.
+The installed release `io.github.regstar2.tgwsproxy` is not uninstalled or
+re-signed. The ordinary debug/release builds retain their original application ID.
+
+The isolated app starts with separate settings, so import only the test
+configuration required by the matrix. Do not run the release and isolated proxy
+simultaneously on the same localhost port. A passing Compose instrumentation
+test is not proof of successful MTProto message or media transport.
+
 ## Device acceptance matrix
 
 Use a debug-enabled Android handset, a working Telegram MTProto proxy account,
