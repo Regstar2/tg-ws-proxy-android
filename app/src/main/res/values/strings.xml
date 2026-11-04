@@ -989,4 +989,5 @@
     <string name="routes_inactive_text">Inactive</string>
     <string name="routes_minimum_one">At least one route must stay enabled</string>
     <string name="routes_live_apply_failed">Route changes saved but not applied to the running proxy</string>
+    <string name="routes_configuration_required">Configuration required</string>
 </resources>
