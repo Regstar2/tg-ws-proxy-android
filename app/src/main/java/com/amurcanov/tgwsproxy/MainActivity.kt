@@ -1457,9 +1457,9 @@ private fun ProxyScreen(
         Log.i("TgWsProxy", RoutePolicyDiagnostics.formatLogLine(snapshot))
         saveReconfigureStatus(
             ReconfigureStatus(
-                type = ReconfigureStatusType.SUCCESS,
+                type = ReconfigureStatusType.SKIPPED,
                 networkType = config.profile.type,
-                message = "action_reconfigure_sent",
+                message = "pending_runtime_apply",
                 updatedAtMs = System.currentTimeMillis(),
             ),
         )
@@ -2021,6 +2021,9 @@ private fun ProxyScreen(
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
+                                    latestReconfigureAction(currentNetworkProfile)
+                                }
                             },
                             onMobilePolicyChange = { policy ->
                                 val normalized = NetworkRoutePolicyEditor.normalize(
@@ -2031,6 +2034,9 @@ private fun ProxyScreen(
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
+                                    latestReconfigureAction(currentNetworkProfile)
+                                }
                             },
                             onResetWifiPolicy = {
                                 routePolicyRepository.reset(NetworkProfileType.WIFI)
@@ -2038,6 +2044,9 @@ private fun ProxyScreen(
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
+                                    latestReconfigureAction(currentNetworkProfile)
+                                }
                                 Toast.makeText(
                                     context,
                                     context.getString(R.string.route_policy_reset_done),
@@ -2050,6 +2059,9 @@ private fun ProxyScreen(
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
+                                    latestReconfigureAction(currentNetworkProfile)
+                                }
                                 Toast.makeText(
                                     context,
                                     context.getString(R.string.route_policy_reset_done),
