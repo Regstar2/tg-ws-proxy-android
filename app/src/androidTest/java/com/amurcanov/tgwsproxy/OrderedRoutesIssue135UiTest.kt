@@ -47,15 +47,21 @@ class OrderedRoutesIssue135UiTest {
         assertCount(3)
     }
 
-    @Test fun toggleOffAppendsToBottomThenOnAppendsToActiveEnd() {
+    @Test fun toggleOffKeepsRowPositionAndOnRestoresOriginalPriority() {
         render()
+        val before = compose.onNodeWithTag("routes.row.cf_proxy_ws")
+            .fetchSemanticsNode().boundsInRoot.top
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").performClick()
         assertCount(2)
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").assertIsOff()
+        assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+        val after = compose.onNodeWithTag("routes.row.cf_proxy_ws")
+            .fetchSemanticsNode().boundsInRoot.top
+        org.junit.Assert.assertEquals(before, after, 1f)
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").performClick()
         assertCount(3)
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").assertIsOn()
-        assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS)
+        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
     }
 
     @Test fun gripDragMovesAcrossTwoRowsInOneGesture() {
@@ -64,7 +70,7 @@ class OrderedRoutesIssue135UiTest {
             .targetContext.resources.displayMetrics.density
         compose.onNodeWithTag("routes.drag.cf_proxy_ws").performTouchInput {
             down(center)
-            moveBy(Offset(0f, 85f * density * 2.2f))
+            moveBy(Offset(0f, 85f * density * 4.2f))
             up()
         }
         assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS)
@@ -92,14 +98,29 @@ class OrderedRoutesIssue135UiTest {
         assertCount(2)
         compose.onNodeWithTag("routes.reset").performScrollTo().performClick()
         compose.onNodeWithTag("routes.reset.confirm").performClick()
-        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+        assertChain(RouteKind.CF_PROXY_WS)
         compose.onNodeWithTag("routes.tab.mobile").performClick()
         assertCount(1)
     }
 
+    @Test fun defaultResetKeepsOnlyCloudflareProxyInBothProfiles() {
+        render()
+        compose.onNodeWithTag("routes.reset").performScrollTo().performClick()
+        compose.onNodeWithTag("routes.reset.confirm").performClick()
+        assertChain(RouteKind.CF_PROXY_WS)
+        compose.onNodeWithTag("routes.tab.mobile").performClick()
+        assertChain(RouteKind.CF_PROXY_WS)
+    }
+
     private fun render() {
         compose.setContent {
-            var wifi by remember { mutableStateOf(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)) }
+            var wifi by remember {
+                mutableStateOf(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                    activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                    displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                        RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                ))
+            }
             var mobile by remember { mutableStateOf(DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE)) }
             MaterialTheme {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
