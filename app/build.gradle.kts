@@ -7,6 +7,7 @@ val releaseVersionCode = 62
 val releaseVersionName = "1.11.6"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
+val issue135IsolatedDeviceTest = providers.gradleProperty("issue135IsolatedDeviceTest").orNull == "true"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -82,6 +83,9 @@ android {
     buildTypes {
         debug {
             versionNameSuffix = "-debug"
+            if (issue135IsolatedDeviceTest) {
+                applicationIdSuffix = ".issue135"
+            }
             if (signedWorkerSmoke) {
                 signingConfig = signingConfigs.findByName("release")
                     ?: error("Signed Worker smoke requires the existing release signing key")
