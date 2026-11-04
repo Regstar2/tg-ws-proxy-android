@@ -42,8 +42,8 @@ class OrderedRoutePolicyMigrationTest {
         val prefs = InMemorySharedPreferences()
         val repo = NetworkRoutePolicyRepository(prefs)
         OrderedRoutePolicyMigration.applyIfNeeded(prefs, repo)
-        val custom = NetworkRoutePolicyEditor.moveEnabledRoute(
-            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), 2, 0)
+        val custom = NetworkRoutePolicyEditor.setRouteEnabled(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), RouteKind.AWG_WARP, true)
         repo.save(custom)
         OrderedRoutePolicyMigration.applyIfNeeded(prefs, repo)
         assertEquals(custom.activeRoutes, repo.load(NetworkProfileType.WIFI).activeRoutes)
