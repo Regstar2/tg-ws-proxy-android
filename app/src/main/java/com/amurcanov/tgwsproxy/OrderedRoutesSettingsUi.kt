@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -64,13 +65,13 @@ internal fun OrderedRoutesSettings(
                 selected = selectedType == NetworkProfileType.WIFI,
                 onClick = { selectedType = NetworkProfileType.WIFI },
                 label = { Text(stringResource(R.string.routes_profile_wifi_tab)) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("routes.tab.wifi"),
             )
             FilterChip(
                 selected = selectedType == NetworkProfileType.MOBILE,
                 onClick = { selectedType = NetworkProfileType.MOBILE },
                 label = { Text(stringResource(R.string.routes_profile_mobile_tab)) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("routes.tab.mobile"),
             )
         }
 
@@ -85,6 +86,7 @@ internal fun OrderedRoutesSettings(
                 text = stringResource(R.string.routes_enabled_count, policy.activeRoutes.size, RouteKind.entries.size),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("routes.count"),
             )
         }
         Card {
@@ -107,6 +109,7 @@ internal fun OrderedRoutesSettings(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
+            modifier = Modifier.testTag("routes.chain"),
             text = if (policy.activeRoutes.size == 1) {
                 stringResource(R.string.routes_no_fallback)
             } else {
@@ -118,7 +121,7 @@ internal fun OrderedRoutesSettings(
         )
         OutlinedButton(
             onClick = { showResetConfirmation = true },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("routes.reset"),
         ) {
             Text(stringResource(R.string.routes_reset_profile))
         }
@@ -132,7 +135,7 @@ internal fun OrderedRoutesSettings(
             title = { Text(stringResource(R.string.routes_reset_profile)) },
             text = { Text(stringResource(R.string.routes_reset_confirmation)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(modifier = Modifier.testTag("routes.confirm_reset"), onClick = {
                     showResetConfirmation = false
                     if (selectedType == NetworkProfileType.WIFI) onResetWifiPolicy()
                     else onResetMobilePolicy()
@@ -163,7 +166,7 @@ private fun OrderedRouteRow(
     val moveDownDescription = stringResource(R.string.routes_move_down, label)
     var dragDistance = 0f
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("routes.row.${route.prefValue}"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -174,6 +177,7 @@ private fun OrderedRouteRow(
             modifier = Modifier
                 .size(42.dp)
                 .semantics { contentDescription = dragDescription }
+                .testTag("routes.drag.${route.prefValue}")
                 .then(
                     if (enabled) Modifier.pointerInput(route, policy.activeRoutes) {
                         detectDragGestures(
@@ -218,12 +222,14 @@ private fun OrderedRouteRow(
             IconButton(
                 onClick = { onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(policy, activeIndex, activeIndex - 1)) },
                 enabled = enabled && activeIndex > 0,
-                modifier = Modifier.semantics { contentDescription = moveUpDescription },
+                modifier = Modifier.semantics { contentDescription = moveUpDescription }
+                    .testTag("routes.up.${route.prefValue}"),
             ) { Text("↑") }
             IconButton(
                 onClick = { onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(policy, activeIndex, activeIndex + 1)) },
                 enabled = enabled && activeIndex < activeCount - 1,
-                modifier = Modifier.semantics { contentDescription = moveDownDescription },
+                modifier = Modifier.semantics { contentDescription = moveDownDescription }
+                    .testTag("routes.down.${route.prefValue}"),
             ) { Text("↓") }
         }
         Switch(
@@ -237,7 +243,7 @@ private fun OrderedRouteRow(
             },
             modifier = Modifier.semantics {
                 contentDescription = context.getString(R.string.routes_toggle_route, label)
-            },
+            }.testTag("routes.toggle.${route.prefValue}"),
         )
     }
 }
