@@ -1,3 +1,13 @@
+## Архив с Xiaomi: подтверждённая блокировка запуска Activity (2026-11-04)
+
+Из полученного `automated-tests-20261104-214712.zip`:
+- JUnit XML: **378 тестов, 0 failures, 0 errors**.
+- `Go tests`: два пакета PASS, временный `mtproxyfrontend.test.exe` заблокирован Windows Security как потенциально нежелательное ПО. Это локальная блокировка, не доказанная ошибка пакета; для Go используется CI.
+- `instrumentation.txt` завершается записью о старте `defaultResetKeepsOnlyCloudflareProxyInBothProfiles`, без результата.
+- В `android-logcat.txt` в 21:47:34.028 подтверждено `MIUILOG- Permission Denied Activity` при запуске `androidx.activity.ComponentActivity` и `Abort background activity starts from 11370` в 21:47:34.039. Запрошенную `ActivityScenario` Activity MIUI не открыл. Появившийся после этого `MainActivity` игнорировался тестом из-за несовпадения Intent.
+- Изменён ограниченный сценарий: перед каждым Compose-тестом выводит основной APK на передний план через `adb shell am start` из контекста shell, а не фоновым `ActivityScenario`. Не нарушает данные и не гарантирует снятия политики MIUI; при повторном отказе сохраняет `activity-launch-denials.txt` внутри ZIP.
+- Последующий `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user` произошёл **до запуска UI-тестов**. Нужна явная авторизация установки USB на телефоне; не обходить системное подтверждение и не удалять основной пакет.
+
 ## Инструментальные тесты на MIUI/Android 14 — повторное зависание (2026-11-04)
 
 Подтверждённое наблюдение при локальном запуске `scripts/issue-135-rebuild-device.ps1`: сборка Gradle (`71 actionable tasks`) и обе установки `adb install -r` завершились успешно, но прямой `AndroidJUnitRunner` не выдаёт окончания первого теста `defaultResetKeepsOnlyCloudflareProxyInBothProfiles`. Этот тест отмечен как **BLOCKED**, а не PASS. Причину пока нельзя определить без `logcat` и отметок из процесса. В этом же локальном запуске Windows заблокировал временный исполняемый файл Go-тестов `mtproxyfrontend.test.exe` как подозрительное ПО. Это отдельный **BLOCKED_ENV**, а не подтверждение дефекта Go; не следует отключать антивирус.
