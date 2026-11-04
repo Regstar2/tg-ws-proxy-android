@@ -3,6 +3,7 @@ package com.amurcanov.tgwsproxy
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,8 +86,11 @@ internal fun OrderedRoutesSettings(
     var dragDistancePx by remember(selectedNetwork) { mutableFloatStateOf(0f) }
     val rowStridePx = with(LocalDensity.current) { 85.dp.toPx() }
     val dragStartIndex = policy.activeRoutes.indexOf(draggedRoute)
-    val dragTargetIndex = RouteDragTarget.index(
-        dragStartIndex, policy.activeRoutes.size, dragDistancePx, rowStridePx
+    val activeSlots = policy.displayOrder.indices.filter {
+        policy.displayOrder[it] in policy.enabledRoutes
+    }
+    val dragTargetIndex = RouteDragTarget.indexForDisplaySlots(
+        dragStartIndex, policy.displayOrder, policy.activeRoutes, dragDistancePx, rowStridePx
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -155,7 +159,7 @@ internal fun OrderedRoutesSettings(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
             ),
         ) {
-            (policy.activeRoutes + policy.inactiveRoutes).forEachIndexed { position, route ->
+            policy.displayOrder.forEachIndexed { position, route ->
                 key(route) {
                     if (position > 0) {
                         HorizontalDivider(
@@ -169,9 +173,11 @@ internal fun OrderedRoutesSettings(
                     val shifting = when {
                         dragStartIndex < 0 || index < 0 || dragging -> 0f
                         dragTargetIndex > dragStartIndex &&
-                            index > dragStartIndex && index <= dragTargetIndex -> -rowStridePx
+                            index > dragStartIndex && index <= dragTargetIndex ->
+                            (activeSlots[index - 1] - activeSlots[index]) * rowStridePx
                         dragTargetIndex < dragStartIndex &&
-                            index >= dragTargetIndex && index < dragStartIndex -> rowStridePx
+                            index >= dragTargetIndex && index < dragStartIndex ->
+                            (activeSlots[index + 1] - activeSlots[index]) * rowStridePx
                         else -> 0f
                     }
                     val animatedShift by animateFloatAsState(
@@ -181,11 +187,19 @@ internal fun OrderedRoutesSettings(
                     )
                     Box(
                         modifier = Modifier
+                            .fillMaxWidth()
                             .zIndex(if (dragging) 1f else 0f)
                             .graphicsLayer {
                                 translationY = if (dragging) dragDistancePx else animatedShift
                                 shadowElevation = if (dragging) 5.dp.toPx() else 0f
-                            },
+                                alpha = 1f
+                            }
+                            .then(
+                                if (dragging) Modifier.background(
+                                    MaterialTheme.colorScheme.surface,
+                                    RoundedCornerShape(8.dp),
+                                ) else Modifier
+                            ),
                     ) {
                         RoutePriorityRow(
                             route = route,
@@ -203,15 +217,17 @@ internal fun OrderedRoutesSettings(
                             },
                             onDragBy = { delta ->
                                 if (draggedRoute == route) {
-                                    val minimum = -index * rowStridePx
-                                    val maximum = (policy.activeRoutes.size - index - 1) * rowStridePx
+                                    val sourceSlot = activeSlots[index]
+                                    val minimum = (activeSlots.first() - sourceSlot) * rowStridePx
+                                    val maximum = (activeSlots.last() - sourceSlot) * rowStridePx
                                     dragDistancePx = (dragDistancePx + delta).coerceIn(minimum, maximum)
                                 }
                             },
                             onDragEnd = {
                                 if (draggedRoute == route) {
-                                    val target = RouteDragTarget.index(
-                                        index, policy.activeRoutes.size, dragDistancePx, rowStridePx
+                                    val target = RouteDragTarget.indexForDisplaySlots(
+                                        index, policy.displayOrder, policy.activeRoutes,
+                                        dragDistancePx, rowStridePx
                                     )
                                     draggedRoute = null
                                     dragDistancePx = 0f
