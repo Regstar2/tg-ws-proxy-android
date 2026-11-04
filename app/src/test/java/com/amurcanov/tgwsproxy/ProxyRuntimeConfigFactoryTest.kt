@@ -6,7 +6,7 @@ import org.junit.Test
 
 class ProxyRuntimeConfigFactoryTest {
     @Test
-    fun runtimePolicy_workerOnlyWithFallbackDoesNotEnableDisabledRoutes() {
+    fun runtimePolicy_singleEnabledRouteDisablesFallbackWithoutAddingRoutes() {
         val policy = NetworkRoutePolicy(
             networkType = NetworkProfileType.WIFI,
             enabledRoutes = setOf(RouteKind.WORKER_WS),
@@ -28,7 +28,8 @@ class ProxyRuntimeConfigFactoryTest {
         )
 
         assertTrue(raw.contains("@route_worker_ws=1"))
-        assertTrue(raw.contains("@route_fallback=1"))
+        assertTrue(raw.contains("@route_order=worker_ws"))
+        assertTrue(raw.contains("@route_fallback=0"))
         assertTrue(raw.contains("@cfproxy=0"))
         assertTrue(raw.contains("@route_cf_proxy_ws=0"))
         assertTrue(raw.contains("@route_tcp_fallback=0"))
