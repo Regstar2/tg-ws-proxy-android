@@ -970,4 +970,20 @@
     <string name="quick_tile_setup">Откройте приложение для настройки</string>
     <string name="quick_tile_config_changed">Настройки изменились · запустите прокси в приложении</string>
     <string name="quick_tile_confirm_required">Запустите прокси в приложении для подтверждения настроек</string>
+    <string name="routes_profile_wifi_tab">Wi-Fi</string>
+    <string name="routes_profile_mobile_tab">Мобильная сеть</string>
+    <string name="routes_order_title">Приоритет маршрутов</string>
+    <string name="routes_enabled_count">Включено %1$d из %2$d</string>
+    <string name="routes_fallback_title">Как будет работать fallback</string>
+    <string name="routes_no_fallback">Fallback отсутствует</string>
+    <string name="routes_reset_profile">Сбросить профиль</string>
+    <string name="routes_reset_confirmation">Сбросить маршруты только для выбранной сети?</string>
+    <string name="routes_reset_confirm">Сбросить</string>
+    <string name="routes_reset_cancel">Отмена</string>
+    <string name="routes_inactive">Неактивно</string>
+    <string name="routes_drag_route">Перетащить %1$s</string>
+    <string name="routes_move_up">Поднять %1$s</string>
+    <string name="routes_move_down">Опустить %1$s</string>
+    <string name="routes_last_route_error">Нельзя выключить последний маршрут</string>
+    <string name="routes_toggle_route">Включить или выключить %1$s</string>
 </resources>
