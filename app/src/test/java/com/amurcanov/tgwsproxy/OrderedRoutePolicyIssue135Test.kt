@@ -6,17 +6,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OrderedRoutePolicyIssue135Test {
-    @Test fun togglingMovesOnlySelectedRouteAndKeepsOtherPriorities() {
-        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+    @Test fun togglingKeepsVisualSlotAndRestoresOldPriority() {
+        val original = threeEnabledWifi()
         val disabled = NetworkRoutePolicyEditor.setRouteEnabled(original, RouteKind.CF_PROXY_WS, false)
         assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK), disabled.activeRoutes)
-        assertEquals(RouteKind.CF_PROXY_WS, disabled.inactiveRoutes.last())
+        assertEquals(original.displayOrder, disabled.displayOrder)
         val restored = NetworkRoutePolicyEditor.setRouteEnabled(disabled, RouteKind.CF_PROXY_WS, true)
-        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS), restored.activeRoutes)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK), restored.activeRoutes)
     }
 
     @Test fun arrowsAndDragShareOneOrderMutation() {
-        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val original = threeEnabledWifi()
         val changed = NetworkRoutePolicyEditor.moveEnabledRoute(original, 0, 2)
         assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS), changed.activeRoutes)
         assertEquals(original, NetworkRoutePolicyEditor.moveEnabledRoute(changed, 2, 0))
@@ -32,9 +32,7 @@ class OrderedRoutePolicyIssue135Test {
     @Test fun storedV2KeepsIndependentNetworksAndSanitizesDuplicates() {
         val prefs = InMemorySharedPreferences()
         val repository = NetworkRoutePolicyRepository(prefs)
-        val wifi = NetworkRoutePolicyEditor.moveEnabledRoute(
-            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), 2, 0
-        )
+        val wifi = NetworkRoutePolicyEditor.moveEnabledRoute(threeEnabledWifi(), 2, 0)
         repository.save(wifi)
         prefs.edit().putString(
             "route_policy_mobile_v2",
@@ -82,4 +80,12 @@ class OrderedRoutePolicyIssue135Test {
         assertTrue(tokens.contains("@route_direct_ws=0"))
         assertTrue(tokens.contains("@route_tcp_fallback=0"))
     }
+    private fun threeEnabledWifi(): NetworkRoutePolicy =
+        NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS,
+                    RouteKind.TCP_FALLBACK, RouteKind.AWG_WARP, RouteKind.WORKER_WS),
+            ),
+        )
 }
