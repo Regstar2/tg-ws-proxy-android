@@ -22,6 +22,7 @@ interface ProxyLibrary : Library {
     fun StartMtProtoProxy(host: String, port: Int, secret: String, runtimeConfig: String, verbose: Int): Int
     fun StopMtProtoProxy(): Int
     fun GetMtProtoProxyStatus(): Pointer?
+    fun UpdateRouteOrder(orderedRoutes: String): Int
     fun ConfigureAWGWarp(configPath: String, enabled: Int, preferred: Int, allowFallback: Int): Int
     fun ResetAWGWarp(): Int
     fun GenerateWireGuardKeyPair(): Pointer?
@@ -113,6 +114,11 @@ object NativeProxy {
         ProxyLibrary.INSTANCE.FreeString(ptr)
         return res
     }
+    fun updateRouteOrder(activeRoutes: List<RouteKind>): Int {
+        if (activeRoutes.isEmpty()) return -2
+        return ProxyLibrary.INSTANCE.UpdateRouteOrder(activeRoutes.joinToString("|") { it.prefValue })
+    }
+
     fun configureAwgWarp(
         configPath: String,
         enabled: Boolean,
