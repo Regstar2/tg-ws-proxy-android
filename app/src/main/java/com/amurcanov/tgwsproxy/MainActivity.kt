@@ -1505,26 +1505,18 @@ private fun ProxyScreen(
         }
     }
 
-    LaunchedEffect(reconfigureStatus.updatedAtMs, reconfigureStatus.message) {
-        if (reconfigureStatus.message == "pending_runtime_apply") {
-            val requestedAt = reconfigureStatus.updatedAtMs
-            repeat(20) {
-                delay(300)
-                val applied = ReconfigureStatusStore.load(prefs)
-                if (applied.updatedAtMs >= requestedAt &&
-                    applied.message != "pending_runtime_apply"
-                ) {
-                    reconfigureStatus = applied
-                    if (applied.type == ReconfigureStatusType.FAILED) {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.routes_live_apply_failed),
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
-                    return@LaunchedEffect
-                }
-            }
+    // Service publishes the result immediately; no 300 ms polling or timeout.
+    val liveReconfigureStatus by ReconfigureStatusStore.liveStatus.collectAsStateWithLifecycle()
+    LaunchedEffect(liveReconfigureStatus) {
+        val applied = liveReconfigureStatus ?: return@LaunchedEffect
+        if (applied.updatedAtMs < reconfigureStatus.updatedAtMs) return@LaunchedEffect
+        reconfigureStatus = applied
+        if (applied.type == ReconfigureStatusType.FAILED) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.routes_live_apply_failed),
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -2051,7 +2043,10 @@ private fun ProxyScreen(
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
                                 if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
-                                    latestReconfigureAction(currentNetworkProfile)
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
                                 }
                             },
                             onMobilePolicyChange = { policy ->
@@ -2064,7 +2059,10 @@ private fun ProxyScreen(
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
                                 if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
-                                    latestReconfigureAction(currentNetworkProfile)
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
                                 }
                             },
                             onResetWifiPolicy = {
@@ -2074,7 +2072,10 @@ private fun ProxyScreen(
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
                                 if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
-                                    latestReconfigureAction(currentNetworkProfile)
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
                                 }
                                 Toast.makeText(
                                     context,
@@ -2089,7 +2090,10 @@ private fun ProxyScreen(
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
                                 if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
-                                    latestReconfigureAction(currentNetworkProfile)
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
                                 }
                                 Toast.makeText(
                                     context,
