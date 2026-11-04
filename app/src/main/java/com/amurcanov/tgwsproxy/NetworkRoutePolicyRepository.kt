@@ -23,7 +23,16 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
     }
 
     fun reset(type: NetworkProfileType) {
-        prefs.edit().remove(keyFor(type, true)).remove(keyFor(type, false)).apply()
+        // An explicit default v2 snapshot is necessary: removing both keys would
+        // reactivate a previously saved legacy global connection_mode in the resolver.
+        val defaults = DefaultNetworkRoutePolicies.forType(type)
+        val active = defaults.activeRoutes.joinToString("|") { it.prefValue }
+        val inactive = defaults.inactiveRoutes.joinToString("|") { it.prefValue }
+        prefs.edit()
+            .remove(keyFor(type, false))
+            .putString(keyFor(type, true),
+                "active=$active;inactive=$inactive;strategy=${defaults.autoStrategy.prefValue}")
+            .apply()
     }
 
     fun resetAll() {
