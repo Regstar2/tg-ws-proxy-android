@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
@@ -25,6 +26,14 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class OrderedRoutesIssue135UiTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun allFiveRoutesShareOneCompactList() {
+        render()
+        compose.onNodeWithTag("routes.list").assertExists()
+        RouteKind.entries.forEach { route ->
+            compose.onNodeWithTag("routes.row.${route.prefValue}").assertExists()
+        }
+    }
 
     @Test fun wifiAndMobileTabsAreIndependent() {
         render()
