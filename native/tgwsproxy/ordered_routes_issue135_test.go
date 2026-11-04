@@ -95,3 +95,38 @@ func TestOrderedConnectorStrictOnlyRejectsHiddenTransport(t *testing.T) {
         t.Fatalf("failed strict route reported a fallback/success: %+v", truth)
     }
 }
+
+// A settings switch must affect future MTProto sessions without changing
+// already-created upstream connections or enabling a disabled fallback.
+func TestOrderedPolicySwitchesBackendOnNewSessions(t *testing.T) {
+    _, cfOnly, err := parseRuntimeConfig("@route_order=cf_proxy_ws,@route_cf_proxy_ws=1")
+    if err != nil { t.Fatal(err) }
+    _, workerOnly, err := parseRuntimeConfig(
+        "@route_order=worker_ws,@route_worker_ws=1,@worker_enabled=1,@worker_domain=worker.example")
+    if err != nil { t.Fatal(err) }
+    withRuntimeSettings(t, func(runtimeSettings) runtimeSettings { return cfOnly })
+    cf := &fakeOutboundRouteConnector{backend: mtProtoCFProxyBackend, conn: nopConn{}}
+    worker := &fakeOutboundRouteConnector{backend: mtProtoWorkerBackend, conn: nopConn{}}
+    direct := &fakeOutboundRouteConnector{backend: mtProtoDirectWSBackend, conn: nopConn{}}
+    tcp := &fakeOutboundRouteConnector{backend: mtProtoDirectBackend, conn: nopConn{}}
+    connector := &mtProtoRouteConnector{cfProxy: cf, worker: worker, directWS: direct, tcp: tcp}
+    request := mtproxyfrontend.OutboundRequest{DCID: 2}
+    verify := func(want string) {
+        t.Helper()
+        conn, result := connector.Connect(context.Background(), request)
+        if conn == nil || result.Err != nil || result.SelectedBackend != want ||
+            result.ActualBackend != want || result.FallbackUsed {
+            t.Fatalf("route switch failed want=%s, actual=%+v", want, result)
+        }
+        _ = conn.Close()
+    }
+    verify(mtProtoCFProxyBackend)
+    setRuntimeSettings(workerOnly)
+    verify(mtProtoWorkerBackend)
+    setRuntimeSettings(cfOnly)
+    verify(mtProtoCFProxyBackend)
+    if cf.calls != 2 || worker.calls != 1 || direct.calls != 0 || tcp.calls != 0 {
+        t.Fatalf("unexpected route attempts after switching cf=%d worker=%d direct=%d tcp=%d",
+            cf.calls, worker.calls, direct.calls, tcp.calls)
+    }
+}
