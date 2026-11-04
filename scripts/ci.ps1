@@ -77,6 +77,13 @@ foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-
     }
 }
 
+$issue135CertParserTest = Join-Path $PSScriptRoot 'tests\issue-135-apksigner-cert-test.ps1'
+Invoke-CheckedCommand `
+    -Label 'Validate apksigner output parser (PowerShell 5.1)' `
+    -FilePath $windowsPowerShell.Source `
+    -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $issue135CertParserTest)
+& $issue135CertParserTest
+
 $nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
 Invoke-CheckedCommand `
     -Label 'Test native stderr handling under Windows PowerShell 5.1' `
