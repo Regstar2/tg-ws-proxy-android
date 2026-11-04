@@ -141,7 +141,7 @@ class LocalProxyFrontendTest {
     }
 
     @Test
-    fun mtprotoExperimentalFrontend_runtimeStartExceptionIsContainedAndAwgReset() {
+    fun mtprotoExperimentalFrontend_runtimeStartExceptionResetsConfiguredAwg() {
         val awgRuntime = RecordingAwgRuntime()
         val frontend = MtProtoLocalProxyFrontend(
             runtimeAdapter = ThrowingMtProtoRuntimeAdapter(),
@@ -150,13 +150,33 @@ class LocalProxyFrontendTest {
         )
 
         val result = frontend.start(
-            mtProtoStartConfig(MtProtoProxyConfig.default { fixedSecret }),
+            mtProtoStartConfig(
+                config = MtProtoProxyConfig.default { fixedSecret },
+                runtimeConfig = "@route_awg_warp=true,@preferred_route=awg_warp,@route_fallback=false,@awg_warp_config_path=/private/active.conf",
+            ),
         )
 
         assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
         assertEquals(MtProtoRuntimeErrorCode.START_FAILED.name, result.errorCode)
         assertTrue(result.message.contains("IllegalStateException"))
         assertEquals(1, awgRuntime.resetCalls)
+    }
+
+    @Test
+    fun mtprotoExperimentalFrontend_runtimeStartExceptionDoesNotResetUnusedAwg() {
+        val awgRuntime = RecordingAwgRuntime()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = ThrowingMtProtoRuntimeAdapter(),
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+            awgRuntime = awgRuntime,
+        )
+
+        val result = frontend.start(mtProtoStartConfig(MtProtoProxyConfig.default { fixedSecret }))
+
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.START_FAILED.name, result.errorCode)
+        assertTrue(result.message.contains("IllegalStateException"))
+        assertEquals(0, awgRuntime.resetCalls)
     }
 
     private fun mtProtoStartConfig(
