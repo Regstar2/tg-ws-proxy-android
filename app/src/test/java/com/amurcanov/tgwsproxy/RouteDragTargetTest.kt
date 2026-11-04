@@ -20,4 +20,15 @@ class RouteDragTargetTest {
         assertEquals(2, RouteDragTarget.index(2, 5, -30f, 85f))
         assertEquals(2, RouteDragTarget.index(2, 5, 300f, 0f))
     }
+    @Test fun dragCrossesInactiveSlotsWithoutMovingThem() {
+        val order = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+            RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+        val active = listOf(RouteKind.CF_PROXY_WS, RouteKind.WORKER_WS, RouteKind.TCP_FALLBACK)
+        assertEquals(0, RouteDragTarget.indexForDisplaySlots(0, order, active, 30f, 85f))
+        assertEquals(1, RouteDragTarget.indexForDisplaySlots(0, order, active, 170f, 85f))
+        assertEquals(2, RouteDragTarget.indexForDisplaySlots(0, order, active, 360f, 85f))
+        assertEquals(0, RouteDragTarget.indexForDisplaySlots(2, order, active, -360f, 85f))
+        assertEquals(2, RouteDragTarget.indexForDisplaySlots(2, order, active, 340f, 85f))
+    }
+
 }
