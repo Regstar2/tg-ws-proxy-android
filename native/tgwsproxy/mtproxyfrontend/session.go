@@ -172,21 +172,24 @@ func readClientInit(
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	first := make([]byte, 1)
-	if _, err := io.ReadFull(conn, first); err != nil {
+	prefix := make([]byte, 5)
+	if _, err := io.ReadFull(conn, prefix); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
 		return nil, conn, fmt.Errorf("%w: %v", ErrHandshakeRead, err)
 	}
-	if first[0] != tlsRecordHandshake {
-		// Telegram may retain a legacy DD link after the app enables EE Fake TLS.
-		// Accept only a cryptographically valid obfuscated MTProto init for the
-		// configured secret. Probes and unrelated plaintext remain rejected.
+	recordLen := int(binary.BigEndian.Uint16(prefix[3:5]))
+	isClientHelloRecord := prefix[0] == tlsRecordHandshake &&
+		prefix[1] == 0x03 && prefix[2] <= 0x04 &&
+		recordLen >= 40 && recordLen <= 16384
+	if !isClientHelloRecord {
+		// A Telegram DD/obfuscated client can retain an older proxy link.
+		// Only the configured secret can authenticate this alternate ingress.
 		_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
-		rest := make([]byte, 63)
+		rest := make([]byte, 64-len(prefix))
 		_, readErr := io.ReadFull(conn, rest)
 		_ = conn.SetReadDeadline(time.Time{})
 		if readErr == nil {
-			raw := append(first, rest...)
+			raw := append(prefix, rest...)
 			if isValidRawObfuscatedInit(raw, secret) {
 				return raw, conn, nil
 			}
@@ -195,12 +198,6 @@ func readClientInit(
 		return nil, conn, ErrFakeTLSExpected
 	}
 
-	headerRest := make([]byte, 4)
-	if _, err := io.ReadFull(conn, headerRest); err != nil {
-		_ = conn.SetReadDeadline(time.Time{})
-		return nil, conn, fmt.Errorf("%w: %v", ErrHandshakeRead, err)
-	}
-	recordLen := int(binary.BigEndian.Uint16(headerRest[2:4]))
 	body := make([]byte, recordLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
@@ -208,7 +205,7 @@ func readClientInit(
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	clientHello := append(append([]byte{first[0]}, headerRest...), body...)
+	clientHello := append(append([]byte(nil), prefix...), body...)
 	clientRandom, sessionID, ok := verifyFakeTLSClientHello(clientHello, secret, time.Now())
 	if !ok {
 		if fakeTLSMaskingPassthrough {
