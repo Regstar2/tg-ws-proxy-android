@@ -184,9 +184,10 @@ internal class MtProtoLocalProxyFrontend(
 
     private fun resetAwgRuntimeAfterFailedConfigure() {
         synchronized(awgRuntimeOwnerLock) {
-            awgRuntimeOwners.remove(awgRuntime)
+            if (!awgRuntimeOwners.containsKey(awgRuntime)) {
+                runCatching { awgRuntime.reset() }
+            }
         }
-        runCatching { awgRuntime.reset() }
     }
 
     private fun fail(
