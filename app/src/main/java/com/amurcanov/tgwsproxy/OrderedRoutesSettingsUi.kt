@@ -3,17 +3,25 @@ package com.amurcanov.tgwsproxy
 import android.widget.Toast
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +44,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
@@ -60,26 +69,50 @@ internal fun OrderedRoutesSettings(
     )
     val onPolicyChange = if (selectedNetwork == NetworkProfileType.WIFI) onWifiPolicyChange else onMobilePolicyChange
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.routes_network_profile), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = stringResource(R.string.routes_network_profile),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             FilterChip(
                 selected = selectedNetwork == NetworkProfileType.WIFI,
                 onClick = { selectedNetwork = NetworkProfileType.WIFI },
-                label = { Text(stringResource(R.string.routes_wifi_tab)) },
+                label = {
+                    Text(
+                        stringResource(R.string.routes_wifi_tab),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 modifier = Modifier.weight(1f).testTag("routes.tab.wifi"),
             )
             FilterChip(
                 selected = selectedNetwork == NetworkProfileType.MOBILE,
                 onClick = { selectedNetwork = NetworkProfileType.MOBILE },
-                label = { Text(stringResource(R.string.routes_mobile_tab)) },
+                label = {
+                    Text(
+                        stringResource(R.string.routes_mobile_tab),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 modifier = Modifier.weight(1f).testTag("routes.tab.mobile"),
             )
         }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Text(
                 stringResource(R.string.routes_priority_heading),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
@@ -91,8 +124,22 @@ internal fun OrderedRoutesSettings(
             )
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            (policy.activeRoutes + policy.inactiveRoutes).forEach { route ->
+        // One compact settings list, rather than five oversized independent cards.
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
+            ),
+        ) {
+            (policy.activeRoutes + policy.inactiveRoutes).forEachIndexed { position, route ->
+                if (position > 0) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f),
+                    )
+                }
                 val index = policy.activeRoutes.indexOf(route)
                 RoutePriorityRow(
                     route = route,
@@ -108,10 +155,20 @@ internal fun OrderedRoutesSettings(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ),
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.routes_fallback_heading), fontWeight = FontWeight.SemiBold)
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    stringResource(R.string.routes_fallback_heading),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 val context = LocalContext.current
                 Text(
                     policy.activeRoutes.joinToString("  →  ") { context.getString(it.priorityLabel()) },
@@ -121,7 +178,7 @@ internal fun OrderedRoutesSettings(
                 Text(
                     if (policy.activeRoutes.size == 1) stringResource(R.string.routes_fallback_none)
                     else stringResource(R.string.routes_fallback_next, policy.activeRoutes.size),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -140,13 +197,13 @@ internal fun OrderedRoutesSettings(
 
         OutlinedButton(
             onClick = { confirmReset = true },
-            modifier = Modifier.fillMaxWidth().testTag("routes.reset"),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("routes.reset"),
         ) {
             Text(stringResource(R.string.routes_reset_selected))
         }
         TextButton(
             onClick = onOpenDiagnostics,
-            modifier = Modifier.fillMaxWidth().testTag("routes.diagnostics"),
+            modifier = Modifier.align(Alignment.End).testTag("routes.diagnostics"),
         ) {
             Text(stringResource(R.string.routes_overview_advanced_title))
         }
@@ -191,103 +248,139 @@ private fun RoutePriorityRow(
     val downLabel = stringResource(R.string.routes_down_label, routeName)
     val toggleLabel = stringResource(R.string.routes_toggle_label, routeName)
 
-    Card(
-        modifier = Modifier.fillMaxWidth().testTag("routes.row.${route.prefValue}"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (enabled) MaterialTheme.colorScheme.surfaceVariant
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
-        ),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("routes.row.${route.prefValue}")
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        // The grip remains the only draggable surface; it never reorders inactive routes.
+        Box(
+            modifier = Modifier
+                .width(28.dp)
+                .heightIn(min = 84.dp)
+                .semantics { contentDescription = dragLabel }
+                .testTag("routes.drag.${route.prefValue}")
+                .then(
+                    if (enabled) Modifier.pointerInput(route, policy.activeRoutes) {
+                        var distance = 0f
+                        detectDragGestures(onDragStart = { distance = 0f }) { change, delta ->
+                            change.consume()
+                            distance += delta.y
+                            if (abs(distance) > 55.dp.toPx()) {
+                                val newIndex = (activeIndex + if (distance > 0f) 1 else -1)
+                                    .coerceIn(0, activeCount - 1)
+                                onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
+                                    policy, activeIndex, newIndex
+                                ))
+                                distance = 0f
+                            }
+                        }
+                    } else Modifier
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.DragIndicator,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                    alpha = if (enabled) 0.8f else 0.35f
+                ),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Text(
+            text = if (enabled) (activeIndex + 1).toString() else "—",
+            modifier = Modifier.width(18.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
-                text = "⋮⋮",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(32.dp)
-                    .semantics { contentDescription = dragLabel }
-                    .testTag("routes.drag.${route.prefValue}")
-                    .then(
-                        if (enabled) Modifier.pointerInput(route, policy.activeRoutes) {
-                            var distance = 0f
-                            detectDragGestures(onDragStart = { distance = 0f }) { change, delta ->
-                                change.consume()
-                                distance += delta.y
-                                if (abs(distance) > 55.dp.toPx()) {
-                                    val newIndex = (activeIndex + if (distance > 0f) 1 else -1)
-                                        .coerceIn(0, activeCount - 1)
-                                    onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                                        policy, activeIndex, newIndex
-                                    ))
-                                    distance = 0f
-                                }
-                            }
-                        } else Modifier
-                    )
-                    .padding(vertical = 12.dp),
+                text = routeName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                if (enabled) (activeIndex + 1).toString() else "—",
-                modifier = Modifier.width(22.dp),
-                style = MaterialTheme.typography.labelMedium,
-                textAlign = TextAlign.Center,
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(routeName, style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (enabled) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!enabled) Text(
+            if (!enabled) {
+                Text(
                     stringResource(R.string.routes_inactive_text),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (enabled && configurationRequired) Text(
+            } else if (configurationRequired) {
+                Text(
                     stringResource(R.string.routes_configuration_required),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Column {
-                IconButton(
-                    onClick = {
-                        onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                            policy, activeIndex, activeIndex - 1
-                        ))
-                    },
-                    enabled = enabled && activeIndex > 0,
-                    modifier = Modifier.size(40.dp).semantics { contentDescription = upLabel }
-                        .testTag("routes.up.${route.prefValue}"),
-                ) { Text("↑") }
-                IconButton(
-                    onClick = {
-                        onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                            policy, activeIndex, activeIndex + 1
-                        ))
-                    },
-                    enabled = enabled && activeIndex < activeCount - 1,
-                    modifier = Modifier.size(40.dp).semantics { contentDescription = downLabel }
-                        .testTag("routes.down.${route.prefValue}"),
-                ) { Text("↓") }
-            }
-            Switch(
-                checked = enabled,
-                onCheckedChange = { checked ->
-                    if (!checked && activeCount == 1) {
-                        Toast.makeText(context, R.string.routes_minimum_one, Toast.LENGTH_SHORT).show()
-                    } else {
-                        onPolicyChange(NetworkRoutePolicyEditor.setRouteEnabled(policy, route, checked))
-                    }
-                },
-                modifier = Modifier.semantics { contentDescription = toggleLabel }
-                    .testTag("routes.toggle.${route.prefValue}"),
-            )
         }
+        Column(
+            modifier = Modifier.width(40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            IconButton(
+                onClick = {
+                    onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
+                        policy, activeIndex, activeIndex - 1
+                    ))
+                },
+                enabled = enabled && activeIndex > 0,
+                modifier = Modifier.size(40.dp)
+                    .semantics { contentDescription = upLabel }
+                    .testTag("routes.up.${route.prefValue}"),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            IconButton(
+                onClick = {
+                    onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
+                        policy, activeIndex, activeIndex + 1
+                    ))
+                },
+                enabled = enabled && activeIndex < activeCount - 1,
+                modifier = Modifier.size(40.dp)
+                    .semantics { contentDescription = downLabel }
+                    .testTag("routes.down.${route.prefValue}"),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = { checked ->
+                if (!checked && activeCount == 1) {
+                    Toast.makeText(context, R.string.routes_minimum_one, Toast.LENGTH_SHORT).show()
+                } else {
+                    onPolicyChange(NetworkRoutePolicyEditor.setRouteEnabled(policy, route, checked))
+                }
+            },
+            modifier = Modifier
+                .semantics { contentDescription = toggleLabel }
+                .testTag("routes.toggle.${route.prefValue}"),
+        )
     }
+
 }
 
 internal fun RouteKind.priorityLabel(): Int = when (this) {
