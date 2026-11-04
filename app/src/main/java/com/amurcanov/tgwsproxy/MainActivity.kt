@@ -2072,7 +2072,8 @@ private fun ProxyScreen(
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
                             },
-                            onResetWifiPolicy = {
+                            onResetWifiPolicy = resetWifiPolicy@{
+                                if (!applyRoutePolicyLive(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI))) return@resetWifiPolicy
                                 routePolicyRepository.reset(NetworkProfileType.WIFI)
                                 RouteDefaultsMigration.markUserModified(prefs)
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
@@ -2084,7 +2085,8 @@ private fun ProxyScreen(
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             },
-                            onResetMobilePolicy = {
+                            onResetMobilePolicy = resetMobilePolicy@{
+                                if (!applyRoutePolicyLive(DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE))) return@resetMobilePolicy
                                 routePolicyRepository.reset(NetworkProfileType.MOBILE)
                                 RouteDefaultsMigration.markUserModified(prefs)
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
