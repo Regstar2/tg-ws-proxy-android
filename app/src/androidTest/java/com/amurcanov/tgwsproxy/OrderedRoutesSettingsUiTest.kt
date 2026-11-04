@@ -99,7 +99,7 @@ class OrderedRoutesSettingsUiTest {
         val initial = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
             .joinToString(" → ") { context.getString(label(it)) }
         val actual = rule.onNodeWithTag("routes.chain").fetchSemanticsNode().config
-            .getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)
+            .getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.Text) { null }
             ?.joinToString("") { it.text }.orEmpty()
         org.junit.Assert.assertTrue("drag did not change route order", actual != initial)
     }
