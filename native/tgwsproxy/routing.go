@@ -358,6 +358,40 @@ func parseOrderedRoutes(raw string) []routeKind {
 	return routes
 }
 
+// withExplicitRouteOrder derives compatibility flags from the user-controlled chain.
+// Neither a legacy mode nor route scoring may expand this allowlist.
+func withExplicitRouteOrder(settings runtimeSettings, routes []routeKind) runtimeSettings {
+	settings.PolicyPresent = true
+	settings.RouteOrderPresent = true
+	settings.RouteOrder = append([]routeKind(nil), routes...)
+	settings.AllowDirect = false
+	settings.AllowWorker = false
+	settings.AllowCFProxy = false
+	settings.AllowAWG = false
+	settings.AllowTCP = false
+	for _, route := range routes {
+		switch route {
+		case routeDirectWS:
+			settings.AllowDirect = true
+		case routeCFWorkerWS:
+			settings.AllowWorker = true
+		case routeCFProxyWS:
+			settings.AllowCFProxy = true
+		case routeAWGWarp:
+			settings.AllowAWG = true
+		case routeTCPFallback:
+			settings.AllowTCP = true
+		}
+	}
+	settings.Preferred = routes[0]
+	settings.AllowFallback = len(routes) > 1
+	settings.CF.Enabled = settings.AllowCFProxy
+	settings.CF.Only = false
+	settings.CF.Priority = false
+	settings.Worker.Enabled = settings.AllowWorker && settings.Worker.Domain != ""
+	return settings
+}
+
 func filterRoutesByPolicy(settings runtimeSettings, routes []routeKind, reason string) []routeKind {
 	if !settings.PolicyPresent {
 		return routes
