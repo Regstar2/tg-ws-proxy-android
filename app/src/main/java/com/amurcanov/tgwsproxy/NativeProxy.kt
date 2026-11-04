@@ -21,6 +21,7 @@ interface ProxyLibrary : Library {
     fun GetProxyStatus(): Pointer?
     fun StartMtProtoProxy(host: String, port: Int, secret: String, runtimeConfig: String, verbose: Int): Int
     fun StopMtProtoProxy(): Int
+    fun UpdateMtProtoRoutePolicy(runtimeConfig: String): Int
     fun GetMtProtoProxyStatus(): Pointer?
     fun ConfigureAWGWarp(configPath: String, enabled: Int, preferred: Int, allowFallback: Int): Int
     fun ResetAWGWarp(): Int
@@ -106,6 +107,9 @@ object NativeProxy {
     }
     fun stopMtProtoProxy(): Int {
         return ProxyLibrary.INSTANCE.StopMtProtoProxy()
+    }
+    fun updateMtProtoRoutePolicy(runtimeConfig: String): Int {
+        return ProxyLibrary.INSTANCE.UpdateMtProtoRoutePolicy(runtimeConfig)
     }
     fun getMtProtoProxyStatus(): String? {
         val ptr = ProxyLibrary.INSTANCE.GetMtProtoProxyStatus() ?: return null
