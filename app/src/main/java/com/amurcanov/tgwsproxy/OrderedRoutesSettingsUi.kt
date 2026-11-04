@@ -49,6 +49,8 @@ internal fun OrderedRoutesSettings(
     onResetWifiPolicy: () -> Unit,
     onResetMobilePolicy: () -> Unit,
     reconfigureStatus: ReconfigureStatus? = null,
+    workerConfigured: Boolean = false,
+    awgConfigured: Boolean = false,
     onOpenDiagnostics: () -> Unit = {},
 ) {
     var selectedNetwork by rememberSaveable { mutableStateOf(NetworkProfileType.WIFI) }
@@ -97,6 +99,8 @@ internal fun OrderedRoutesSettings(
                     activeIndex = index,
                     activeCount = policy.activeRoutes.size,
                     policy = policy,
+                    configurationRequired = (route == RouteKind.WORKER_WS && !workerConfigured) ||
+                        (route == RouteKind.AWG_WARP && !awgConfigured),
                     onPolicyChange = onPolicyChange,
                 )
             }
@@ -176,6 +180,7 @@ private fun RoutePriorityRow(
     activeIndex: Int,
     activeCount: Int,
     policy: NetworkRoutePolicy,
+    configurationRequired: Boolean,
     onPolicyChange: (NetworkRoutePolicy) -> Unit,
 ) {
     val context = LocalContext.current
@@ -240,6 +245,11 @@ private fun RoutePriorityRow(
                     stringResource(R.string.routes_inactive_text),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (enabled && configurationRequired) Text(
+                    stringResource(R.string.routes_configuration_required),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
             Column {
