@@ -14,43 +14,81 @@ object NetworkRoutePolicyEditor {
         route: RouteKind,
         enabled: Boolean,
     ): NetworkRoutePolicy {
-        val current = ordered(policy.enabledRoutes).toMutableSet()
+        val current = normalize(policy)
+        val active = current.activeRoutes.toMutableList()
+        val inactive = current.inactiveRoutes.toMutableList()
         if (enabled) {
-            current += route
+            if (route in active) return current
+            inactive.remove(route)
+            active.add(route)
         } else {
-            if (current.size <= 1 && route in current) {
-                return normalize(policy)
-            }
-            current -= route
+            if (route !in active || active.size == 1) return current
+            active.remove(route)
+            inactive.add(route)
         }
-        return normalize(policy.copy(enabledRoutes = ordered(current).toSet()))
+        return withOrder(current, active, inactive)
     }
 
+    /** Shared by arrow controls and drag-and-drop. Disabled routes cannot be moved. */
+    fun moveEnabledRoute(
+        policy: NetworkRoutePolicy,
+        fromIndex: Int,
+        toIndex: Int,
+    ): NetworkRoutePolicy {
+        val current = normalize(policy)
+        val active = current.activeRoutes.toMutableList()
+        if (fromIndex !in active.indices || toIndex !in active.indices || fromIndex == toIndex) {
+            return current
+        }
+        val route = active.removeAt(fromIndex)
+        active.add(toIndex, route)
+        return withOrder(current, active, current.inactiveRoutes)
+    }
+
+    /** Legacy preferred-route editor is equivalent to moving the route to priority one. */
     fun setPreferredRoute(
         policy: NetworkRoutePolicy,
         route: RouteKind,
     ): NetworkRoutePolicy {
-        if (route !in policy.enabledRoutes) {
-            return normalize(policy)
-        }
-        return normalize(policy.copy(preferredRoute = route))
+        val current = normalize(policy)
+        val index = current.activeRoutes.indexOf(route)
+        if (index < 0) return current
+        return moveEnabledRoute(current, index, 0)
     }
 
     fun normalize(policy: NetworkRoutePolicy): NetworkRoutePolicy {
-        val routes = ordered(policy.enabledRoutes)
-        if (routes.isEmpty()) {
+        val explicitOrder = policy.activeRoutes.isNotEmpty()
+        val active = if (explicitOrder) {
+            policy.activeRoutes.distinct()
+        } else {
+            val enabled = routeOrder.filter { it in policy.enabledRoutes }
+            val first = policy.preferredRoute?.takeIf { it in enabled } ?: enabled.firstOrNull()
+            if (first == null) {
+                emptyList()
+            } else if (!policy.allowFallback) {
+                listOf(first)
+            } else {
+                listOf(first) + enabled.filterNot { it == first }
+            }
+        }
+        if (active.isEmpty()) {
             return DefaultNetworkRoutePolicies.forType(policy.networkType)
         }
-        val preferred = policy.preferredRoute
-            ?.takeIf { it in routes }
-            ?: routes.first()
-        return policy.copy(
-            enabledRoutes = routes.toSet(),
-            preferredRoute = preferred,
-        )
+        val inactive = (policy.inactiveRoutes + routeOrder)
+            .distinct()
+            .filterNot { it in active }
+        return withOrder(policy, active, inactive)
     }
 
-    private fun ordered(routes: Set<RouteKind>): List<RouteKind> {
-        return routeOrder.filter { it in routes }
-    }
+    private fun withOrder(
+        policy: NetworkRoutePolicy,
+        active: List<RouteKind>,
+        inactive: List<RouteKind>,
+    ): NetworkRoutePolicy = policy.copy(
+        enabledRoutes = active.toSet(),
+        preferredRoute = active.first(),
+        allowFallback = active.size > 1,
+        activeRoutes = active.toList(),
+        inactiveRoutes = inactive.toList(),
+    )
 }
