@@ -136,34 +136,12 @@ try {
             throw "Instrumentation runner missing or targeting a different application."
         }
 
-        $testReportDirectory = Join-Path $env:TEMP "tgwsproxy-issue135-instrumentation"
-        New-Item -ItemType Directory -Force -Path $testReportDirectory | Out-Null
-        $outputPath = Join-Path $testReportDirectory "instrumentation.txt"
-        $errorPath = Join-Path $testReportDirectory "instrumentation-errors.txt"
-        $logcatPath = Join-Path $testReportDirectory "logcat.txt"
-        Write-Host "Running on-device UI tests directly: $runner"
-        Write-Host "Instrumentation results: $outputPath"
-
-        $process = Start-Process -FilePath (Get-Command adb).Source -ArgumentList @(
-            "-s", $serial, "shell", "am", "instrument", "-w", "-r", $runner
-        ) -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -NoNewWindow -PassThru
-        $completed = $process.WaitForExit($InstrumentTimeoutSeconds * 1000)
-        if (-not $completed) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        }
-        $process.Refresh()
-        $testOutput = @(Get-Content -LiteralPath $outputPath -ErrorAction SilentlyContinue)
-        $testErrors = @(Get-Content -LiteralPath $errorPath -ErrorAction SilentlyContinue)
-        $testOutput | ForEach-Object { Write-Host $_ }
-        $testErrors | ForEach-Object { Write-Warning $_ }
-
-        $passed = $completed -and $process.ExitCode -eq 0 -and
-            @($testOutput | Where-Object { $_ -match '^INSTRUMENTATION_CODE:\s*-1\s*$' }).Count -eq 1
-        if (-not $passed) {
-            adb -s $serial logcat -d -b main -b system -b crash -v threadtime -t 10000 |
-                Out-File -LiteralPath $logcatPath -Encoding UTF8
-            throw "Android UI tests failed or timed out; see $outputPath, $errorPath and $logcatPath."
-        }
+        # The device may stall inside Compose setup or AndroidJUnitRunner. Each test
+        # has an independent watchdog and every failure is archived before exit.
+        # A timed-out runner stops the suite without uninstalling or clearing the app.
+        $perTestTimeout = [Math]::Min($InstrumentTimeoutSeconds, 60)
+        & (Join-Path $PSScriptRoot "issue-135-run-ui-tests.ps1") `
+            -Serial $serial -PerTestTimeoutSeconds $perTestTimeout
     }
 
     if (-not (Test-ApplicationInstalled)) {
