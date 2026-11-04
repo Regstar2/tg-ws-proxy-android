@@ -488,7 +488,11 @@ class ProxyService : Service() {
             ))
             if (applied == 0) {
                 saveLastConfig(port, ips, poolSize, frontendType)
-                updateNotification()
+                // Native hot apply completed: refresh app state and notification immediately.
+                // Existing MTProto sockets keep their last actual backend until reconnect.
+                val runtime = readRuntimeMetrics(frontendType)
+                ProxyRuntimeState.update { it.copy(runtime = runtime) }
+                updateNotification(force = true)
             } else {
                 Log.e("TgWsProxy", "MTProto route policy hot-update rejected; existing sessions preserved")
             }
