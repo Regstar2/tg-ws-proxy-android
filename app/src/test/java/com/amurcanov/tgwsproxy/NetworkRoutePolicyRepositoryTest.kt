@@ -180,7 +180,7 @@ class NetworkRoutePolicyRepositoryTest {
     }
 
     @Test
-    fun hasSavedPolicy_falseAfterReset() {
+    fun hasSavedPolicy_trueAfterExplicitDefaultReset() {
         val repository = NetworkRoutePolicyRepository(InMemorySharedPreferences())
         repository.save(
             NetworkRoutePolicy(
@@ -194,7 +194,7 @@ class NetworkRoutePolicyRepositoryTest {
 
         repository.reset(NetworkProfileType.UNKNOWN)
 
-        assertFalse(repository.hasSavedPolicy(NetworkProfileType.UNKNOWN))
+        assertTrue(repository.hasSavedPolicy(NetworkProfileType.UNKNOWN))
     }
 
     @Test
@@ -215,7 +215,7 @@ class NetworkRoutePolicyRepositoryTest {
     }
 
     @Test
-    fun reset_returnsDefaultButNotSaved() {
+    fun reset_returnsPersistedDefaultPolicy() {
         val repository = NetworkRoutePolicyRepository(InMemorySharedPreferences())
         repository.save(
             NetworkRoutePolicy(
@@ -230,7 +230,7 @@ class NetworkRoutePolicyRepositoryTest {
         repository.reset(NetworkProfileType.WIFI)
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
-        assertFalse(repository.hasSavedPolicy(NetworkProfileType.WIFI))
+        assertTrue(repository.hasSavedPolicy(NetworkProfileType.WIFI))
     }
 
     private companion object {
