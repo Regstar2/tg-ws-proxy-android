@@ -31,6 +31,22 @@ class MtProtoAwgRuntimeOwnershipTest {
         assertEquals(1, awgRuntime.resetCalls)
     }
 
+    @Test
+    fun failedReplacementDoesNotResetAwgRuntimeOwnedByExistingFrontend() {
+        val awgRuntime = RecordingAwgRuntime()
+        val first = frontend(awgRuntime)
+        val replacement = frontend(awgRuntime)
+
+        assertEquals(LocalProxyFrontendStatus.RUNNING, first.start(startConfig()).state.status)
+
+        awgRuntime.configureResult = -2
+        assertEquals(LocalProxyFrontendStatus.FAILED, replacement.start(startConfig()).state.status)
+        assertEquals(0, awgRuntime.resetCalls)
+
+        first.stop()
+        assertEquals(1, awgRuntime.resetCalls)
+    }
+
     private fun frontend(awgRuntime: RecordingAwgRuntime): MtProtoLocalProxyFrontend {
         return MtProtoLocalProxyFrontend(
             runtimeAdapter = RunningMtProtoRuntimeAdapter(),
@@ -58,10 +74,11 @@ class MtProtoAwgRuntimeOwnershipTest {
     private class RecordingAwgRuntime : AwgWarpNativeRuntime {
         var configureCalls = 0
         var resetCalls = 0
+        var configureResult = 0
 
         override fun configure(config: AwgWarpRuntimeConfig): Int {
             configureCalls += 1
-            return 0
+            return configureResult
         }
 
         override fun reset(): Int {
