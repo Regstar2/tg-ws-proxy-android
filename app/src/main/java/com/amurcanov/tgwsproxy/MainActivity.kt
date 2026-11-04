@@ -1828,6 +1828,44 @@ private fun ProxyScreen(
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
+                fun applyRoutePolicyLive(policy: NetworkRoutePolicy): Boolean {
+                    if (!isRunning || currentNetworkProfile.type != policy.networkType) return true
+                    val applied = runCatching {
+                        if (RouteKind.AWG_WARP in policy.activeRoutes) {
+                            val path = AwgWarpConfigStore.configPath(context)
+                            if (!path.isNullOrBlank()) {
+                                NativeProxy.configureAwgWarp(
+                                    configPath = path,
+                                    enabled = true,
+                                    preferred = false,
+                                    allowFallback = true,
+                                )
+                            }
+                        }
+                        NativeProxy.updateRouteOrder(policy.activeRoutes) == 0
+                    }.getOrDefault(false)
+                    if (!applied) {
+                        saveReconfigureStatus(
+                            ReconfigureStatus(
+                                type = ReconfigureStatusType.FAILED,
+                                networkType = policy.networkType,
+                                message = "native_route_order_update_failed",
+                                updatedAtMs = System.currentTimeMillis(),
+                            ),
+                        )
+                        Toast.makeText(context, R.string.routes_live_apply_failed, Toast.LENGTH_SHORT).show()
+                    } else {
+                        saveReconfigureStatus(
+                            ReconfigureStatus(
+                                type = ReconfigureStatusType.SUCCESS,
+                                networkType = policy.networkType,
+                                message = "route_order_updated_for_new_sessions",
+                                updatedAtMs = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+                    return applied
+                }
                 val settingsNetworkLabel = RoutePolicyDisplayNames.networkTypeLabel(
                     context,
                     currentNetworkProfile.type,
@@ -2012,20 +2050,22 @@ private fun ProxyScreen(
                                 refreshRoutePolicySnapshot()
                             },
                             onApplyRecommendedPreset = applyRecommendedRoutes,
-                            onWifiPolicyChange = { policy ->
+                            onWifiPolicyChange = wifiPolicyChange@{ policy ->
                                 val normalized = NetworkRoutePolicyEditor.normalize(
                                     policy.copy(networkType = NetworkProfileType.WIFI),
                                 )
+                                if (!applyRoutePolicyLive(normalized)) return@wifiPolicyChange
                                 routePolicyRepository.save(normalized)
                                 RouteDefaultsMigration.markUserModified(prefs)
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
                             },
-                            onMobilePolicyChange = { policy ->
+                            onMobilePolicyChange = mobilePolicyChange@{ policy ->
                                 val normalized = NetworkRoutePolicyEditor.normalize(
                                     policy.copy(networkType = NetworkProfileType.MOBILE),
                                 )
+                                if (!applyRoutePolicyLive(normalized)) return@mobilePolicyChange
                                 routePolicyRepository.save(normalized)
                                 RouteDefaultsMigration.markUserModified(prefs)
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
