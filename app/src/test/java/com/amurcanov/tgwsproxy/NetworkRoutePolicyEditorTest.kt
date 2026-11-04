@@ -106,6 +106,37 @@ class NetworkRoutePolicyEditorTest {
         ))
     }
 
+    @Test
+    fun disabledRouteNeverMovesAndReturnsToItsOriginalSlot() {
+        val initial = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP, RouteKind.WORKER_WS),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val disabled = NetworkRoutePolicyEditor.setRouteEnabled(initial, RouteKind.AWG_WARP, false)
+        assertEquals(initial.displayOrder, disabled.displayOrder)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.WORKER_WS), disabled.activeRoutes)
+
+        val reordered = NetworkRoutePolicyEditor.moveEnabledRoute(disabled, 0, 1)
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.AWG_WARP,
+            RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            reordered.displayOrder)
+        val enabled = NetworkRoutePolicyEditor.setRouteEnabled(reordered, RouteKind.AWG_WARP, true)
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS),
+            enabled.activeRoutes)
+    }
+
+    @Test
+    fun resettingBothProfilesEnablesOnlyCloudflareProxy() {
+        for (type in listOf(NetworkProfileType.WIFI, NetworkProfileType.MOBILE)) {
+            val policy = DefaultNetworkRoutePolicies.forType(type)
+            assertEquals(listOf(RouteKind.CF_PROXY_WS), policy.activeRoutes)
+            assertFalse(policy.allowFallback)
+        }
+    }
+
     private fun policy(
         routes: Set<RouteKind>,
         preferred: RouteKind?,
