@@ -17,8 +17,8 @@ enum class RouteKind(val prefValue: String) {
 }
 
 /**
- * For v2, activeRoutes and inactiveRoutes are authoritative, ordered lists.
- * Legacy fields are retained only for migration and older consumers.
+ * Active routes are the native fallback chain. displayOrder is the stable visual
+ * order of all routes, including disabled entries. Legacy fields remain readable.
  */
 data class NetworkRoutePolicy(
     val networkType: NetworkProfileType,
@@ -28,18 +28,13 @@ data class NetworkRoutePolicy(
     val allowFallback: Boolean,
     val activeRoutes: List<RouteKind> = emptyList(),
     val inactiveRoutes: List<RouteKind> = emptyList(),
+    val displayOrder: List<RouteKind> = emptyList(),
 )
 
 object DefaultNetworkRoutePolicies {
     fun forType(type: NetworkProfileType): NetworkRoutePolicy {
-        val active = when (type) {
-            NetworkProfileType.WIFI -> listOf(
-                RouteKind.CF_PROXY_WS,
-                RouteKind.DIRECT_WS,
-                RouteKind.TCP_FALLBACK,
-            )
-            NetworkProfileType.MOBILE, NetworkProfileType.UNKNOWN -> listOf(RouteKind.CF_PROXY_WS)
-        }
+        // Direct WS and TCP are opt-in, not silent fallback routes.
+        val active = listOf(RouteKind.CF_PROXY_WS)
         return NetworkRoutePolicy(
             networkType = type,
             enabledRoutes = active.toSet(),
@@ -48,6 +43,7 @@ object DefaultNetworkRoutePolicies {
             allowFallback = active.size > 1,
             activeRoutes = active,
             inactiveRoutes = NetworkRoutePolicyEditor.routeOrder.filterNot { it in active },
+            displayOrder = NetworkRoutePolicyEditor.routeOrder,
         )
     }
 }
