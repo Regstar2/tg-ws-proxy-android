@@ -89,6 +89,7 @@ fun RoutesSettingsScreen(
                 onMobilePolicyChange = onMobilePolicyChange,
                 onResetWifiPolicy = onResetWifiPolicy,
                 onResetMobilePolicy = onResetMobilePolicy,
+                reconfigureStatus = reconfigureStatus,
             )
         }
         RoutesSettingsPage.ADVANCED -> {
