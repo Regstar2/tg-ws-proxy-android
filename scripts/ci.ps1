@@ -138,7 +138,7 @@ else {
     Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
 }
 
-Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
+Invoke-CheckedCommand -Label 'Run Android unit tests and build debug and instrumentation APKs' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', 'assembleDebugAndroidTest', '--stacktrace')
 
 $quickSettingsManifestTest = Join-Path $PSScriptRoot 'tests\quick-settings-preferences-manifest-test.ps1'
 Write-Host "`n==> Verify merged Android Quick Settings preferences manifest"
