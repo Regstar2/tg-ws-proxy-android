@@ -200,7 +200,9 @@ func mtProtoRoutesForCapability(settings runtimeSettings) []routeKind {
 
 func mtProtoRoutesForRequest(settings runtimeSettings, request mtproxyfrontend.OutboundRequest) []routeKind {
     if settings.OrderedPolicy {
-        return allowedRoutesList(settings)
+        // Cooldowns decide whether a candidate is currently eligible, not priority.
+        // An exhausted strict-only chain still fails without inventing a replacement.
+        return filterWorkerRouteCooldown(allowedRoutesList(settings), request.DCID, request.IsMedia)
     }
 	if request.IsTestDC {
 		return mtProtoTestDCRoutes(settings)
