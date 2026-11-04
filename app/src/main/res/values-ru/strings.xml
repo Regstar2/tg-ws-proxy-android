@@ -991,4 +991,5 @@
     <string name="routes_no_configured_route">Настройте Worker/WARP</string>
     <string name="routes_live_apply_failed">Маршруты сохранены, но не применены к работающему прокси</string>
     <string name="routes_configuration_required">Требуется настройка</string>
+    <string name="notification_configured_priority">Приоритет: %1$s</string>
 </resources>
