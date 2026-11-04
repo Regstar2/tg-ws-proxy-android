@@ -3550,6 +3550,20 @@ func SetManualCFDomains(cDomains *C.char) {
 	setRuntimeSettings(settings)
 }
 
+//export UpdateRouteOrder
+func UpdateRouteOrder(cOrder *C.char) C.int {
+	if cOrder == nil {
+		return -2
+	}
+	routes := parseOrderedRoutes(C.GoString(cOrder))
+	if len(routes) == 0 {
+		return -2
+	}
+	settings := withExplicitRouteOrder(getRuntimeSettings(), routes)
+	setRuntimeSettings(settings)
+	return 0
+}
+
 //export GetAdaptiveRouteStats
 func GetAdaptiveRouteStats() *C.char {
 	return C.CString(exportAdaptiveRouteStats())
