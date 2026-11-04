@@ -3332,6 +3332,12 @@ func (mtProtoLogWriter) Printf(format string, args ...any) {
 }
 
 func startMtProtoWorkerPreconnect(dcOptMap map[int]string, settings runtimeSettings) {
+    // Do not open a lower-priority Worker transport merely for speculative warmup.
+    if settings.OrderedPolicy &&
+        (len(settings.OrderedRoutes) == 0 || settings.OrderedRoutes[0] != routeCFWorkerWS) {
+        stopMtProtoWorkerPreconnect(false)
+        return
+    }
 	workerDomains := workerWarmupDomains(settings)
 	active := workerWsPreconnectActiveForSettings(settings)
 	if !settings.workerRouteAvailable() || !active || len(workerDomains) == 0 {
