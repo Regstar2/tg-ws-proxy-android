@@ -30,13 +30,15 @@
 
 В CI: Go `test ./...` (проверки строгой очередности), Android `testDebugUnitTest`, `lintDebug`, `assembleDebug`, `assembleDebugAndroidTest`. Compose UI-тесты выполняются на подключённом устройстве.
 
-Сборка, проверка подписи и установка на физическое устройство без удаления данных:
+Сборка, проверка подписи и обновление приложения **только при наличии установленного основного пакета** (без удаления данных):
 
 ```powershell
 .\scripts\issue-135-rebuild-device.ps1 -SigningRoot "C:\Путь\к\исходному\репозиторию\с\release-ключом"
 ```
 
-Нужен оригинальный release keystore и локальные переменные `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, опционально `KEY_ALIAS`. Существующий Gradle `TGWS_SIGNED_WORKER_SMOKE=1` выпускает debug APK, подписанный тем же ключом, что и установленное приложение. Скрипт сверяет подписи application и instrumentation APK, проверяет application ID, выполняет `adb install -r` без `adb uninstall` и запускает UI-тесты. Если подпись другого ключа, Android отклонит замену с сохранением данных.
+Нужен оригинальный release keystore и локальные переменные `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, опционально `KEY_ALIAS`. Существующий Gradle `TGWS_SIGNED_WORKER_SMOKE=1` выпускает debug APK, подписанный тем же ключом, что и установленное приложение. Скрипт сверяет подписи application и instrumentation APK, проверяет application ID, выполняет `adb install -r` без `adb uninstall` и запускает UI-тесты **напрямую через AndroidJUnitRunner**, без Gradle-задачи установки/очистки инструментальных тестов. Если подпись другого ключа, Android отклонит замену без удаления данных.
+
+**Защита пользовательских данных:** Android Gradle Plugin 8.2.x может удалять целевой пакет после `connectedDebugAndroidTest`. Для ручного запуска Gradle установлен `android.injected.androidTest.leaveApksInstalledAfterRun=true`, однако предпочтителен безопасный прямой тестовый запуск скриптом. Если основной пакет отсутствует (`adb shell pm path io.github.regstar2.tgwsproxy` не выводит `package:`), скрипт **останавливается до установки**, потому что старые настройки могли быть утрачены. Только после проверки резервной копии можно сознательно разрешить новую установку через `-AllowFreshInstall`; этот флаг не восстанавливает настройки. `-SkipInstrumentedTests` пропускает UI-тесты, но не проверку сохранности основного пакета. В случае падения UI-тестов сохраняются `instrumentation.txt`, `instrumentation-errors.txt` и `logcat.txt` в `%TEMP%\\tgwsproxy-issue135-instrumentation`.
 
 ## Обязательный device acceptance до merge
 
