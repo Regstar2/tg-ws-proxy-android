@@ -48,6 +48,7 @@ internal fun OrderedRoutesSettings(
     onMobilePolicyChange: (NetworkRoutePolicy) -> Unit,
     onResetWifiPolicy: () -> Unit,
     onResetMobilePolicy: () -> Unit,
+    reconfigureStatus: ReconfigureStatus? = null,
 ) {
     var selectedNetwork by rememberSaveable { mutableStateOf(NetworkProfileType.WIFI) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -119,6 +120,17 @@ internal fun OrderedRoutesSettings(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+
+        if (reconfigureStatus?.type == ReconfigureStatusType.FAILED &&
+            reconfigureStatus.networkType == selectedNetwork
+        ) {
+            Text(
+                stringResource(R.string.routes_live_apply_failed),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("routes.apply.error"),
+            )
         }
 
         OutlinedButton(
