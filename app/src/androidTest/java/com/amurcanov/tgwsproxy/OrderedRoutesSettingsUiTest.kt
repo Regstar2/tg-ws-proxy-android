@@ -16,9 +16,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.down
-import androidx.compose.ui.test.moveBy
-import androidx.compose.ui.test.up
 import androidx.compose.foundation.layout.Column
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
