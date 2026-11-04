@@ -183,10 +183,16 @@ func (c *mtProtoRouteConnector) connectorForRoute(route routeKind) mtproxyfronte
 }
 
 func mtProtoRoutesForCapability(settings runtimeSettings) []routeKind {
-	return withAWGWarpRoute(routesForMode(settings.Mode, settings, false))
+    if settings.OrderedPolicy {
+        return allowedRoutesList(settings)
+    }
+    return withAWGWarpRoute(routesForMode(settings.Mode, settings, false))
 }
 
 func mtProtoRoutesForRequest(settings runtimeSettings, request mtproxyfrontend.OutboundRequest) []routeKind {
+    if settings.OrderedPolicy {
+        return allowedRoutesList(settings)
+    }
 	if request.IsTestDC {
 		return mtProtoTestDCRoutes(settings)
 	}
