@@ -23,8 +23,9 @@ object RouteDefaultsMigration {
         if (currentVersion >= DEFAULTS_VERSION_1800) return
 
         val userModified = prefs.getBoolean(KEY_USER_MODIFIED, false)
-        if (userModified) {
-            Log.i(TAG, "Skipping route defaults migration: userModifiedRoutePolicy=true")
+        val hasExistingPolicy = NetworkProfileType.entries.any(repository::hasSavedPolicy)
+        if (userModified || hasExistingPolicy) {
+            Log.i(TAG, "Skipping route defaults migration: existingRoutePolicy=$hasExistingPolicy userModified=$userModified")
             prefs.edit().putInt(KEY_DEFAULTS_VERSION, DEFAULTS_VERSION_1800).apply()
             return
         }
