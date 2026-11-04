@@ -51,7 +51,9 @@ class NetworkRoutePolicyRepositoryTest {
         repository.save(expected)
         val actual = repository.load(NetworkProfileType.WIFI)
 
-        assertEquals(expected.enabledRoutes, actual.enabledRoutes)
+        // v2 policy cannot contain two active routes while fallback is forbidden.
+        assertEquals(setOf(RouteKind.CF_PROXY_WS), actual.enabledRoutes)
+        assertTrue(RouteKind.WORKER_WS in actual.inactiveRoutes)
         assertEquals(expected.preferredRoute, actual.preferredRoute)
         assertEquals(expected.autoStrategy, actual.autoStrategy)
         assertEquals(expected.allowFallback, actual.allowFallback)
@@ -125,7 +127,7 @@ class NetworkRoutePolicyRepositoryTest {
         repository.reset(NetworkProfileType.WIFI)
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
-        assertEquals(mobilePolicy, repository.load(NetworkProfileType.MOBILE))
+        assertEquals(NetworkRoutePolicyEditor.normalize(mobilePolicy), repository.load(NetworkProfileType.MOBILE))
     }
 
     @Test
