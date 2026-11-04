@@ -456,7 +456,11 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		return
 	}
 	if config.FakeTLSDomain != "" {
-		r.noteFakeTLSAccepted()
+		if _, wrapped := clientConn.(*fakeTLSStream); wrapped {
+			r.noteFakeTLSAccepted()
+		} else {
+			r.log("MTProto legacy obfuscated client accepted on Fake TLS-enabled local listener remote=%s", remote)
+		}
 	}
 
 	sessionID := SessionIDForRequest(request)
