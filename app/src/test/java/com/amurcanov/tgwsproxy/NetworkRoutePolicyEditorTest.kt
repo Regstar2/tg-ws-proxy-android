@@ -78,6 +78,34 @@ class NetworkRoutePolicyEditorTest {
         assertEquals(RouteKind.CF_PROXY_WS, updated.preferredRoute)
     }
 
+    @Test
+    fun configuredRouteGuard_blocksLastReachableRouteFromBeingDisabled() {
+        val initial = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val onlyCf = initial.copy(
+            activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP),
+            inactiveRoutes = listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.WORKER_WS),
+        )
+        val candidate = NetworkRoutePolicyEditor.setRouteEnabled(
+            onlyCf, RouteKind.CF_PROXY_WS, false
+        )
+        assertFalse(NetworkRoutePolicyEditor.hasConfiguredOutboundRoute(
+            candidate, workerConfigured = false, awgConfigured = false
+        ))
+        assertTrue(NetworkRoutePolicyEditor.hasConfiguredOutboundRoute(
+            candidate, workerConfigured = false, awgConfigured = true
+        ))
+    }
+
+    @Test
+    fun configuredRouteGuard_allowsExplicitCloudflareFallbackWithoutAwgConfig() {
+        val mixed = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+            activeRoutes = listOf(RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS),
+        )
+        assertTrue(NetworkRoutePolicyEditor.hasConfiguredOutboundRoute(
+            mixed, workerConfigured = false, awgConfigured = false
+        ))
+    }
+
     private fun policy(
         routes: Set<RouteKind>,
         preferred: RouteKind?,
