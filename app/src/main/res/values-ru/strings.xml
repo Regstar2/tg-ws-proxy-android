@@ -989,4 +989,5 @@
     <string name="routes_inactive_text">Неактивно</string>
     <string name="routes_minimum_one">Хотя бы один маршрут должен оставаться включённым</string>
     <string name="routes_live_apply_failed">Маршруты сохранены, но не применены к работающему прокси</string>
+    <string name="routes_configuration_required">Требуется настройка</string>
 </resources>
