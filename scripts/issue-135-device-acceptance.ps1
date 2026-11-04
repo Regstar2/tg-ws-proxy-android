@@ -11,6 +11,7 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
 
 $TestPackage = "io.github.regstar2.tgwsproxy"
+. (Join-Path $PSScriptRoot "issue-135-apksigner-cert.ps1")
 if ([string]::IsNullOrWhiteSpace($SigningRoot)) {
     $SigningRoot = $Root
 }
@@ -119,16 +120,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Signed debug APK failed apksigner verification"
     }
-    $CertLine = $CertReport | Where-Object {
-        $_ -match '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
-    } | Select-Object -First 1
-    if (-not $CertLine) {
-        throw "APK signing certificate digest not found; installation stopped"
-    }
-    $CertificateDigest = ([regex]::Match($CertLine, '([0-9a-fA-F]{64})\s*$')).Groups[1].Value
-    if ($CertificateDigest.Length -ne 64) {
-        throw "APK signing certificate SHA-256 digest is invalid"
-    }
+    $CertificateDigest = Get-ApkSignerCertificateSha256 -ReportLines $CertReport
 
     @(
         "apk_sha256=$((Get-FileHash -LiteralPath $Apk -Algorithm SHA256).Hash)",
@@ -143,11 +135,7 @@ try {
     }
     $TestCertReport = @(& $ApkSigner.FullName verify --print-certs $TestApk)
     if ($LASTEXITCODE -ne 0) { throw "Android instrumentation APK signature verification failed" }
-    $TestCertLine = $TestCertReport | Where-Object {
-        $_ -match '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
-    } | Select-Object -First 1
-    if (-not $TestCertLine) { throw "Instrumentation APK certificate digest unavailable" }
-    $TestCertDigest = ([regex]::Match($TestCertLine, '([0-9a-fA-F]{64})\s*$')).Groups[1].Value
+    $TestCertDigest = Get-ApkSignerCertificateSha256 -ReportLines $TestCertReport
     if ($TestCertDigest -ine $CertificateDigest) {
         throw "Instrumentation APK certificate differs from the release-signed debug APK; refusing device test"
     }
