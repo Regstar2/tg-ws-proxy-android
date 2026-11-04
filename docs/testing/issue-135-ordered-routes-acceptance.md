@@ -11,18 +11,29 @@
   reset confirmation, restart persistence and accessibility labels.
 - A green unit-test suite does **not** prove real MTProto transport success.
 
-## Isolated Android test installation
+## Release-signed Android device installation
 
-Run `scripts/issue-135-device-acceptance.ps1` from the issue branch. It builds
-the debug APK with `-Pissue135IsolatedDeviceTest=true` and installs the separate
-application `io.github.regstar2.tgwsproxy.issue135` using its own data storage.
-The installed release `io.github.regstar2.tgwsproxy` is not uninstalled or
-re-signed. The ordinary debug/release builds retain their original application ID.
+Run `scripts/issue-135-device-acceptance.ps1` with the original release signing environment.
+If the keys are loaded from the original checkout's ignored
+`scripts/load-release-signing.ps1`, supply `-SigningRoot` pointing to that checkout.
+The script uses the existing `TGWS_SIGNED_WORKER_SMOKE=1` Gradle signing
+opt-in to produce a **debug APK signed with the ORIGINAL release keystore**
+and retains the production application ID
+`io.github.regstar2.tgwsproxy` and release versionCode. No new package
+ID, signing key or uninstallation is involved.
 
-The isolated app starts with separate settings, so import only the test
-configuration required by the matrix. Do not run the release and isolated proxy
-simultaneously on the same localhost port. A passing Compose instrumentation
-test is not proof of successful MTProto message or media transport.
+The script requires the existing release keystore, `KEYSTORE_PASSWORD`,
+`KEY_PASSWORD` and optional `KEY_ALIAS`. It checks the signed APK
+certificate with `apksigner` and checks its package ID with `aapt`
+before `adb install -r`. Android rejects mismatched certificates and
+never removes the existing application data. Never use `adb uninstall`
+or `pm clear` to work around an install error; the original release
+key must match the installed application.
+
+The test replaces the existing app, so its current preferences are retained.
+Only run it on the intended test device; keep a private backup before changing
+routes. A passing Compose instrumentation test does not prove successful
+MTProto text or media transport.
 
 ## Device acceptance matrix
 
