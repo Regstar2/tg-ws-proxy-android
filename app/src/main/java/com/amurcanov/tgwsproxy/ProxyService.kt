@@ -491,7 +491,14 @@ class ProxyService : Service() {
                 // Native hot apply completed: refresh app state and notification immediately.
                 // Existing MTProto sockets keep their last actual backend until reconnect.
                 val runtime = readRuntimeMetrics(frontendType)
-                ProxyRuntimeState.update { it.copy(runtime = runtime) }
+                val configuredFirst = ips.split(',')
+                    .firstOrNull { it.startsWith("@route_order=") }
+                    ?.substringAfter('=')
+                    ?.substringBefore('|')
+                    .orEmpty()
+                ProxyRuntimeState.update {
+                    it.copy(runtime = runtime, configuredRouteKind = configuredFirst)
+                }
                 updateNotification(force = true)
             } else {
                 Log.e("TgWsProxy", "MTProto route policy hot-update rejected; existing sessions preserved")
@@ -715,11 +722,22 @@ class ProxyService : Service() {
                 ui.runtime.routeLabel(this),
             )
         }
+        // Show the applied priority immediately, without claiming an already
+        // established MTProto session switched its actual transport.
+        val configured = ui.configuredRouteKind.takeIf {
+            ui.serviceStatus == ProxyServiceStatus.RUNNING && it.isNotBlank()
+        }?.let { route ->
+            getString(
+                R.string.notification_configured_priority,
+                RouteDisplayNames.routeLabel(this, route),
+            )
+        }
+        val statusWithPriority = if (configured == null) status else "$status · $configured"
         if (!prefs.showMetricsInNotification || prefs.displayMode == NotificationDisplayMode.MINIMAL) {
-            return status
+            return statusWithPriority
         }
         if (ui.serviceStatus != ProxyServiceStatus.RUNNING) {
-            return status
+            return statusWithPriority
         }
         val speed = when (prefs.displayMode) {
             NotificationDisplayMode.COMPACT ->
@@ -735,7 +753,7 @@ class ProxyService : Service() {
                     getString(R.string.metrics_idle),
                 )
         }
-        return "$status · $speed"
+        return "$statusWithPriority · $speed"
     }
 
     private fun notificationExpandedText(
@@ -751,6 +769,12 @@ class ProxyService : Service() {
         val lines = mutableListOf<String>()
         lines += getString(R.string.notification_line_mode, ui.runtime.modeLabel(this))
         lines += getString(R.string.notification_line_route, ui.runtime.routeLabel(this))
+        if (ui.configuredRouteKind.isNotBlank()) {
+            lines += getString(
+                R.string.notification_configured_priority,
+                RouteDisplayNames.routeLabel(this, ui.configuredRouteKind),
+            )
+        }
         val speed = ConnectionMetricsFormatter.formatSpeedPair(
             ui.downloadBps,
             ui.uploadBps,
