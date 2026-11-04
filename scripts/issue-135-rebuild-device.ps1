@@ -1,8 +1,11 @@
-# Build and install an original-release-key-signed debug APK for Issue #135.
-# Existing package data are preserved. Never uninstall to bypass a certificate error.
+# Build and update an original-release-key-signed debug APK for Issue #135.
+# No uninstall/clear-data commands. A missing installed app blocks silent reinstalls.
 param(
     [string]$SigningRoot = "",
-    [switch]$SkipInstrumentedTests
+    [switch]$SkipInstrumentedTests,
+    [switch]$AllowFreshInstall,
+    [ValidateRange(30, 900)]
+    [int]$InstrumentTimeoutSeconds = 240
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +49,19 @@ if ($LASTEXITCODE -ne 0 -or $devices.Count -ne 1) {
     throw "Exactly one authorized Android device is required."
 }
 $serial = ($devices[0] -split '\s+')[0]
+$applicationId = "io.github.regstar2.tgwsproxy"
+$runner = "$applicationId.test/androidx.test.runner.AndroidJUnitRunner"
+
+function Test-ApplicationInstalled {
+    $paths = @(adb -s $serial shell pm path $applicationId)
+    return $LASTEXITCODE -eq 0 -and @($paths | Where-Object { $_ -match '^package:' }).Count -gt 0
+}
+
+$appWasInstalled = Test-ApplicationInstalled
+if (-not $appWasInstalled -and -not $AllowFreshInstall) {
+    throw "The existing application is missing from Android. The earlier Gradle device test may have removed it and its data. No installation will be attempted. Inspect backups first; use -AllowFreshInstall only after accepting that previous settings may be gone."
+}
+
 $androidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) {
     $env:ANDROID_SDK_ROOT
 } else { Join-Path $env:LOCALAPPDATA "Android/Sdk" }
@@ -94,16 +110,74 @@ try {
     Write-Host "Commit: $(git rev-parse HEAD)"
     Write-Host "Certificate SHA-256: $appCert"
     Write-Host "APK SHA-256: $((Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash)"
-    Write-Host "Installing release-signed DEBUG APK; preserving application data."
+    if (-not $appWasInstalled) {
+        Write-Warning "Fresh install explicitly authorized. Previous application settings cannot be guaranteed."
+    } else {
+        Write-Host "Upgrading release-signed DEBUG APK with adb install -r; no app uninstall or data clear."
+    }
     adb -s $serial install -r $apk
     if ($LASTEXITCODE -ne 0) {
         throw "Android rejected the upgrade. Check original key/version; do not uninstall."
     }
-    if (-not $SkipInstrumentedTests) {
-        & .\gradlew.bat :app:connectedDebugAndroidTest
-        if ($LASTEXITCODE -ne 0) { throw "Connected instrumentation tests failed" }
+    if (-not (Test-ApplicationInstalled)) {
+        throw "Production application is missing after adb install -r."
     }
-    Write-Host "Signed debug build and install completed."
+
+    if (-not $SkipInstrumentedTests) {
+        # Gradle's connected test task can uninstall the production package on some
+        # Android Gradle Plugin versions. Run the signed test APK directly instead.
+        adb -s $serial install -r -t $testApk
+        if ($LASTEXITCODE -ne 0) {
+            throw "Android rejected the instrumentation APK; production app was not uninstalled."
+        }
+        $instrumentations = @(adb -s $serial shell pm list instrumentation)
+        $expectedRunner = "instrumentation:$runner (target=$applicationId)"
+        if ($LASTEXITCODE -ne 0 -or -not ($instrumentations | Where-Object { $_.Trim() -eq $expectedRunner })) {
+            throw "Instrumentation runner missing or targeting a different application."
+        }
+
+        $testReportDirectory = Join-Path $env:TEMP "tgwsproxy-issue135-instrumentation"
+        New-Item -ItemType Directory -Force -Path $testReportDirectory | Out-Null
+        $outputPath = Join-Path $testReportDirectory "instrumentation.txt"
+        $errorPath = Join-Path $testReportDirectory "instrumentation-errors.txt"
+        $logcatPath = Join-Path $testReportDirectory "logcat.txt"
+        Write-Host "Running on-device UI tests directly: $runner"
+        Write-Host "Instrumentation results: $outputPath"
+
+        $process = Start-Process -FilePath (Get-Command adb).Source -ArgumentList @(
+            "-s", $serial, "shell", "am", "instrument", "-w", "-r", $runner
+        ) -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -NoNewWindow -PassThru
+        $completed = $process.WaitForExit($InstrumentTimeoutSeconds * 1000)
+        if (-not $completed) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+        $process.Refresh()
+        $testOutput = @(Get-Content -LiteralPath $outputPath -ErrorAction SilentlyContinue)
+        $testErrors = @(Get-Content -LiteralPath $errorPath -ErrorAction SilentlyContinue)
+        $testOutput | ForEach-Object { Write-Host $_ }
+        $testErrors | ForEach-Object { Write-Warning $_ }
+
+        $passed = $completed -and $process.ExitCode -eq 0 -and
+            @($testOutput | Where-Object { $_ -match '^INSTRUMENTATION_CODE:\s*-1\s*
+} finally {
+    if ($null -eq $previousSignedFlag) {
+        Remove-Item Env:TGWS_SIGNED_WORKER_SMOKE -ErrorAction SilentlyContinue
+    } else {
+        $env:TGWS_SIGNED_WORKER_SMOKE = $previousSignedFlag
+    }
+}
+ }).Count -eq 1
+        if (-not $passed) {
+            adb -s $serial logcat -d -b main -b system -b crash -v threadtime -t 10000 |
+                Out-File -LiteralPath $logcatPath -Encoding UTF8
+            throw "Android UI tests failed or timed out; see $outputPath, $errorPath and $logcatPath."
+        }
+    }
+
+    if (-not (Test-ApplicationInstalled)) {
+        throw "Production app disappeared during device testing. Do not repeat tests; inspect app data."
+    }
+    Write-Host "Signed debug build, upgrade and device verification completed."
 } finally {
     if ($null -eq $previousSignedFlag) {
         Remove-Item Env:TGWS_SIGNED_WORKER_SMOKE -ErrorAction SilentlyContinue
