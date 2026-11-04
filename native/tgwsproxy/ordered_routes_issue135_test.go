@@ -99,6 +99,8 @@ func TestOrderedConnectorStrictOnlyRejectsHiddenTransport(t *testing.T) {
 // A settings switch must affect future MTProto sessions without changing
 // already-created upstream connections or enabling a disabled fallback.
 func TestOrderedPolicySwitchesBackendOnNewSessions(t *testing.T) {
+    resetWorkerRouteCooldowns()
+    t.Cleanup(resetWorkerRouteCooldowns)
     _, cfOnly, err := parseRuntimeConfig("@route_order=cf_proxy_ws,@route_cf_proxy_ws=1")
     if err != nil { t.Fatal(err) }
     _, workerOnly, err := parseRuntimeConfig(
