@@ -73,6 +73,7 @@ type runtimeSettings struct {
 	AllowAWG      bool
 	AllowTCP      bool
 	RouteOrder    []routeKind // v2: authoritative order, unaffected by scoring and legacy mode
+	RouteOrderPresent bool
 	Preferred     routeKind // empty means "no explicit preferred"
 	AllowFallback bool
 	PolicyGen     uint64
