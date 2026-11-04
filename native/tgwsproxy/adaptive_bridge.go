@@ -39,6 +39,10 @@ func applyAdaptiveProfile(settings runtimeSettings) {
 }
 
 func adaptiveRoutesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool, dc int, isMedia bool) []routeKind {
+	if settings.RouteOrderPresent {
+		// Preserve user priority; health/cooldown can skip a candidate, never promote it by score.
+		return filterWorkerRouteCooldown(routesForMode(mode, settings, skipDirect), dc, isMedia)
+	}
 	if exclusiveAWGWarpRouteEnabled() {
 		if logDebug != nil {
 			logDebug.Printf("Auto route scoring skipped reason=exclusive_awg_warp dc=%d media=%t", dc, isMedia)
