@@ -183,10 +183,17 @@ func (c *mtProtoRouteConnector) connectorForRoute(route routeKind) mtproxyfronte
 }
 
 func mtProtoRoutesForCapability(settings runtimeSettings) []routeKind {
+	if settings.RouteOrderPresent {
+		return allowedRoutesList(settings)
+	}
 	return withAWGWarpRoute(routesForMode(settings.Mode, settings, false))
 }
 
 func mtProtoRoutesForRequest(settings runtimeSettings, request mtproxyfrontend.OutboundRequest) []routeKind {
+	if settings.RouteOrderPresent {
+		// No legacy mode, last-good score, or AWG auto-insertion can reorder v2.
+		return allowedRoutesList(settings)
+	}
 	if request.IsTestDC {
 		return mtProtoTestDCRoutes(settings)
 	}
