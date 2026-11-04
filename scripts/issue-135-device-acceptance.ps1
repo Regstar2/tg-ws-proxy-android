@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
+$IsolatedGradleProperty = "-Pissue135IsolatedDeviceTest=true"
+$TestPackage = "io.github.regstar2.tgwsproxy.issue135"
 
 if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
     throw "adb not found in PATH"
@@ -34,21 +36,27 @@ try {
         "serial=$Serial",
         "android_release=$(adb -s $Serial shell getprop ro.build.version.release)",
         "device_model=$(adb -s $Serial shell getprop ro.product.model)",
-        "git_head=$(git rev-parse HEAD)"
+        "git_head=$(git rev-parse HEAD)",
+        "test_application_id=$TestPackage"
     ) | Set-Content -Path (Join-Path $OutputDirectory "device.txt") -Encoding UTF8
 
     if (-not $SkipBuild) {
-        & .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        & .\gradlew.bat $IsolatedGradleProperty :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
         if ($LASTEXITCODE -ne 0) { throw "Build, lint or JVM tests failed" }
     }
     if (-not $SkipInstall) {
         $Apk = Join-Path $Root "app/build/outputs/apk/debug/app-debug.apk"
         if (-not (Test-Path $Apk)) { throw "Debug APK not found: $Apk" }
+        Write-Host "Installing isolated test package: $TestPackage (existing release app preserved)"
         adb -s $Serial install -r $Apk
-        if ($LASTEXITCODE -ne 0) { throw "APK installation failed (data kept)" }
+        if ($LASTEXITCODE -ne 0) { throw "Isolated APK installation failed (existing apps kept)" }
+        $PackagePaths = @(adb -s $Serial shell pm path $TestPackage)
+        if ($LASTEXITCODE -ne 0 -or @($PackagePaths | Where-Object { $_ -match '^package:' }).Count -eq 0) {
+            throw "Isolated test package not found after install: $TestPackage"
+        }
     }
 
-    & .\gradlew.bat :app:connectedDebugAndroidTest
+    & .\gradlew.bat $IsolatedGradleProperty :app:connectedDebugAndroidTest
     if ($LASTEXITCODE -ne 0) { throw "Instrumentation tests failed" }
     $Status = "PASS"
 } finally {
