@@ -19,7 +19,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,7 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
-/** Visual structure follows the approved TGWSProxy_Routes_Revised.html mockup. */
+/** Compact ordered route editor with independent network profiles. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OrderedRoutesSettings(
     wifiPolicy: NetworkRoutePolicy,
@@ -75,13 +79,14 @@ internal fun OrderedRoutesSettings(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        SingleChoiceSegmentedButtonRow(
             modifier = Modifier.fillMaxWidth(),
         ) {
-            FilterChip(
+            SegmentedButton(
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                 selected = selectedNetwork == NetworkProfileType.WIFI,
                 onClick = { selectedNetwork = NetworkProfileType.WIFI },
+                icon = {},
                 label = {
                     Text(
                         stringResource(R.string.routes_wifi_tab),
@@ -89,11 +94,13 @@ internal fun OrderedRoutesSettings(
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                modifier = Modifier.weight(1f).testTag("routes.tab.wifi"),
+                modifier = Modifier.testTag("routes.tab.wifi"),
             )
-            FilterChip(
+            SegmentedButton(
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                 selected = selectedNetwork == NetworkProfileType.MOBILE,
                 onClick = { selectedNetwork = NetworkProfileType.MOBILE },
+                icon = {},
                 label = {
                     Text(
                         stringResource(R.string.routes_mobile_tab),
@@ -101,7 +108,7 @@ internal fun OrderedRoutesSettings(
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
-                modifier = Modifier.weight(1f).testTag("routes.tab.mobile"),
+                modifier = Modifier.testTag("routes.tab.mobile"),
             )
         }
 
