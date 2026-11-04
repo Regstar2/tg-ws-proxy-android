@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,7 @@ class OrderedRoutesSettingsUiTest {
         count(3)
         rule.onNodeWithTag("routes.tab.mobile").performClick()
         count(1)
-        rule.onNodeWithTag("routes.toggle.awg_warp").performClick()
+        rule.onNodeWithTag("routes.toggle.awg_warp").performScrollTo().performClick()
         count(2)
         rule.onNodeWithTag("routes.tab.wifi").performClick()
         count(3)
@@ -76,7 +77,7 @@ class OrderedRoutesSettingsUiTest {
         render()
         rule.onNodeWithTag("routes.toggle.cf_proxy_ws").performClick()
         count(2)
-        rule.onNodeWithTag("routes.reset").performClick()
+        rule.onNodeWithTag("routes.reset").performScrollTo().performClick()
         rule.onNodeWithTag("routes.confirm_reset").performClick()
         count(3)
         assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
@@ -87,7 +88,7 @@ class OrderedRoutesSettingsUiTest {
     @Test
     fun dragHandleCanChangeActivePriority() {
         render()
-        rule.onNodeWithTag("routes.drag.tcp_fallback").performTouchInput {
+        rule.onNodeWithTag("routes.drag.tcp_fallback").performScrollTo().performTouchInput {
             down(center)
             moveBy(Offset(0f, -180f))
             moveBy(Offset(0f, -180f))
