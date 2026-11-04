@@ -77,6 +77,46 @@ class NetworkRoutePolicyEditorTest {
         assertEquals(RouteKind.WORKER_WS, updated.preferredRoute)
     }
 
+    @Test
+    fun moveEnabledRouteChangesExactFallbackPriority() {
+        val initial = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val moved = NetworkRoutePolicyEditor.moveEnabledRoute(initial, fromIndex = 2, toIndex = 0)
+        assertEquals(
+            listOf(RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS),
+            moved.activeRoutes,
+        )
+        assertEquals(RouteKind.TCP_FALLBACK, moved.preferredRoute)
+        assertTrue(moved.allowFallback)
+    }
+
+    @Test
+    fun disablingThenEnablingMovesRouteToEnd() {
+        val initial = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val disabled = NetworkRoutePolicyEditor.setRouteEnabled(initial, RouteKind.CF_PROXY_WS, false)
+        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK), disabled.activeRoutes)
+        assertTrue(RouteKind.CF_PROXY_WS in disabled.inactiveRoutes)
+        val restored = NetworkRoutePolicyEditor.setRouteEnabled(disabled, RouteKind.CF_PROXY_WS, true)
+        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS), restored.activeRoutes)
+    }
+
+    @Test
+    fun lastRouteCannotBeDisabledOrMovedOutsideList() {
+        val initial = DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE)
+        assertEquals(initial, NetworkRoutePolicyEditor.setRouteEnabled(initial, RouteKind.CF_PROXY_WS, false))
+        assertEquals(initial, NetworkRoutePolicyEditor.moveEnabledRoute(initial, 0, 1))
+    }
+
+    @Test
+    fun legacyNoFallbackMigratesToStrictOnly() {
+        val policy = policy(
+            routes = setOf(RouteKind.DIRECT_WS, RouteKind.WORKER_WS),
+            preferred = RouteKind.WORKER_WS,
+        ).copy(allowFallback = false)
+        val migrated = NetworkRoutePolicyEditor.normalize(policy)
+        assertEquals(listOf(RouteKind.WORKER_WS), migrated.activeRoutes)
+        assertFalse(migrated.allowFallback)
+    }
+
     private fun policy(
         routes: Set<RouteKind>,
         preferred: RouteKind?,
