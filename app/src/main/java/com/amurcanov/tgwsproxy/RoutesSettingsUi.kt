@@ -78,6 +78,8 @@ fun RoutesSettingsScreen(
     onCopyPolicyDiagnostics: () -> Unit,
     onRunRouteProbe: () -> Unit,
     onCopyRouteProbeReport: () -> Unit,
+    workerConfigured: Boolean = false,
+    awgConfigured: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     when (page) {
@@ -90,6 +92,8 @@ fun RoutesSettingsScreen(
                 onResetWifiPolicy = onResetWifiPolicy,
                 onResetMobilePolicy = onResetMobilePolicy,
                 reconfigureStatus = reconfigureStatus,
+                workerConfigured = workerConfigured,
+                awgConfigured = awgConfigured,
                 onOpenDiagnostics = { onPageChange(RoutesSettingsPage.ADVANCED) },
             )
         }
