@@ -36,7 +36,7 @@ class EffectiveRoutePolicyResolverTest {
         val effective = resolver.resolve(profile(NetworkProfileType.WIFI))
 
         assertEquals(EffectiveRoutePolicySource.SAVED_NETWORK_POLICY, effective.source)
-        assertEquals(saved, effective.policy)
+        assertEquals(NetworkRoutePolicyEditor.normalize(saved), effective.policy)
         assertEquals(ConnectionMode.CFOnly, effective.legacyMode)
     }
 
