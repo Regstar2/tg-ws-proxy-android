@@ -45,7 +45,7 @@ class NetworkRoutePolicyRepositoryTest {
             enabledRoutes = linkedSetOf(RouteKind.WORKER_WS, RouteKind.CF_PROXY_WS),
             preferredRoute = RouteKind.CF_PROXY_WS,
             autoStrategy = AutoStrategy.CF_PREFERRED,
-            allowFallback = false,
+            allowFallback = true,
         )
 
         repository.save(expected)
@@ -125,7 +125,7 @@ class NetworkRoutePolicyRepositoryTest {
         repository.reset(NetworkProfileType.WIFI)
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
-        assertEquals(mobilePolicy, repository.load(NetworkProfileType.MOBILE))
+        assertEquals(NetworkRoutePolicyEditor.normalize(mobilePolicy), repository.load(NetworkProfileType.MOBILE))
     }
 
     @Test
@@ -229,6 +229,55 @@ class NetworkRoutePolicyRepositoryTest {
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
         assertFalse(repository.hasSavedPolicy(NetworkProfileType.WIFI))
+    }
+
+    @Test
+    fun v1MigrationPreservesPreferredAndEnabledOnly() {
+        val prefs = InMemorySharedPreferences()
+        prefs.edit().putString(
+            KEY_WIFI,
+            "routes=tcp_fallback|worker_ws|direct_ws;preferred=worker_ws;strategy=balanced;fallback=1",
+        ).apply()
+        val repository = NetworkRoutePolicyRepository(prefs)
+
+        val loaded = repository.load(NetworkProfileType.WIFI)
+
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK), loaded.activeRoutes)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP), loaded.inactiveRoutes)
+        repository.save(loaded)
+        assertTrue(prefs.contains("route_policy_wifi_v2"))
+        assertEquals(loaded, repository.load(NetworkProfileType.WIFI))
+    }
+
+    @Test
+    fun v2StoresExactOrderForEachProfileAndResetIsIsolated() {
+        val repository = NetworkRoutePolicyRepository(InMemorySharedPreferences())
+        val wifi = NetworkRoutePolicyEditor.moveEnabledRoute(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), 2, 0,
+        )
+        val mobile = NetworkRoutePolicyEditor.setRouteEnabled(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE), RouteKind.AWG_WARP, true,
+        )
+        repository.save(wifi)
+        repository.save(mobile)
+        assertEquals(listOf(RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS),
+            repository.load(NetworkProfileType.WIFI).activeRoutes)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP),
+            repository.load(NetworkProfileType.MOBILE).activeRoutes)
+        repository.reset(NetworkProfileType.WIFI)
+        assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
+        assertEquals(mobile, repository.load(NetworkProfileType.MOBILE))
+    }
+
+    @Test
+    fun v2RejectsEmptyActiveChainAndDoesNotReenableLegacyRoutes() {
+        val prefs = InMemorySharedPreferences()
+        prefs.edit()
+            .putString(KEY_WIFI, "routes=direct_ws;preferred=direct_ws;fallback=0")
+            .putString("route_policy_wifi_v2", "version=2;active=bogus;inactive=cf_proxy_ws")
+            .apply()
+        val policy = NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI)
+        assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), policy)
     }
 
     private companion object {
