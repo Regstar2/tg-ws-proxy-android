@@ -3216,7 +3216,16 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.MtProtoWorkerPreconnect = parseBoolValue(val)
 			case "force_test_dc":
 				settings.ForceTestDC = parseBoolValue(val)
-			case "route_direct_ws":
+			case "route_order":
+                routes, err := parseOrderedRoutes(val)
+                if err != nil { return nil, settings, err }
+                settings.OrderedPolicy = true
+                settings.PolicyPresent = true
+                settings.OrderedRoutes = routes
+            case "route_awg_warp":
+                settings.PolicyPresent = true
+                settings.AllowAWG = parseBoolValue(val)
+            case "route_direct_ws":
 				settings.PolicyPresent = true
 				settings.AllowDirect = parseBoolValue(val)
 			case "route_worker_ws":
@@ -3473,6 +3482,29 @@ func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfi
 	default:
 		return -4
 	}
+}
+
+//export UpdateMtProtoRoutePolicy
+// Atomically change policy for future MTProto sessions without restarting the listener.
+func UpdateMtProtoRoutePolicy(cRuntimeConfig *C.char) C.int {
+    dcMap, settings, err := parseRuntimeConfig(C.GoString(cRuntimeConfig))
+    if err != nil || !settings.OrderedPolicy {
+        if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
+        return -4
+    }
+    // A policy with AWG but without a valid imported profile must not block other routes.
+    // Existing AWG tunnel configuration remains owned by the running frontend.
+    setRuntimeSettings(settings)
+    setCfProxyConfig(settings.CF)
+    dcOptMu.Lock()
+    dcOpt = dcMap
+    dcOptMu.Unlock()
+    if logInfo != nil {
+        logInfo.Printf("MTProto route policy updated network=%s order=%s generation=%d",
+            settings.NetworkProfileType, strings.Join(routeKindStrings(settings.OrderedRoutes), "|"),
+            getRuntimeSettings().PolicyGen)
+    }
+    return 0
 }
 
 //export StopMtProtoProxy
