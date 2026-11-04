@@ -1,6 +1,9 @@
 package com.amurcanov.tgwsproxy
 
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 enum class ReconfigureStatusType {
     NONE,
@@ -17,6 +20,9 @@ data class ReconfigureStatus(
 )
 
 object ReconfigureStatusStore {
+    private val _liveStatus = MutableStateFlow<ReconfigureStatus?>(null)
+    val liveStatus: StateFlow<ReconfigureStatus?> = _liveStatus.asStateFlow()
+
     fun load(prefs: SharedPreferences): ReconfigureStatus {
         val type = runCatching {
             ReconfigureStatusType.valueOf(prefs.getString(KEY_TYPE, null).orEmpty())
@@ -38,6 +44,7 @@ object ReconfigureStatusStore {
             .putString(KEY_MESSAGE, status.message)
             .putLong(KEY_UPDATED_AT, status.updatedAtMs)
             .apply()
+        _liveStatus.value = status
     }
 
     fun clear(prefs: SharedPreferences) {
@@ -47,6 +54,7 @@ object ReconfigureStatusStore {
             .remove(KEY_MESSAGE)
             .remove(KEY_UPDATED_AT)
             .apply()
+        _liveStatus.value = null
     }
 
     private const val KEY_TYPE = "last_reconfigure_type_v1"
