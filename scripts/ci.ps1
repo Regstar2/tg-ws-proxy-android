@@ -85,6 +85,25 @@ $routeParseErrors = $null
 ) | Out-Null
 if ($routeParseErrors) { throw "Issue #135 installation script has invalid PowerShell syntax: $($routeParseErrors -join '; ')" }
 
+$routeUiTestScript = Join-Path $PSScriptRoot 'issue-135-run-ui-tests.ps1'
+if (-not (Test-Path -LiteralPath $routeUiTestScript)) {
+    throw "Issue #135 bounded UI test script missing"
+}
+$uiParseTokens = $null
+$uiParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeUiTestScript, [ref]$uiParseTokens, [ref]$uiParseErrors
+) | Out-Null
+if ($uiParseErrors) {
+    throw "Issue #135 bounded UI test script has invalid PowerShell syntax: $($uiParseErrors -join '; ')"
+}
+$uiTestSource = Get-Content -LiteralPath $routeUiTestScript -Raw
+if ($uiTestSource -notmatch 'WaitForExit\(' -or
+    $uiTestSource -notmatch 'Compress-Archive' -or
+    $uiTestSource -match '(?m)^[^#\r\n]*\b(uninstall|pm clear|connectedDebugAndroidTest)\b') {
+    throw "Issue #135 UI test runner lacks watchdog/ZIP or calls forbidden destructive commands"
+}
+
 # Guard against an AGP instrumentation cleanup removing the production app.
 $routeInstallSource = Get-Content -LiteralPath $routeInstallScript -Raw
 if ($routeInstallSource -match '(?m)^[^#\r\n]*:app:connectedDebugAndroidTest') {
