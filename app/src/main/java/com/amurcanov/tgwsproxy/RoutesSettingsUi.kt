@@ -90,6 +90,7 @@ fun RoutesSettingsScreen(
                 onResetWifiPolicy = onResetWifiPolicy,
                 onResetMobilePolicy = onResetMobilePolicy,
                 reconfigureStatus = reconfigureStatus,
+                onOpenDiagnostics = { onPageChange(RoutesSettingsPage.ADVANCED) },
             )
         }
         RoutesSettingsPage.ADVANCED -> {
