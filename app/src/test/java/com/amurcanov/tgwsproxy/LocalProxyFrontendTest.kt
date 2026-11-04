@@ -141,6 +141,74 @@ class LocalProxyFrontendTest {
     }
 
     @Test
+    fun mtprotoExperimentalFrontend_explicitAwgOnlyRejectsNativeFailure() {
+        val adapter = RecordingMtProtoRuntimeAdapter()
+        val awgRuntime = ThrowingAwgRuntime()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = adapter,
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+            awgRuntime = awgRuntime,
+        )
+
+        val result = frontend.start(
+            mtProtoStartConfig(
+                config = MtProtoProxyConfig.default { fixedSecret },
+                runtimeConfig = "@route_order=awg_warp,@route_awg_warp=1,@awg_warp_config_path=/private/active.conf",
+            ),
+        )
+
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.INVALID_CONFIG.name, result.errorCode)
+        assertTrue(result.message.contains("IllegalStateException"))
+        assertEquals(0, adapter.startCalls)
+        assertEquals(1, awgRuntime.resetCalls)
+    }
+
+    @Test
+    fun mtprotoExperimentalFrontend_optionalAwgFailureAllowsOtherConfiguredRoutes() {
+        val adapter = RecordingMtProtoRuntimeAdapter()
+        val awgRuntime = ThrowingAwgRuntime()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = adapter,
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+            awgRuntime = awgRuntime,
+        )
+
+        val result = frontend.start(
+            mtProtoStartConfig(
+                config = MtProtoProxyConfig.default { fixedSecret },
+                runtimeConfig = "@route_order=awg_warp|direct_ws,@route_awg_warp=1,@awg_warp_config_path=/private/active.conf",
+            ),
+        )
+
+        assertEquals(LocalProxyFrontendStatus.RUNNING, result.state.status)
+        assertNull(result.errorCode)
+        assertEquals(1, adapter.startCalls)
+        assertEquals(0, awgRuntime.resetCalls)
+    }
+
+    @Test
+    fun mtprotoExperimentalFrontend_explicitAwgOnlyRequiresConfig() {
+        val adapter = RecordingMtProtoRuntimeAdapter()
+        val frontend = MtProtoLocalProxyFrontend(
+            runtimeAdapter = adapter,
+            portAvailabilityChecker = FixedPortAvailabilityChecker(true),
+        )
+
+        val result = frontend.start(
+            mtProtoStartConfig(
+                config = MtProtoProxyConfig.default { fixedSecret },
+                runtimeConfig = "@route_order=awg_warp,@route_awg_warp=1",
+            ),
+        )
+
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.INVALID_CONFIG.name, result.errorCode)
+        assertTrue(result.message.contains("no config has been imported"))
+        assertEquals(0, adapter.startCalls)
+    }
+
+    @Test
     fun mtprotoExperimentalFrontend_runtimeStartExceptionIsContainedAndAwgReset() {
         val awgRuntime = RecordingAwgRuntime()
         val frontend = MtProtoLocalProxyFrontend(
