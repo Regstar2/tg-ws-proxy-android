@@ -62,7 +62,7 @@ if (-not (Test-Path $releaseScript)) {
     throw "Release script not found: $releaseScript"
 }
 
-foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'tests/worker-issue-101-dc2-ab-test.ps1')) {
+foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-signed-worker-smoke.ps1', 'worker-issue-101-native-command.ps1', 'tests/worker-issue-101-native-command-test.ps1', 'tests/worker-issue-101-dc2-ab-test.ps1', 'issue-135-device-acceptance.ps1')) {
     $acceptanceScript = Join-Path $PSScriptRoot $acceptanceScriptName
     if (-not (Test-Path -LiteralPath $acceptanceScript)) {
         throw "Worker acceptance script not found: $acceptanceScript"
