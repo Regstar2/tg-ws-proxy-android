@@ -78,11 +78,12 @@ foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-
 }
 
 $routeInstallScript = Join-Path $PSScriptRoot 'issue-135-rebuild-device.ps1'
+$routeParseTokens = $null
 $routeParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile(
-    $routeInstallScript, [ref]$null, [ref]$routeParseErrors
+    $routeInstallScript, [ref]$routeParseTokens, [ref]$routeParseErrors
 ) | Out-Null
-if ($routeParseErrors.Count -gt 0) { throw "Issue #135 installation script has invalid PowerShell syntax" }
+if ($routeParseErrors) { throw "Issue #135 installation script has invalid PowerShell syntax: $($routeParseErrors -join '; ')" }
 
 $nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
 Invoke-CheckedCommand `
