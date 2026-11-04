@@ -158,15 +158,7 @@ try {
         $testErrors | ForEach-Object { Write-Warning $_ }
 
         $passed = $completed -and $process.ExitCode -eq 0 -and
-            @($testOutput | Where-Object { $_ -match '^INSTRUMENTATION_CODE:\s*-1\s*
-} finally {
-    if ($null -eq $previousSignedFlag) {
-        Remove-Item Env:TGWS_SIGNED_WORKER_SMOKE -ErrorAction SilentlyContinue
-    } else {
-        $env:TGWS_SIGNED_WORKER_SMOKE = $previousSignedFlag
-    }
-}
- }).Count -eq 1
+            @($testOutput | Where-Object { $_ -match '^INSTRUMENTATION_CODE:\s*-1\s*$' }).Count -eq 1
         if (-not $passed) {
             adb -s $serial logcat -d -b main -b system -b crash -v threadtime -t 10000 |
                 Out-File -LiteralPath $logcatPath -Encoding UTF8
