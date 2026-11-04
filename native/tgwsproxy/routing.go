@@ -70,7 +70,9 @@ type runtimeSettings struct {
 	AllowDirect   bool
 	AllowWorker   bool
 	AllowCFProxy  bool
+	AllowAWG      bool
 	AllowTCP      bool
+	RouteOrder    []routeKind // v2: authoritative order, unaffected by scoring and legacy mode
 	Preferred     routeKind // empty means "no explicit preferred"
 	AllowFallback bool
 	PolicyGen     uint64
@@ -139,7 +141,10 @@ func allowedRoutesList(s runtimeSettings) []routeKind {
 	if !s.PolicyPresent {
 		return nil
 	}
-	out := make([]routeKind, 0, 4)
+	if len(s.RouteOrder) > 0 {
+		return append([]routeKind(nil), s.RouteOrder...)
+	}
+	out := make([]routeKind, 0, 5)
 	if s.AllowDirect {
 		out = append(out, routeDirectWS)
 	}
@@ -148,6 +153,9 @@ func allowedRoutesList(s runtimeSettings) []routeKind {
 	}
 	if s.AllowCFProxy {
 		out = append(out, routeCFProxyWS)
+	}
+	if s.AllowAWG {
+		out = append(out, routeAWGWarp)
 	}
 	if s.AllowTCP {
 		out = append(out, routeTCPFallback)
@@ -178,13 +186,7 @@ func logPolicyChange(old, cur runtimeSettings) {
 	logInfo.Printf("Policy changed generation=%d oldRoutes=%s newRoutes=%s preferred=%s fallback=%t",
 		cur.PolicyGen, oldAllowed, newAllowed, cur.Preferred, cur.AllowFallback)
 
-	// Close pools for disabled routes (best-effort). This prevents "ghost" worker/direct usage.
-	if !cur.AllowWorker {
-		workerPool.CloseAll()
-	}
-	if !cur.AllowDirect {
-		wsPool.CloseAll()
-	}
+	// The policy guards new attempts; do not close sockets owned by existing sessions.
 }
 
 func getRuntimeSettings() runtimeSettings {
@@ -285,11 +287,27 @@ func newCFDomainPool() *tgwsroute.CFDomainPool {
 // ---------------------------------------------------------------------------
 
 func routesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool) []routeKind {
+	if len(settings.RouteOrder) > 0 {
+		routes := allowedRoutesList(settings)
+		if skipDirect {
+			filtered := make([]routeKind, 0, len(routes))
+			for _, r := range routes {
+				if r != routeDirectWS {
+					filtered = append(filtered, r)
+				}
+			}
+			return filtered
+		}
+		return routes
+	}
 	base := tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect)
 	return filterRoutesByPolicy(settings, base, "routesForMode")
 }
 
 func primaryRoutesBeforeDirectWS(mode connectionMode, settings runtimeSettings) []routeKind {
+	if len(settings.RouteOrder) > 0 {
+		return nil // ordered routes use the single explicit planner
+	}
 	return tgwsroute.PrimaryRoutesBeforeDirectWS(mode, toRouteSettings(settings))
 }
 
@@ -304,11 +322,39 @@ func isRouteAllowedByPolicy(settings runtimeSettings, r routeKind) bool {
 		return settings.AllowWorker
 	case routeCFProxyWS:
 		return settings.AllowCFProxy
+	case routeAWGWarp:
+		return settings.AllowAWG
 	case routeTCPFallback:
 		return settings.AllowTCP
 	default:
 		return false
 	}
+}
+
+// parseOrderedRoutes accepts only known unique route names. Unknown values cannot grant a route.
+func parseOrderedRoutes(raw string) []routeKind {
+	seen := make(map[routeKind]bool)
+	routes := make([]routeKind, 0, 5)
+	for _, part := range strings.Split(raw, "|") {
+		var r routeKind
+		switch strings.TrimSpace(part) {
+		case "direct_ws":
+			r = routeDirectWS
+		case "cf_worker_ws", "worker_ws":
+			r = routeCFWorkerWS
+		case "cf_proxy_ws":
+			r = routeCFProxyWS
+		case "awg_warp":
+			r = routeAWGWarp
+		case "tcp_fallback":
+			r = routeTCPFallback
+		}
+		if r != "" && !seen[r] {
+			seen[r] = true
+			routes = append(routes, r)
+		}
+	}
+	return routes
 }
 
 func filterRoutesByPolicy(settings runtimeSettings, routes []routeKind, reason string) []routeKind {
