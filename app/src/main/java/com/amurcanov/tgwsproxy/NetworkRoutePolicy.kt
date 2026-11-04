@@ -16,46 +16,38 @@ enum class RouteKind(val prefValue: String) {
     }
 }
 
+/**
+ * activeRoutes and inactiveRoutes are the source of truth for v2 policies.
+ * Legacy fields remain for reading v1 settings and compatibility with older callers.
+ */
 data class NetworkRoutePolicy(
     val networkType: NetworkProfileType,
     val enabledRoutes: Set<RouteKind>,
     val preferredRoute: RouteKind?,
     val autoStrategy: AutoStrategy,
     val allowFallback: Boolean,
+    val activeRoutes: List<RouteKind> = emptyList(),
+    val inactiveRoutes: List<RouteKind> = emptyList(),
 )
 
 object DefaultNetworkRoutePolicies {
     fun forType(type: NetworkProfileType): NetworkRoutePolicy {
-        return when (type) {
-            NetworkProfileType.WIFI -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.DIRECT_WS,
-                    RouteKind.CF_PROXY_WS,
-                    RouteKind.TCP_FALLBACK,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = true,
+        val active = when (type) {
+            NetworkProfileType.WIFI -> listOf(
+                RouteKind.CF_PROXY_WS,
+                RouteKind.DIRECT_WS,
+                RouteKind.TCP_FALLBACK,
             )
-            NetworkProfileType.MOBILE -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.CF_PROXY_WS,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = false,
-            )
-            NetworkProfileType.UNKNOWN -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.CF_PROXY_WS,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = false,
-            )
+            NetworkProfileType.MOBILE, NetworkProfileType.UNKNOWN -> listOf(RouteKind.CF_PROXY_WS)
         }
+        return NetworkRoutePolicy(
+            networkType = type,
+            enabledRoutes = active.toSet(),
+            preferredRoute = active.first(),
+            autoStrategy = AutoStrategy.CF_PREFERRED,
+            allowFallback = active.size > 1,
+            activeRoutes = active,
+            inactiveRoutes = NetworkRoutePolicyEditor.routeOrder.filterNot { it in active },
+        )
     }
 }
