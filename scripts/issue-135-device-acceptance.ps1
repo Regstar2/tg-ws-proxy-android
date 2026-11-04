@@ -100,7 +100,7 @@ try {
     ) | Set-Content -Path (Join-Path $OutputDirectory "device.txt") -Encoding UTF8
 
     if (-not $SkipBuild) {
-        & .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        & .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
         if ($LASTEXITCODE -ne 0) { throw "Build, lint or JVM tests failed" }
     }
 
@@ -135,6 +135,62 @@ try {
         "certificate_sha256=$CertificateDigest",
         "application_id=$TestPackage"
     ) | Set-Content -Path (Join-Path $OutputDirectory "apk-signature.txt") -Encoding UTF8
+
+    # Instrumentation must use the same certificate as the target app.
+    $TestApk = Join-Path $Root "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+    if (-not (Test-Path -LiteralPath $TestApk -PathType Leaf)) {
+        throw "Android instrumentation APK missing: $TestApk"
+    }
+    $TestCertReport = @(& $ApkSigner.FullName verify --print-certs $TestApk)
+    if ($LASTEXITCODE -ne 0) { throw "Android instrumentation APK signature verification failed" }
+    $TestCertLine = $TestCertReport | Where-Object {
+        $_ -match '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
+    } | Select-Object -First 1
+    if (-not $TestCertLine) { throw "Instrumentation APK certificate digest unavailable" }
+    $TestCertDigest = ([regex]::Match($TestCertLine, '([0-9a-fA-F]{64})\s*        adb -s $Serial install -r $Apk
+        if ($LASTEXITCODE -ne 0) {
+            throw "Install rejected. Confirm the LOCAL keystore is the ORIGINAL signing key. Existing app/data were not removed."
+        }
+        $PackagePaths = @(adb -s $Serial shell pm path $TestPackage)
+        if ($LASTEXITCODE -ne 0 -or @($PackagePaths | Where-Object { $_ -match '^package:' }).Count -eq 0) {
+            throw "Installed package not found: $TestPackage"
+        }
+    }
+
+    & .\gradlew.bat :app:connectedDebugAndroidTest
+    if ($LASTEXITCODE -ne 0) { throw "Instrumentation tests failed" }
+    $Status = "PASS"
+}
+finally {
+    if ($null -eq $PreviousSignedFlag) {
+        Remove-Item Env:TGWS_SIGNED_WORKER_SMOKE -ErrorAction SilentlyContinue
+    } else {
+        $env:TGWS_SIGNED_WORKER_SMOKE = $PreviousSignedFlag
+    }
+
+    $Results = "app/build/outputs/androidTest-results/connected"
+    $Report = "app/build/reports/androidTests/connected"
+    if (Test-Path $Results) {
+        Copy-Item $Results (Join-Path $OutputDirectory "instrumentation-results") -Recurse -Force
+    }
+    if (Test-Path $Report) {
+        Copy-Item $Report (Join-Path $OutputDirectory "instrumentation-report") -Recurse -Force
+    }
+
+    $RouteLog = @(adb -s $Serial logcat -d -v time '*:I' 2>$null |
+        Where-Object { $_ -match 'MTProto route truth|MTProto fallback activated|Route policy' } |
+        ForEach-Object {
+            $_ -replace 'session_id=\S+', 'session_id=<redacted>' -replace '(target|domain|worker_url|inner_target)=\S+', '$1=<redacted>' -replace '((?:[0-9]{1,3}\.){3}[0-9]{1,3})', '<ip-redacted>'
+        })
+    $RouteLog | Set-Content -Path (Join-Path $OutputDirectory "route-log-redacted.txt") -Encoding UTF8
+    "status=$Status" | Set-Content -Path (Join-Path $OutputDirectory "status.txt") -Encoding UTF8
+    Write-Host "Issue #135 device gate: $Status"
+    Write-Host "Evidence: $OutputDirectory"
+}
+)).Groups[1].Value
+    if ($TestCertDigest -ine $CertificateDigest) {
+        throw "Instrumentation APK certificate differs from the release-signed debug APK; refusing device test"
+    }
 
     if (-not $SkipInstall) {
         Write-Host "Installing RELEASE-SIGNED debug APK over $TestPackage (no uninstall or data deletion)"
