@@ -77,6 +77,21 @@ try {
 
         Write-Host "[$($Index + 1)/$($Tests.Count)] START $Test"
         try {
+            if ($Test -like "*OrderedRoutesIssue135UiTest#*") {
+                # MIUI 14 can deny ActivityScenario's in-process ComponentActivity
+                # launch while the application is in the background.
+                # Foreground the existing launcher Activity from the ADB shell
+                # before instrumentation. This never clears app data.
+                $ForegroundLog = Join-Path $RunDir "$BaseName.foreground.txt"
+                $ForegroundResult = @(& $Adb -s $Serial shell am start -n `
+                    "$AppId/com.amurcanov.tgwsproxy.MainActivity" 2>&1)
+                $ForegroundExit = $LASTEXITCODE
+                $ForegroundResult | Out-File -LiteralPath $ForegroundLog -Encoding UTF8
+                if ($ForegroundExit -ne 0) {
+                    throw "Unable to foreground target app before Compose instrumentation"
+                }
+                Start-Sleep -Milliseconds 800
+            }
             $Args = @("-s", $Serial, "shell", "am", "instrument", "-w", "-r",
                 "-e", "class", $Test, $Runner)
             $Process = Start-Process -FilePath $Adb -ArgumentList $Args `
@@ -130,6 +145,14 @@ try {
         adb -s $Serial logcat -d -b main -b system -b crash -v threadtime -t 10000 |
             Out-File -LiteralPath $LogcatPath -Encoding UTF8
     }
+    # Distinguish a Compose hang from the MIUI background-activity policy.
+    Get-Content -LiteralPath $LogcatPath -ErrorAction SilentlyContinue |
+        Select-String -Pattern 'MIUILOG- Permission Denied Activity',
+            'Abort background activity starts',
+            'ActivityScenario:.*intent does not match' |
+        Select-Object -ExpandProperty Line |
+        Set-Content -LiteralPath (Join-Path $RunDir "activity-launch-denials.txt") -Encoding UTF8
+
     adb -s $Serial shell pm path $AppId |
         Out-File -LiteralPath $PackageStatePath -Encoding UTF8
     adb -s $Serial shell pm list instrumentation |
