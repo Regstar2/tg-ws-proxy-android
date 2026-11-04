@@ -178,7 +178,19 @@ func readClientInit(
 		return nil, conn, fmt.Errorf("%w: %v", ErrHandshakeRead, err)
 	}
 	if first[0] != tlsRecordHandshake {
+		// Telegram may retain a legacy DD link after the app enables EE Fake TLS.
+		// Accept only a cryptographically valid obfuscated MTProto init for the
+		// configured secret. Probes and unrelated plaintext remain rejected.
+		_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
+		rest := make([]byte, 63)
+		_, readErr := io.ReadFull(conn, rest)
 		_ = conn.SetReadDeadline(time.Time{})
+		if readErr == nil {
+			raw := append(first, rest...)
+			if isValidRawObfuscatedInit(raw, secret) {
+				return raw, conn, nil
+			}
+		}
 		_ = writeFakeTLSRedirect(conn, fakeTLSDomain)
 		return nil, conn, ErrFakeTLSExpected
 	}
@@ -220,6 +232,31 @@ func readClientInit(
 		return nil, stream, fmt.Errorf("%w: %v", ErrHandshakeRead, readErr)
 	}
 	return handshake, stream, nil
+}
+
+// A raw client is accepted in Fake TLS mode only if its header decrypts to
+// a supported MTProto transport and DC using the configured 16-byte secret.
+func isValidRawObfuscatedInit(raw, secret []byte) bool {
+	if len(raw) != 64 || len(secret) != 16 || isHTTPTransport(raw) {
+		return false
+	}
+	stream, err := secretStream(raw[8:40], raw[40:56], secret)
+	if err != nil {
+		return false
+	}
+	decoded := make([]byte, len(raw))
+	stream.XORKeyStream(decoded, raw)
+	if _, ok := transportForProto(binary.LittleEndian.Uint32(decoded[56:60])); !ok {
+		return false
+	}
+	dc := int(int16(binary.LittleEndian.Uint16(decoded[60:62])))
+	if dc < 0 {
+		dc = -dc
+	}
+	if dc >= 10000 {
+		dc -= 10000
+	}
+	return validDC(dc)
 }
 
 func generateRelayInit(
