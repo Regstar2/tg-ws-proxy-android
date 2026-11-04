@@ -984,6 +984,7 @@
     <string name="routes_drag_route">Перетащить %1$s</string>
     <string name="routes_move_up">Поднять %1$s</string>
     <string name="routes_move_down">Опустить %1$s</string>
+    <string name="routes_live_apply_failed">Не удалось применить изменения маршрутов к работающему прокси</string>
     <string name="routes_last_route_error">Нельзя выключить последний маршрут</string>
     <string name="routes_toggle_route">Включить или выключить %1$s</string>
 </resources>
