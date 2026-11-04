@@ -2,7 +2,7 @@ package com.amurcanov.tgwsproxy
 
 import android.content.SharedPreferences
 
-/** V2 lists keep user priority; legacy v1 settings are read without modifying them. */
+/** V2 stores a stable visual order and enabled chain; old snapshots remain readable. */
 class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
     fun load(type: NetworkProfileType): NetworkRoutePolicy {
         val v2 = prefs.getString(keyFor(type, true), null)
@@ -18,8 +18,9 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
         val normalized = NetworkRoutePolicyEditor.normalize(policy)
         val active = normalized.activeRoutes.joinToString("|") { it.prefValue }
         val inactive = normalized.inactiveRoutes.joinToString("|") { it.prefValue }
+        val order = normalized.displayOrder.joinToString("|") { it.prefValue }
         prefs.edit().putString(keyFor(normalized.networkType, true),
-            "active=$active;inactive=$inactive;strategy=${normalized.autoStrategy.prefValue}").apply()
+            "active=$active;inactive=$inactive;order=$order;strategy=${normalized.autoStrategy.prefValue}").apply()
     }
 
     fun reset(type: NetworkProfileType) {
@@ -28,10 +29,11 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
         val defaults = DefaultNetworkRoutePolicies.forType(type)
         val active = defaults.activeRoutes.joinToString("|") { it.prefValue }
         val inactive = defaults.inactiveRoutes.joinToString("|") { it.prefValue }
+        val order = defaults.displayOrder.joinToString("|") { it.prefValue }
         prefs.edit()
             .remove(keyFor(type, false))
             .putString(keyFor(type, true),
-                "active=$active;inactive=$inactive;strategy=${defaults.autoStrategy.prefValue}")
+                "active=$active;inactive=$inactive;order=$order;strategy=${defaults.autoStrategy.prefValue}")
             .apply()
     }
 
@@ -59,6 +61,7 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
                 autoStrategy = strategy,
                 activeRoutes = active,
                 inactiveRoutes = inactive,
+                displayOrder = parseRoutes(fields["order"]),
             ),
         )
     }
