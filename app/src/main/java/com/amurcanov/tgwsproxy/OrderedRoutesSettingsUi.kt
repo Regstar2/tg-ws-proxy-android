@@ -126,7 +126,7 @@ internal fun OrderedRoutesSettings(
 
         // One compact settings list, rather than five oversized independent cards.
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("routes.list"),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
