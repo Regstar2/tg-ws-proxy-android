@@ -13,12 +13,12 @@ class NetworkRoutePolicyRepositoryTest {
         val policy = repository.load(NetworkProfileType.WIFI)
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), policy)
-        assertTrue(RouteKind.DIRECT_WS in policy.enabledRoutes)
-        assertTrue(RouteKind.CF_PROXY_WS in policy.enabledRoutes)
-        assertTrue(RouteKind.TCP_FALLBACK in policy.enabledRoutes)
+        assertEquals(setOf(RouteKind.CF_PROXY_WS), policy.enabledRoutes)
+        assertFalse(RouteKind.DIRECT_WS in policy.enabledRoutes)
+        assertFalse(RouteKind.TCP_FALLBACK in policy.enabledRoutes)
         assertEquals(RouteKind.CF_PROXY_WS, policy.preferredRoute)
         assertEquals(AutoStrategy.CF_PREFERRED, policy.autoStrategy)
-        assertTrue(policy.allowFallback)
+        assertFalse(policy.allowFallback)
     }
 
     @Test
@@ -231,6 +231,43 @@ class NetworkRoutePolicyRepositoryTest {
 
         assertEquals(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI), repository.load(NetworkProfileType.WIFI))
         assertTrue(repository.hasSavedPolicy(NetworkProfileType.WIFI))
+    }
+
+    @Test
+    fun disablingAndReenablingRoutePreservesVisualOrderAcrossRestarts() {
+        val prefs = InMemorySharedPreferences()
+        val repository = NetworkRoutePolicyRepository(prefs)
+        var policy = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP, RouteKind.DIRECT_WS),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val slots = policy.displayOrder
+        policy = NetworkRoutePolicyEditor.setRouteEnabled(policy, RouteKind.AWG_WARP, false)
+        repository.save(policy)
+
+        val restored = NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI)
+        assertEquals(slots, restored.displayOrder)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS), restored.activeRoutes)
+        val enabled = NetworkRoutePolicyEditor.setRouteEnabled(restored, RouteKind.AWG_WARP, true)
+        assertEquals(slots, enabled.displayOrder)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP, RouteKind.DIRECT_WS),
+            enabled.activeRoutes)
+    }
+
+    @Test
+    fun loadingOldV2SnapshotDoesNotDropActiveRoutes() {
+        val prefs = InMemorySharedPreferences()
+        prefs.edit().putString("route_policy_wifi_v2",
+            "active=direct_ws|cf_proxy_ws;inactive=worker_ws|awg_warp|tcp_fallback;strategy=balanced"
+        ).apply()
+
+        val policy = NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI)
+        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.CF_PROXY_WS), policy.activeRoutes)
+        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.CF_PROXY_WS, RouteKind.WORKER_WS,
+            RouteKind.AWG_WARP, RouteKind.TCP_FALLBACK), policy.displayOrder)
     }
 
     private companion object {
