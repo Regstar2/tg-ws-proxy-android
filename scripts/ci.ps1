@@ -77,6 +77,13 @@ foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-
     }
 }
 
+$routeInstallScript = Join-Path $PSScriptRoot 'issue-135-rebuild-device.ps1'
+$routeParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeInstallScript, [ref]$null, [ref]$routeParseErrors
+) | Out-Null
+if ($routeParseErrors.Count -gt 0) { throw "Issue #135 installation script has invalid PowerShell syntax" }
+
 $nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
 Invoke-CheckedCommand `
     -Label 'Test native stderr handling under Windows PowerShell 5.1' `
@@ -138,7 +145,7 @@ else {
     Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
 }
 
-Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
+Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'lintDebug', 'assembleDebug', 'assembleDebugAndroidTest', '--stacktrace')
 
 $quickSettingsManifestTest = Join-Path $PSScriptRoot 'tests\quick-settings-preferences-manifest-test.ps1'
 Write-Host "`n==> Verify merged Android Quick Settings preferences manifest"
