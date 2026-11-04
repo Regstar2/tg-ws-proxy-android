@@ -984,6 +984,7 @@
     <string name="routes_drag_route">Drag %1$s</string>
     <string name="routes_move_up">Move %1$s up</string>
     <string name="routes_move_down">Move %1$s down</string>
+    <string name="routes_live_apply_failed">Could not apply route changes to the running proxy</string>
     <string name="routes_last_route_error">The last enabled route cannot be disabled</string>
     <string name="routes_toggle_route">Enable or disable %1$s</string>
 </resources>
