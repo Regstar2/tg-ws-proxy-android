@@ -49,6 +49,7 @@ internal fun OrderedRoutesSettings(
     onResetWifiPolicy: () -> Unit,
     onResetMobilePolicy: () -> Unit,
     reconfigureStatus: ReconfigureStatus? = null,
+    onOpenDiagnostics: () -> Unit = {},
 ) {
     var selectedNetwork by rememberSaveable { mutableStateOf(NetworkProfileType.WIFI) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -138,6 +139,12 @@ internal fun OrderedRoutesSettings(
             modifier = Modifier.fillMaxWidth().testTag("routes.reset"),
         ) {
             Text(stringResource(R.string.routes_reset_selected))
+        }
+        TextButton(
+            onClick = onOpenDiagnostics,
+            modifier = Modifier.fillMaxWidth().testTag("routes.diagnostics"),
+        ) {
+            Text(stringResource(R.string.routes_overview_advanced_title))
         }
     }
 
