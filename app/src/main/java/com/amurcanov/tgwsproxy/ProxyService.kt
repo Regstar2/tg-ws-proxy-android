@@ -471,6 +471,29 @@ class ProxyService : Service() {
         poolSize: Int,
         frontendType: LocalProxyFrontendType,
     ) {
+        if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL &&
+            _isRunning.value && currentFrontend.type == frontendType &&
+            port == lastPort && poolSize == lastPoolSize
+        ) {
+            // Apply only to future outbound MTProto sessions. The listener and
+            // established sockets continue running under the previous snapshots.
+            val applied = runCatching { NativeProxy.updateMtProtoRoutePolicy(ips) }.getOrDefault(-1)
+            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val profileType = NetworkProfileProvider.current(this).type
+            ReconfigureStatusStore.save(prefs, ReconfigureStatus(
+                type = if (applied == 0) ReconfigureStatusType.SUCCESS else ReconfigureStatusType.FAILED,
+                networkType = profileType,
+                message = if (applied == 0) "hot_policy_updated" else "native_hot_policy_update_failed",
+                updatedAtMs = System.currentTimeMillis(),
+            ))
+            if (applied == 0) {
+                saveLastConfig(port, ips, poolSize, frontendType)
+                updateNotification()
+            } else {
+                Log.e("TgWsProxy", "MTProto route policy hot-update rejected; existing sessions preserved")
+            }
+            return
+        }
         if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL || !_isRunning.value) {
             startProxy(port, ips, poolSize, frontendType)
             return
