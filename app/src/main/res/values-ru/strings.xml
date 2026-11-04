@@ -988,7 +988,7 @@
     <string name="routes_toggle_label">Включить или выключить %1$s</string>
     <string name="routes_inactive_text">Неактивно</string>
     <string name="routes_minimum_one">Хотя бы один маршрут должен оставаться включённым</string>
-    <string name="routes_no_configured_route">Нельзя отключить последний настроенный маршрут. Сначала настройте другой.</string>
+    <string name="routes_no_configured_route">Настройте Worker/WARP</string>
     <string name="routes_live_apply_failed">Маршруты сохранены, но не применены к работающему прокси</string>
     <string name="routes_configuration_required">Требуется настройка</string>
 </resources>
