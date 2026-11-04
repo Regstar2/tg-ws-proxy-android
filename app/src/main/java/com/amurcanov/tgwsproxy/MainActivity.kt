@@ -1993,6 +1993,10 @@ private fun ProxyScreen(
                             mobilePolicy = mobileRoutePolicy,
                             hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
                             hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
+                            workerConfigured = WorkerRouteResolver.resolveDomain(
+                                workerPoolRepository, workerDomainText,
+                            ).isNotBlank(),
+                            awgConfigured = !AwgWarpConfigStore.configPath(context).isNullOrBlank(),
                             policySnapshot = routePolicySnapshot,
                             reconfigureStatus = reconfigureStatus,
                             routeProbeReport = routeProbeReport,
