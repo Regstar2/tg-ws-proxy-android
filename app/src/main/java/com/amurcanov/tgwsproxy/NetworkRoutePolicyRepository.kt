@@ -88,6 +88,9 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
                 autoStrategy = strategy,
                 activeRoutes = emptyList(),
                 inactiveRoutes = emptyList(),
+                // v1 has no persisted visual slots: derive them from the
+                // legacy preferred route before filling in disabled items.
+                displayOrder = emptyList(),
             ),
         )
     }
