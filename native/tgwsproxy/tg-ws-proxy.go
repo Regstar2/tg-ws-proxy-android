@@ -3225,6 +3225,13 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 			case "route_cf_proxy_ws":
 				settings.PolicyPresent = true
 				settings.AllowCFProxy = parseBoolValue(val)
+			case "route_awg_warp":
+				settings.PolicyPresent = true
+				settings.AllowAWG = parseBoolValue(val)
+			case "route_order":
+				settings.PolicyPresent = true
+				settings.RouteOrderPresent = true
+				settings.RouteOrder = parseOrderedRoutes(val)
 			case "route_tcp_fallback":
 				settings.PolicyPresent = true
 				settings.AllowTCP = parseBoolValue(val)
@@ -3247,6 +3254,34 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 		}
 	}
 
+	// An explicit v2 route chain supersedes every legacy mode/strategy/flag.
+	// Reject a malformed empty chain rather than silently permitting TCP/Direct.
+	if settings.RouteOrderPresent {
+		if len(settings.RouteOrder) == 0 {
+			return nil, settings, fmt.Errorf("route_order has no valid routes")
+		}
+		settings.AllowDirect = false
+		settings.AllowWorker = false
+		settings.AllowCFProxy = false
+		settings.AllowAWG = false
+		settings.AllowTCP = false
+		for _, route := range settings.RouteOrder {
+			switch route {
+			case routeDirectWS:
+				settings.AllowDirect = true
+			case routeCFWorkerWS:
+				settings.AllowWorker = true
+			case routeCFProxyWS:
+				settings.AllowCFProxy = true
+			case routeAWGWarp:
+				settings.AllowAWG = true
+			case routeTCPFallback:
+				settings.AllowTCP = true
+			}
+		}
+		settings.Preferred = settings.RouteOrder[0]
+		settings.AllowFallback = len(settings.RouteOrder) > 1
+	}
 	cfg = normalizeCfProxyConfig(cfg)
 	settings.CF = cfg
 	if settings.Mode == "" {
