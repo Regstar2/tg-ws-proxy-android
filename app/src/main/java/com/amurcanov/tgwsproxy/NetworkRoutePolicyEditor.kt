@@ -45,6 +45,22 @@ object NetworkRoutePolicyEditor {
         return current.withRoutes(active, current.inactiveRoutes)
     }
 
+    /**
+     * Keep at least one explicitly enabled route that can be attempted with
+     * current configuration. Network reachability is checked separately.
+     */
+    fun hasConfiguredOutboundRoute(
+        policy: NetworkRoutePolicy,
+        workerConfigured: Boolean,
+        awgConfigured: Boolean,
+    ): Boolean = normalize(policy).activeRoutes.any { route ->
+        when (route) {
+            RouteKind.WORKER_WS -> workerConfigured
+            RouteKind.AWG_WARP -> awgConfigured
+            RouteKind.DIRECT_WS, RouteKind.CF_PROXY_WS, RouteKind.TCP_FALLBACK -> true
+        }
+    }
+
     fun setPreferredRoute(policy: NetworkRoutePolicy, route: RouteKind): NetworkRoutePolicy {
         val current = normalize(policy)
         val index = current.activeRoutes.indexOf(route)
