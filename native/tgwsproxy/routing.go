@@ -71,6 +71,9 @@ type runtimeSettings struct {
 	AllowWorker   bool
 	AllowCFProxy  bool
 	AllowTCP      bool
+	AllowAWG      bool
+	OrderedPolicy bool
+	OrderedRoutes []routeKind
 	Preferred     routeKind // empty means "no explicit preferred"
 	AllowFallback bool
 	PolicyGen     uint64
@@ -119,6 +122,24 @@ func setRuntimeSettings(cfg runtimeSettings) {
 	logPolicyChange(prev, cfg)
 }
 
+// parseOrderedRoutes rejects an empty or unrecognizable strict route chain.
+func parseOrderedRoutes(raw string) ([]routeKind, error) {
+    var result []routeKind
+    seen := make(map[routeKind]bool)
+    for _, candidate := range strings.Split(raw, "|") {
+        route := parsePreferredRoute(candidate)
+        if route == "" || seen[route] {
+            continue
+        }
+        seen[route] = true
+        result = append(result, route)
+    }
+    if len(result) == 0 {
+        return nil, fmt.Errorf("ordered policy contains no supported routes")
+    }
+    return result, nil
+}
+
 func parsePreferredRoute(raw string) routeKind {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	switch s {
@@ -130,12 +151,17 @@ func parsePreferredRoute(raw string) routeKind {
 		return routeCFProxyWS
 	case "tcp_fallback", "tcp":
 		return routeTCPFallback
+	case "awg_warp", "awg":
+		return routeAWGWarp
 	default:
 		return ""
 	}
 }
 
 func allowedRoutesList(s runtimeSettings) []routeKind {
+    if s.OrderedPolicy {
+        return append([]routeKind(nil), s.OrderedRoutes...)
+    }
 	if !s.PolicyPresent {
 		return nil
 	}
@@ -178,7 +204,10 @@ func logPolicyChange(old, cur runtimeSettings) {
 	logInfo.Printf("Policy changed generation=%d oldRoutes=%s newRoutes=%s preferred=%s fallback=%t",
 		cur.PolicyGen, oldAllowed, newAllowed, cur.Preferred, cur.AllowFallback)
 
-	// Close pools for disabled routes (best-effort). This prevents "ghost" worker/direct usage.
+	// Ordered policy changes must never close pools used by existing MTProto sessions.
+    if cur.OrderedPolicy {
+        return
+    }
 	if !cur.AllowWorker {
 		workerPool.CloseAll()
 	}
@@ -285,6 +314,15 @@ func newCFDomainPool() *tgwsroute.CFDomainPool {
 // ---------------------------------------------------------------------------
 
 func routesForMode(mode connectionMode, settings runtimeSettings, skipDirect bool) []routeKind {
+    if settings.OrderedPolicy {
+        ordered := allowedRoutesList(settings)
+        if !skipDirect { return ordered }
+        filtered := make([]routeKind, 0, len(ordered))
+        for _, route := range ordered {
+            if route != routeDirectWS { filtered = append(filtered, route) }
+        }
+        return filtered
+    }
 	base := tgwsroute.RoutesForMode(mode, toRouteSettings(settings), skipDirect)
 	return filterRoutesByPolicy(settings, base, "routesForMode")
 }
@@ -294,6 +332,12 @@ func primaryRoutesBeforeDirectWS(mode connectionMode, settings runtimeSettings) 
 }
 
 func isRouteAllowedByPolicy(settings runtimeSettings, r routeKind) bool {
+    if settings.OrderedPolicy {
+        for _, candidate := range settings.OrderedRoutes {
+            if candidate == r { return true }
+        }
+        return false
+    }
 	if !settings.PolicyPresent {
 		return true
 	}
