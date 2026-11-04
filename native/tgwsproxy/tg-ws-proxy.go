@@ -3463,6 +3463,10 @@ func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfi
 		logError.Printf("MTProto parseRuntimeConfig: %v", err)
 		return -4
 	}
+	if err := validateMtProtoRequestedRoutes(settings); err != nil {
+		logError.Printf("MTProto frontend start rejected before runtime change: %v", err)
+		return -4
+	}
 	setRuntimeSettings(settings)
 	setCfProxyConfig(settings.CF)
 	dcOptMu.Lock()
@@ -3497,6 +3501,10 @@ func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfi
 func UpdateMtProtoRoutePolicy(cRuntimeConfig *C.char) C.int {
     dcMap, settings, err := parseRuntimeConfig(C.GoString(cRuntimeConfig))
     if err != nil || !settings.OrderedPolicy {
+        if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
+        return -4
+    }
+    if err := validateMtProtoRequestedRoutes(settings); err != nil {
         if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
         return -4
     }
