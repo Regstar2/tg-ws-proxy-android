@@ -3225,6 +3225,8 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
             case "route_awg_warp":
                 settings.PolicyPresent = true
                 settings.AllowAWG = parseBoolValue(val)
+            case "awg_warp_config_path":
+                settings.AWGConfigPath = val
             case "route_direct_ws":
 				settings.PolicyPresent = true
 				settings.AllowDirect = parseBoolValue(val)
@@ -3492,8 +3494,23 @@ func UpdateMtProtoRoutePolicy(cRuntimeConfig *C.char) C.int {
         if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
         return -4
     }
-    // A policy with AWG but without a valid imported profile must not block other routes.
-    // Existing AWG tunnel configuration remains owned by the running frontend.
+    // Configure a newly enabled AWG route before publishing the new policy.
+    // Unconfigured AWG may be skipped only when another explicitly allowed path exists.
+    if settings.AllowAWG {
+        previous := globalAWGWarpRouteRuntime.Policy()
+        if settings.AWGConfigPath == "" && len(settings.OrderedRoutes) == 1 {
+            return -4
+        }
+        if settings.AWGConfigPath != "" &&
+            (!previous.Enabled || previous.ConfigPath != settings.AWGConfigPath) {
+            if err := globalAWGWarpRouteRuntime.Configure(
+                settings.AWGConfigPath, true, false, len(settings.OrderedRoutes) > 1,
+            ); err != nil {
+                if logWarn != nil { logWarn.Printf("AWG route configuration failed: %v", err) }
+                if len(settings.OrderedRoutes) == 1 { return -4 }
+            }
+        }
+    }
     setRuntimeSettings(settings)
     setCfProxyConfig(settings.CF)
     dcOptMu.Lock()
