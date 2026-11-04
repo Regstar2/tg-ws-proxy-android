@@ -111,6 +111,11 @@ func (c *mtProtoRouteConnector) Connect(
 
 		attemptBackend := mtProtoBackendForRoute(route)
 		fallbackUsed := attempts > 0
+        if logInfo != nil {
+            logInfo.Printf("MTProto ordered candidate network=%s route_generation=%d order=%s selected_backend=%s attempt_backend=%s fallback_used=%t",
+                settings.NetworkProfileType, settings.PolicyGen,
+                strings.Join(routeKindStrings(routes), "|"), selectedBackend, attemptBackend, fallbackUsed)
+        }
 		if fallbackUsed && logInfo != nil {
 			logInfo.Printf("MTProto fallback activated route_generation=%d selected_backend=%s attempt_backend=%s previous_reason=%s",
 				settings.PolicyGen, selectedBackend, attemptBackend, mtProtoStatusField(lastResult.Reason))
@@ -137,6 +142,10 @@ func (c *mtProtoRouteConnector) Connect(
 			result.Reason = "connected"
 		}
 		if conn != nil && result.Err == nil {
+            if logInfo != nil {
+                logInfo.Printf("MTProto transport ready stage=outbound_connected selected_backend=%s actual_backend=%s route_generation=%d mtproto_duplex_verified=false",
+                    selectedBackend, result.ActualBackend, settings.PolicyGen)
+            }
 			return conn, result
 		}
 
