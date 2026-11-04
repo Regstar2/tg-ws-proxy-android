@@ -51,6 +51,7 @@ internal fun OrderedRoutesSettings(
     onResetMobilePolicy: () -> Unit,
     onOpenDiagnostics: () -> Unit,
 ) {
+    val context = LocalContext.current
     var selectedType by rememberSaveable { mutableStateOf(NetworkProfileType.WIFI) }
     var showResetConfirmation by remember { mutableStateOf(false) }
     val selectedPolicy = if (selectedType == NetworkProfileType.WIFI) wifiPolicy else mobilePolicy
@@ -110,7 +111,7 @@ internal fun OrderedRoutesSettings(
                 stringResource(R.string.routes_no_fallback)
             } else {
                 policy.activeRoutes.joinToString(" → ") { route ->
-                    stringResource(route.orderedRouteLabelRes())
+                    context.getString(route.orderedRouteLabelRes())
                 }
             },
             style = MaterialTheme.typography.bodyMedium,
