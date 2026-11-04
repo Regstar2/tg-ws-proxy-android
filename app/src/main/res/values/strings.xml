@@ -991,4 +991,5 @@
     <string name="routes_no_configured_route">Configure Worker/WARP first</string>
     <string name="routes_live_apply_failed">Route changes saved but not applied to the running proxy</string>
     <string name="routes_configuration_required">Configuration required</string>
+    <string name="notification_configured_priority">Priority: %1$s</string>
 </resources>
