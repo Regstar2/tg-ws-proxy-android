@@ -72,6 +72,7 @@ type runtimeSettings struct {
 	AllowCFProxy  bool
 	AllowTCP      bool
 	AllowAWG      bool
+	AWGConfigPath string
 	OrderedPolicy bool
 	OrderedRoutes []routeKind
 	Preferred     routeKind // empty means "no explicit preferred"
