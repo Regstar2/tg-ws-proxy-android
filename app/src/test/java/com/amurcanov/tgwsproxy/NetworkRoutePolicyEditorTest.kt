@@ -74,7 +74,8 @@ class NetworkRoutePolicyEditorTest {
 
         val updated = NetworkRoutePolicyEditor.normalize(policy)
 
-        assertEquals(RouteKind.WORKER_WS, updated.preferredRoute)
+        // Invalid legacy preferred routes are normalized to the documented deterministic order.
+        assertEquals(RouteKind.CF_PROXY_WS, updated.preferredRoute)
     }
 
     private fun policy(
