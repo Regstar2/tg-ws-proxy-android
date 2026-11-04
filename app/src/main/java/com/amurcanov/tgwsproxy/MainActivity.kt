@@ -1450,6 +1450,38 @@ private fun ProxyScreen(
             refreshRoutePolicySnapshot()
             return
         }
+        if (localProxyFrontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            val nextPolicy = NetworkRoutePolicyEditor.normalize(config.effectivePolicy.policy)
+            val nativeResult = runCatching {
+                if (RouteKind.AWG_WARP in nextPolicy.activeRoutes) {
+                    val path = AwgWarpConfigStore.configPath(context)
+                    if (!path.isNullOrBlank()) {
+                        NativeProxy.configureAwgWarp(path, true, false, true)
+                    }
+                }
+                NativeProxy.updateMtProtoRuntimeConfig(config.ips)
+            }.getOrDefault(-1)
+            val success = nativeResult == 0
+            saveReconfigureStatus(
+                ReconfigureStatus(
+                    type = if (success) ReconfigureStatusType.SUCCESS else ReconfigureStatusType.FAILED,
+                    networkType = config.profile.type,
+                    message = if (success) "mtproto_profile_updated_without_restart" else "mtproto_profile_update_failed",
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+            Log.i(
+                "TgWsProxy",
+                "MTProto profile hot update networkType=${config.profile.type.prefValue} applied=$success code=$nativeResult",
+            )
+            if (success) {
+                lastRuntimeConfigKey = configKey
+                lastReconfigureAtMs = System.currentTimeMillis()
+            }
+            refreshRoutePolicySnapshot()
+            return
+        }
+
         lastReconfigureAtMs = System.currentTimeMillis()
         Log.i("TgWsProxy", effectiveRoutePolicyLog("effective route policy reconfigure", config))
         val snapshot = RoutePolicyDiagnostics.buildSnapshot(context, prefs, routePolicyRepository)
