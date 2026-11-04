@@ -172,6 +172,28 @@ class ConnectionRuntimeConfigTest {
     }
 
     @Test
+    fun buildRuntimeTokensPreservesExactNativePriorityOrder() {
+        val policy = NetworkRoutePolicyEditor.moveEnabledRoute(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI),
+            fromIndex = 2,
+            toIndex = 0,
+        )
+        val raw = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = listOf("2:149.154.167.51"),
+            mode = ConnectionMode.Auto,
+            cfProxyEnabled = false,
+            cfProxyPriority = false,
+            cfProxyOnly = false,
+            cfDomain = "",
+            workerEnabled = false,
+            workerDomain = "",
+            routePolicy = policy,
+        )
+        assertTrue(raw.contains("@route_order=tcp_fallback|cf_proxy_ws|direct_ws"))
+        assertTrue(raw.contains("@route_fallback=1"))
+    }
+
+    @Test
     fun buildRuntimeTokens_routePolicyControlsCfFlag() {
         val raw = ConnectionRuntimeConfig.buildRuntimeTokens(
             dcEntries = listOf("2:149.154.167.220"),
