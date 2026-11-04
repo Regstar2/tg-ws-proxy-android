@@ -82,21 +82,14 @@ fun RoutesSettingsScreen(
 ) {
     when (page) {
         RoutesSettingsPage.OVERVIEW -> {
-            RoutesOverview(
-                modifier = modifier,
-                currentProfile = currentProfile,
-                connectionMode = connectionMode,
-                isProxyRunning = isProxyRunning,
+            OrderedRoutesSettings(
                 wifiPolicy = wifiPolicy,
                 mobilePolicy = mobilePolicy,
-                hasSavedWifiPolicy = hasSavedWifiPolicy,
-                hasSavedMobilePolicy = hasSavedMobilePolicy,
-                policySnapshot = policySnapshot,
-                onConnectionModeChange = onConnectionModeChange,
-                onApplyRecommendedPreset = onApplyRecommendedPreset,
-                onOpenWifi = { onPageChange(RoutesSettingsPage.WIFI) },
-                onOpenMobile = { onPageChange(RoutesSettingsPage.MOBILE) },
-                onOpenAdvanced = { onPageChange(RoutesSettingsPage.ADVANCED) },
+                onWifiPolicyChange = onWifiPolicyChange,
+                onMobilePolicyChange = onMobilePolicyChange,
+                onResetWifiPolicy = onResetWifiPolicy,
+                onResetMobilePolicy = onResetMobilePolicy,
+                onOpenDiagnostics = { onPageChange(RoutesSettingsPage.ADVANCED) },
             )
         }
         RoutesSettingsPage.WIFI -> {
