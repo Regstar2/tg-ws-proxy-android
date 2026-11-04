@@ -3550,6 +3550,24 @@ func SetManualCFDomains(cDomains *C.char) {
 	setRuntimeSettings(settings)
 }
 
+//export UpdateMtProtoRuntimeConfig
+func UpdateMtProtoRuntimeConfig(cRuntimeConfig *C.char) C.int {
+	if cRuntimeConfig == nil {
+		return -2
+	}
+	dcMap, settings, err := parseRuntimeConfig(C.GoString(cRuntimeConfig))
+	if err != nil || !settings.RouteOrderPresent {
+		return -2
+	}
+	// New connections see one coherent generation. Existing sessions retain their
+	// established sockets; no listener restart or pool teardown occurs here.
+	setRuntimeSettings(settings)
+	dcOptMu.Lock()
+	dcOpt = dcMap
+	dcOptMu.Unlock()
+	return 0
+}
+
 //export UpdateRouteOrder
 func UpdateRouteOrder(cOrder *C.char) C.int {
 	if cOrder == nil {
