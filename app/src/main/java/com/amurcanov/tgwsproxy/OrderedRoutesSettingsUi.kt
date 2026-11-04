@@ -194,6 +194,8 @@ internal fun OrderedRoutesSettings(
                             policy = policy,
                             configurationRequired = (route == RouteKind.WORKER_WS && !workerConfigured) ||
                                 (route == RouteKind.AWG_WARP && !awgConfigured),
+                            workerConfigured = workerConfigured,
+                            awgConfigured = awgConfigured,
                             onPolicyChange = onPolicyChange,
                             onDragStart = {
                                 draggedRoute = route
@@ -315,6 +317,8 @@ private fun RoutePriorityRow(
     activeCount: Int,
     policy: NetworkRoutePolicy,
     configurationRequired: Boolean,
+    workerConfigured: Boolean,
+    awgConfigured: Boolean,
     onPolicyChange: (NetworkRoutePolicy) -> Unit,
     onDragStart: () -> Unit,
     onDragBy: (Float) -> Unit,
@@ -452,7 +456,15 @@ private fun RoutePriorityRow(
                 if (!checked && activeCount == 1) {
                     Toast.makeText(context, R.string.routes_minimum_one, Toast.LENGTH_SHORT).show()
                 } else {
-                    onPolicyChange(NetworkRoutePolicyEditor.setRouteEnabled(policy, route, checked))
+                    val updated = NetworkRoutePolicyEditor.setRouteEnabled(policy, route, checked)
+                    if (!NetworkRoutePolicyEditor.hasConfiguredOutboundRoute(
+                            updated, workerConfigured, awgConfigured
+                        )
+                    ) {
+                        Toast.makeText(context, R.string.routes_no_configured_route, Toast.LENGTH_SHORT).show()
+                    } else {
+                        onPolicyChange(updated)
+                    }
                 }
             },
             modifier = Modifier
