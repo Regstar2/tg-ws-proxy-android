@@ -44,16 +44,50 @@ internal class MtProtoLocalProxyFrontend(
                 message = "MTProto proxy config is missing.",
             )
 
-        val awgConfig = AwgWarpRuntimeConfig.fromRuntimeTokens(config.runtimeConfig)
-        // An unavailable optional route must not prevent other enabled routes from
-        // accepting MTProto sessions. The native AWG connector will report its own failure.
-        val canConfigureAwg = !awgConfig.enabled || awgConfig.configPath.isNotBlank()
-        if (!canConfigureAwg) {
+        val parsedAwg = AwgWarpRuntimeConfig.fromRuntimeTokens(config.runtimeConfig)
+        val orderedRoutes = config.runtimeConfig.split(',')
+            .firstOrNull { it.trim().startsWith("@route_order=") }
+            ?.substringAfter('=')
+            ?.split('|')
+            ?.mapNotNull(RouteKind::fromPref)
+        val awgConfig = if (orderedRoutes == null) {
+            parsedAwg
+        } else {
+            parsedAwg.copy(
+                enabled = RouteKind.AWG_WARP in orderedRoutes,
+                preferred = orderedRoutes.firstOrNull() == RouteKind.AWG_WARP,
+                allowFallback = orderedRoutes.size > 1,
+            )
+        }
+        val awgOnly = if (orderedRoutes != null) {
+            orderedRoutes == listOf(RouteKind.AWG_WARP)
+        } else {
+            awgConfig.enabled && awgConfig.preferred && !awgConfig.allowFallback
+        }
+
+        if (awgConfig.enabled && awgConfig.configPath.isBlank()) {
+            if (awgOnly) {
+                return fail(
+                    errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
+                    message = "AWG/WARP route is enabled but no config has been imported.",
+                )
+            }
             android.util.Log.w("TgWsProxy", "AWG/WARP unavailable reason=config_missing; route will be skipped")
         } else {
             val awgConfigure = runCatching { awgRuntime.configure(awgConfig) }
             if (awgConfigure.getOrNull() == 0) {
                 claimAwgRuntimeOwnership()
+            } else if (awgOnly) {
+                resetAwgRuntimeAfterFailedConfigure()
+                val errorType = awgConfigure.exceptionOrNull()?.javaClass?.simpleName.orEmpty()
+                return fail(
+                    errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
+                    message = if (errorType.isNotBlank()) {
+                        "AWG/WARP native runtime initialization failed ($errorType)."
+                    } else {
+                        "AWG/WARP route configuration was rejected by native runtime."
+                    },
+                )
             } else {
                 android.util.Log.w(
                     "TgWsProxy",
