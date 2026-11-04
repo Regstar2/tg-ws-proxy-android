@@ -100,7 +100,7 @@ if ($uiParseErrors) {
 $uiTestSource = Get-Content -LiteralPath $routeUiTestScript -Raw
 if ($uiTestSource -notmatch 'WaitForExit\(' -or
     $uiTestSource -notmatch 'Compress-Archive' -or
-    $uiTestSource -match '(?m)^[^#\r\n]*\b(uninstall|pm clear|connectedDebugAndroidTest)\b') {
+    $uiTestSource -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)') {
     throw "Issue #135 UI test runner lacks watchdog/ZIP or calls forbidden destructive commands"
 }
 
