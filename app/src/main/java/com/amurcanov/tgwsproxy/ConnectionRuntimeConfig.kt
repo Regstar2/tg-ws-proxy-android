@@ -72,6 +72,8 @@ object ConnectionRuntimeConfig {
             add("@cfproxy_priority=${if (cfPriority) 1 else 0}")
             add("@cfproxy_only=${if (cfOnly) 1 else 0}")
             routePolicy?.let { policy ->
+                val ordered = NetworkRoutePolicyEditor.normalize(policy).activeRoutes
+                add("@route_order=${ordered.joinToString("|") { it.prefValue }}")
                 add("@route_direct_ws=${if (RouteKind.DIRECT_WS in policy.enabledRoutes) 1 else 0}")
                 add("@route_worker_ws=${if (RouteKind.WORKER_WS in policy.enabledRoutes) 1 else 0}")
                 add("@route_cf_proxy_ws=${if (RouteKind.CF_PROXY_WS in policy.enabledRoutes) 1 else 0}")
