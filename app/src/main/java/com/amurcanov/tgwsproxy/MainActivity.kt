@@ -302,7 +302,11 @@ private fun ProxyScreen(
         AdaptiveRouteStatsRepository(prefs)
     }
     val routePolicyRepository = remember {
-        NetworkRoutePolicyRepository(prefs)
+        NetworkRoutePolicyRepository(prefs).also { repository ->
+            // Initialize persisted policies before Compose reads Wi-Fi/mobile state.
+            RouteDefaultsMigration.applyIfNeeded(prefs, repository)
+            OrderedRoutePolicyMigration.applyIfNeeded(prefs, repository)
+        }
     }
     val workerPoolRepository = remember {
         WorkerPoolRepository(SharedPreferencesWorkerPoolPersistence(prefs))
@@ -315,10 +319,6 @@ private fun ProxyScreen(
     }
 
     LaunchedEffect(Unit) {
-        RouteDefaultsMigration.applyIfNeeded(
-            prefs = prefs,
-            repository = routePolicyRepository,
-        )
         WorkerPoolMigration.applyIfNeeded(prefs, workerPoolRepository)
     }
     val cfDomainListUpdater = remember {
