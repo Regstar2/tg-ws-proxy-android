@@ -9,12 +9,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -53,6 +55,18 @@ class OrderedRoutesIssue135UiTest {
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").performClick()
         assertCount(3)
         compose.onNodeWithTag("routes.toggle.cf_proxy_ws").assertIsOn()
+        assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS)
+    }
+
+    @Test fun gripDragMovesAcrossTwoRowsInOneGesture() {
+        render()
+        val density = InstrumentationRegistry.getInstrumentation()
+            .targetContext.resources.displayMetrics.density
+        compose.onNodeWithTag("routes.drag.cf_proxy_ws").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 85f * density * 2.2f))
+            up()
+        }
         assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS)
     }
 
