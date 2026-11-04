@@ -31,6 +31,21 @@ class ReconfigureStatusStoreTest {
     }
 
     @Test
+    fun savePublishesImmediateLiveResultAndClearRemovesIt() {
+        val prefs = InMemorySharedPreferences()
+        val status = ReconfigureStatus(
+            type = ReconfigureStatusType.SUCCESS,
+            networkType = NetworkProfileType.WIFI,
+            message = "hot_policy_updated",
+            updatedAtMs = 1234L,
+        )
+        ReconfigureStatusStore.save(prefs, status)
+        assertEquals(status, ReconfigureStatusStore.liveStatus.value)
+        ReconfigureStatusStore.clear(prefs)
+        assertNull(ReconfigureStatusStore.liveStatus.value)
+    }
+
+    @Test
     fun load_handlesBrokenType() {
         val prefs = InMemorySharedPreferences()
         prefs.edit().putString("last_reconfigure_type_v1", "broken").apply()
