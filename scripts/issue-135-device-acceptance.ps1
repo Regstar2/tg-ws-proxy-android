@@ -147,7 +147,14 @@ try {
         $_ -match '^Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
     } | Select-Object -First 1
     if (-not $TestCertLine) { throw "Instrumentation APK certificate digest unavailable" }
-    $TestCertDigest = ([regex]::Match($TestCertLine, '([0-9a-fA-F]{64})\s*        adb -s $Serial install -r $Apk
+    $TestCertDigest = ([regex]::Match($TestCertLine, '([0-9a-fA-F]{64})\s*$')).Groups[1].Value
+    if ($TestCertDigest -ine $CertificateDigest) {
+        throw "Instrumentation APK certificate differs from the release-signed debug APK; refusing device test"
+    }
+
+    if (-not $SkipInstall) {
+        Write-Host "Installing RELEASE-SIGNED debug APK over $TestPackage (no uninstall or data deletion)"
+        adb -s $Serial install -r $Apk
         if ($LASTEXITCODE -ne 0) {
             throw "Install rejected. Confirm the LOCAL keystore is the ORIGINAL signing key. Existing app/data were not removed."
         }
