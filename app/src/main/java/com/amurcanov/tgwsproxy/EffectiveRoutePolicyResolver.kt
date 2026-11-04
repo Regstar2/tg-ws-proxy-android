@@ -22,7 +22,7 @@ class EffectiveRoutePolicyResolver(
     fun resolve(profile: NetworkProfile): EffectiveRoutePolicy {
         return runCatching {
             if (repository.hasSavedPolicy(profile.type)) {
-                val policy = repository.load(profile.type)
+                val policy = NetworkRoutePolicyEditor.normalize(repository.load(profile.type))
                 return@runCatching EffectiveRoutePolicy(
                     profile = profile,
                     policy = policy,
@@ -44,6 +44,7 @@ class EffectiveRoutePolicyResolver(
                 mode = legacyMode,
                 strategy = strategy,
             ).copy(autoStrategy = strategy)
+                .let(NetworkRoutePolicyEditor::normalize)
 
             EffectiveRoutePolicy(
                 profile = profile,
