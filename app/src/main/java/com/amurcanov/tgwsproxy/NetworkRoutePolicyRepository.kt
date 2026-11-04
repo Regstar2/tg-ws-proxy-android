@@ -19,7 +19,7 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
         val active = normalized.activeRoutes.joinToString("|") { it.prefValue }
         val inactive = normalized.inactiveRoutes.joinToString("|") { it.prefValue }
         prefs.edit().putString(keyFor(normalized.networkType, true),
-            "active=$active;inactive=$inactive").apply()
+            "active=$active;inactive=$inactive;strategy=${normalized.autoStrategy.prefValue}").apply()
     }
 
     fun reset(type: NetworkProfileType) {
@@ -43,8 +43,11 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
         val active = parseRoutes(fields["active"])
         if (active.isEmpty()) return DefaultNetworkRoutePolicies.forType(type)
         val inactive = parseRoutes(fields["inactive"]).filterNot { it in active }
+        val strategy = fields["strategy"]?.let(AutoStrategy::fromPref)
+            ?: DefaultNetworkRoutePolicies.forType(type).autoStrategy
         return NetworkRoutePolicyEditor.normalize(
             DefaultNetworkRoutePolicies.forType(type).copy(
+                autoStrategy = strategy,
                 activeRoutes = active,
                 inactiveRoutes = inactive,
             ),
@@ -58,7 +61,7 @@ class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
         if (routes.isEmpty()) return DefaultNetworkRoutePolicies.forType(type)
         val defaults = DefaultNetworkRoutePolicies.forType(type)
         val first = RouteKind.fromPref(fields["preferred"])?.takeIf { it in routes }
-            ?: NetworkRoutePolicyEditor.routeOrder.first { it in routes }
+            ?: parseRoutes(fields["routes"]).first()
         val fallback = when (fields["fallback"]?.trim()?.lowercase()) {
             "0", "false", "no" -> false
             "1", "true", "yes" -> true
