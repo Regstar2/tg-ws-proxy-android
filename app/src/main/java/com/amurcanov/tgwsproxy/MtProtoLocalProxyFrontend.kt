@@ -48,7 +48,8 @@ internal class MtProtoLocalProxyFrontend(
         val routeOrder = config.runtimeConfig.split(',')
             .firstOrNull { it.trim().startsWith("@route_order=") }
             ?.substringAfter('=').orEmpty().split('|').filter { it.isNotBlank() }
-        val awgOnly = routeOrder == listOf(RouteKind.AWG_WARP.prefValue)
+        val awgOnly = routeOrder == listOf(RouteKind.AWG_WARP.prefValue) ||
+            (routeOrder.isEmpty() && awgConfig.enabled && awgConfig.preferred && !awgConfig.allowFallback)
         if (awgConfig.enabled && awgConfig.configPath.isBlank() && awgOnly) {
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
@@ -168,10 +169,17 @@ internal class MtProtoLocalProxyFrontend(
     }
 
     private fun resetAwgRuntimeAfterFailedConfigure() {
-        synchronized(awgRuntimeOwnerLock) {
-            awgRuntimeOwners.remove(awgRuntime)
+        val canReset = synchronized(awgRuntimeOwnerLock) {
+            val owner = awgRuntimeOwners[awgRuntime]
+            if (owner == null || owner === this) {
+                awgRuntimeOwners.remove(awgRuntime)
+                true
+            } else {
+                false
+            }
         }
-        runCatching { awgRuntime.reset() }
+        // Never reset an AWG dialer owned by an existing live frontend.
+        if (canReset) runCatching { awgRuntime.reset() }
     }
 
     private fun fail(
