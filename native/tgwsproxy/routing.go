@@ -66,17 +66,17 @@ type runtimeSettings struct {
 	MtProtoWorkerPreconnect   bool
 	ForceTestDC               bool
 	// Per-network route policy (from Android @route_* tokens).
-	PolicyPresent bool
-	AllowDirect   bool
-	AllowWorker   bool
-	AllowCFProxy  bool
-	AllowAWG      bool
-	AllowTCP      bool
-	RouteOrder    []routeKind // v2: authoritative order, unaffected by scoring and legacy mode
+	PolicyPresent     bool
+	AllowDirect       bool
+	AllowWorker       bool
+	AllowCFProxy      bool
+	AllowAWG          bool
+	AllowTCP          bool
+	RouteOrder        []routeKind // v2: authoritative order, unaffected by scoring and legacy mode
 	RouteOrderPresent bool
-	Preferred     routeKind // empty means "no explicit preferred"
-	AllowFallback bool
-	PolicyGen     uint64
+	Preferred         routeKind // empty means "no explicit preferred"
+	AllowFallback     bool
+	PolicyGen         uint64
 }
 
 func (s runtimeSettings) workerRouteAvailable() bool {
