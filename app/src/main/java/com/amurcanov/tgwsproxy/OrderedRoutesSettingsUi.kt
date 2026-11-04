@@ -1,6 +1,8 @@
 package com.amurcanov.tgwsproxy
 
 import android.widget.Toast
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +35,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,7 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -48,8 +55,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
 
 /** Compact ordered route editor with independent network profiles. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,6 +79,15 @@ internal fun OrderedRoutesSettings(
         if (selectedNetwork == NetworkProfileType.WIFI) wifiPolicy else mobilePolicy
     )
     val onPolicyChange = if (selectedNetwork == NetworkProfileType.WIFI) onWifiPolicyChange else onMobilePolicyChange
+    // The source order is held constant until pointer-up; this keeps the pointer input
+    // alive through a multi-row gesture instead of canceling it after one swap.
+    var draggedRoute by remember(selectedNetwork) { mutableStateOf<RouteKind?>(null) }
+    var dragDistancePx by remember(selectedNetwork) { mutableFloatStateOf(0f) }
+    val rowStridePx = with(LocalDensity.current) { 85.dp.toPx() }
+    val dragStartIndex = policy.activeRoutes.indexOf(draggedRoute)
+    val dragTargetIndex = RouteDragTarget.index(
+        dragStartIndex, policy.activeRoutes.size, dragDistancePx, rowStridePx
+    )
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -140,23 +156,77 @@ internal fun OrderedRoutesSettings(
             ),
         ) {
             (policy.activeRoutes + policy.inactiveRoutes).forEachIndexed { position, route ->
-                if (position > 0) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f),
+                key(route) {
+                    if (position > 0) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f),
+                        )
+                    }
+                    val index = policy.activeRoutes.indexOf(route)
+                    val dragging = draggedRoute == route && index >= 0
+                    val shifting = when {
+                        dragStartIndex < 0 || index < 0 || dragging -> 0f
+                        dragTargetIndex > dragStartIndex &&
+                            index > dragStartIndex && index <= dragTargetIndex -> -rowStridePx
+                        dragTargetIndex < dragStartIndex &&
+                            index >= dragTargetIndex && index < dragStartIndex -> rowStridePx
+                        else -> 0f
+                    }
+                    val animatedShift by animateFloatAsState(
+                        targetValue = shifting,
+                        animationSpec = tween(durationMillis = 150),
+                        label = "Route priority shift",
                     )
+                    Box(
+                        modifier = Modifier
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer {
+                                translationY = if (dragging) dragDistancePx else animatedShift
+                                shadowElevation = if (dragging) 5.dp.toPx() else 0f
+                            },
+                    ) {
+                        RoutePriorityRow(
+                            route = route,
+                            activeIndex = index,
+                            activeCount = policy.activeRoutes.size,
+                            policy = policy,
+                            configurationRequired = (route == RouteKind.WORKER_WS && !workerConfigured) ||
+                                (route == RouteKind.AWG_WARP && !awgConfigured),
+                            onPolicyChange = onPolicyChange,
+                            onDragStart = {
+                                draggedRoute = route
+                                dragDistancePx = 0f
+                            },
+                            onDragBy = { delta ->
+                                if (draggedRoute == route) {
+                                    val minimum = -index * rowStridePx
+                                    val maximum = (policy.activeRoutes.size - index - 1) * rowStridePx
+                                    dragDistancePx = (dragDistancePx + delta).coerceIn(minimum, maximum)
+                                }
+                            },
+                            onDragEnd = {
+                                if (draggedRoute == route) {
+                                    val target = RouteDragTarget.index(
+                                        index, policy.activeRoutes.size, dragDistancePx, rowStridePx
+                                    )
+                                    draggedRoute = null
+                                    dragDistancePx = 0f
+                                    if (target != index) {
+                                        onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
+                                            policy, index, target
+                                        ))
+                                    }
+                                }
+                            },
+                            onDragCancel = {
+                                draggedRoute = null
+                                dragDistancePx = 0f
+                            },
+                        )
+                    }
                 }
-                val index = policy.activeRoutes.indexOf(route)
-                RoutePriorityRow(
-                    route = route,
-                    activeIndex = index,
-                    activeCount = policy.activeRoutes.size,
-                    policy = policy,
-                    configurationRequired = (route == RouteKind.WORKER_WS && !workerConfigured) ||
-                        (route == RouteKind.AWG_WARP && !awgConfigured),
-                    onPolicyChange = onPolicyChange,
-                )
             }
         }
 
@@ -246,6 +316,10 @@ private fun RoutePriorityRow(
     policy: NetworkRoutePolicy,
     configurationRequired: Boolean,
     onPolicyChange: (NetworkRoutePolicy) -> Unit,
+    onDragStart: () -> Unit,
+    onDragBy: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
 ) {
     val context = LocalContext.current
     val enabled = activeIndex >= 0
@@ -254,6 +328,10 @@ private fun RoutePriorityRow(
     val upLabel = stringResource(R.string.routes_up_label, routeName)
     val downLabel = stringResource(R.string.routes_down_label, routeName)
     val toggleLabel = stringResource(R.string.routes_toggle_label, routeName)
+    val currentStart by rememberUpdatedState(onDragStart)
+    val currentDrag by rememberUpdatedState(onDragBy)
+    val currentEnd by rememberUpdatedState(onDragEnd)
+    val currentCancel by rememberUpdatedState(onDragCancel)
 
     Row(
         modifier = Modifier
@@ -271,19 +349,14 @@ private fun RoutePriorityRow(
                 .semantics { contentDescription = dragLabel }
                 .testTag("routes.drag.${route.prefValue}")
                 .then(
-                    if (enabled) Modifier.pointerInput(route, policy.activeRoutes) {
-                        var distance = 0f
-                        detectDragGestures(onDragStart = { distance = 0f }) { change, delta ->
+                    if (enabled) Modifier.pointerInput(route) {
+                        detectDragGestures(
+                            onDragStart = { currentStart() },
+                            onDragEnd = { currentEnd() },
+                            onDragCancel = { currentCancel() },
+                        ) { change, delta ->
                             change.consume()
-                            distance += delta.y
-                            if (abs(distance) > 55.dp.toPx()) {
-                                val newIndex = (activeIndex + if (distance > 0f) 1 else -1)
-                                    .coerceIn(0, activeCount - 1)
-                                onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                                    policy, activeIndex, newIndex
-                                ))
-                                distance = 0f
-                            }
+                            currentDrag(delta.y)
                         }
                     } else Modifier
                 ),
