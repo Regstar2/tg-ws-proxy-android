@@ -1437,7 +1437,9 @@ private fun ProxyScreen(
             return
         }
         val configKey = runtimeConfigKey(config)
-        if (configKey == lastRuntimeConfigKey) {
+        if (configKey == lastRuntimeConfigKey &&
+            ReconfigureStatusStore.load(prefs).type != ReconfigureStatusType.FAILED
+        ) {
             saveReconfigureStatus(
                 ReconfigureStatus(
                     type = ReconfigureStatusType.SKIPPED,
@@ -1500,6 +1502,29 @@ private fun ProxyScreen(
         } else {
             pendingReconfigureJob = null
             runNetworkReconfigure(profile)
+        }
+    }
+
+    LaunchedEffect(reconfigureStatus.updatedAtMs, reconfigureStatus.message) {
+        if (reconfigureStatus.message == "pending_runtime_apply") {
+            val requestedAt = reconfigureStatus.updatedAtMs
+            repeat(20) {
+                delay(300)
+                val applied = ReconfigureStatusStore.load(prefs)
+                if (applied.updatedAtMs >= requestedAt &&
+                    applied.message != "pending_runtime_apply"
+                ) {
+                    reconfigureStatus = applied
+                    if (applied.type == ReconfigureStatusType.FAILED) {
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.routes_live_apply_failed),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    return@LaunchedEffect
+                }
+            }
         }
     }
 
