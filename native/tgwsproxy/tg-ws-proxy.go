@@ -3516,6 +3516,9 @@ func UpdateMtProtoRoutePolicy(cRuntimeConfig *C.char) C.int {
     dcOptMu.Lock()
     dcOpt = dcMap
     dcOptMu.Unlock()
+    // Cancel preconnect for routes removed from the policy. Keep connections
+    // already owned by existing sessions; do not close the Worker pool here.
+    startMtProtoWorkerPreconnect(dcMap, settings)
     if logInfo != nil {
         logInfo.Printf("MTProto route policy updated network=%s order=%s generation=%d",
             settings.NetworkProfileType, strings.Join(routeKindStrings(settings.OrderedRoutes), "|"),
