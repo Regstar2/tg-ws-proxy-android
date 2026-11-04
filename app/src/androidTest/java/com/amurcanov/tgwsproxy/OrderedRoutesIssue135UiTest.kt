@@ -1,5 +1,7 @@
 package com.amurcanov.tgwsproxy
 
+import android.util.Log
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -104,15 +106,21 @@ class OrderedRoutesIssue135UiTest {
     }
 
     @Test fun defaultResetKeepsOnlyCloudflareProxyInBothProfiles() {
+        Log.i("Issue135UiTest", "defaultReset: before render")
         render()
+        Log.i("Issue135UiTest", "defaultReset: before scroll to reset")
         compose.onNodeWithTag("routes.reset").performScrollTo().performClick()
+        Log.i("Issue135UiTest", "defaultReset: before confirmation")
         compose.onNodeWithTag("routes.reset.confirm").performClick()
+        Log.i("Issue135UiTest", "defaultReset: before Wi-Fi chain assertion")
         assertChain(RouteKind.CF_PROXY_WS)
         compose.onNodeWithTag("routes.tab.mobile").performClick()
         assertChain(RouteKind.CF_PROXY_WS)
+        Log.i("Issue135UiTest", "defaultReset: completed")
     }
 
     private fun render() {
+        Log.i("Issue135UiTest", "render: before setContent")
         compose.setContent {
             var wifi by remember {
                 mutableStateOf(DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
@@ -135,7 +143,9 @@ class OrderedRoutesIssue135UiTest {
                 }
             }
         }
+        Log.i("Issue135UiTest", "render: after setContent, before idle")
         compose.waitForIdle()
+        Log.i("Issue135UiTest", "render: idle")
     }
 
     private fun assertCount(enabled: Int) {
