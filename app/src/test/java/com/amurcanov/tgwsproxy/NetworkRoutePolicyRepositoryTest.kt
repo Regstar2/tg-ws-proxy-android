@@ -258,6 +258,31 @@ class NetworkRoutePolicyRepositoryTest {
     }
 
     @Test
+    fun inactiveDragOrderPersistsAcrossRestartWithoutChangingEnabledRoutes() {
+        val prefs = InMemorySharedPreferences()
+        val repository = NetworkRoutePolicyRepository(prefs)
+        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val moved = NetworkRoutePolicyEditor.moveInactiveRoute(
+            original, RouteKind.WORKER_WS, 0
+        )
+        repository.save(moved)
+
+        val loaded = NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI)
+        assertEquals(moved.displayOrder, loaded.displayOrder)
+        assertEquals(original.activeRoutes, loaded.activeRoutes)
+        assertEquals(original.enabledRoutes, loaded.enabledRoutes)
+
+        val enabled = NetworkRoutePolicyEditor.setRouteEnabled(
+            loaded, RouteKind.WORKER_WS, true
+        )
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.CF_PROXY_WS), enabled.activeRoutes)
+        repository.save(enabled)
+        assertEquals(enabled.displayOrder,
+            NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI).displayOrder
+        )
+    }
+
+    @Test
     fun loadingOldV2SnapshotDoesNotDropActiveRoutes() {
         val prefs = InMemorySharedPreferences()
         prefs.edit().putString("route_policy_wifi_v2",
