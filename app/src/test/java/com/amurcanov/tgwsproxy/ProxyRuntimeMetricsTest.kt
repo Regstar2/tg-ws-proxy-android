@@ -94,6 +94,7 @@ class ProxyRuntimeMetricsTest {
         assertEquals("tcp_fallback", metrics.routeRuntime.selectedRoute)
         assertEquals("awg_warp", metrics.routeRuntime.lastSuccessfulRoute)
         assertEquals("tcp", metrics.transportType)
+        assertEquals("", metrics.routeRuntime.fallbackReason)
     }
 
     @Test
