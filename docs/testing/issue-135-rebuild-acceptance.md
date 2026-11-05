@@ -1,3 +1,15 @@
+## Device smoke 2026-11-05 12:27 — успешная передача через CF, AWG требует проверки
+
+Пользователь выполнил `scripts/issue-135-route-switch-smoke.ps1` на Xiaomi. **Первый запуск** сразу после `am start` завершился ошибкой `Expected exactly one running process ... got` без PID. **Повторный запуск** спустя небольшой интервал обнаружил PID 6108 и завершил тестирование, что соответствует гонке запуска Activity и `pidof`; скрипт дополнен ограниченным ожиданием PID в течение не более ~10 секунд.
+
+Во втором запуске записано:
+- `Policy changed` — 6 событий, поколения 1–6. Последовательность `cf_proxy_ws` → `awg_warp|cf_proxy_ws` → `cf_proxy_ws`.
+- `MTProto route connected` — 26 событий, `MTProto bridge closed` с одновременно положительными `up_bytes` и `down_bytes` — 26 сессий.
+- `no_mtproto_route_available` — 0; `fake tls client hello expected` и `unsupported mtproto transport` — 0 в захваченном процессе.
+- В показанных пользователем последних пяти записях `actual_backend=cf_proxy_ws`, `fallback_used=false`, `error=none`, поколения 6. Это подтверждает двустороннюю MTProto-передачу через CF Proxy после возврата к CF-only.
+- **Пока не доказано**, были ли двусторонние сессии реально через AWG в период поколений 3–4: для проверки нужен полный сохранённый `artifacts/issue135/route-switch-20261105-122740.txt`; один факт `newRoutes=awg_warp|cf_proxy_ws` не равен успеху AWG. Обновлённый скрипт выводит группировку двусторонних сессий по `actual_backend` и `route_generation`, предупреждает при отсутствии AWG evidence.
+- Это положительный реальный smoke для **CF-only и сохранения подключений во время переключения**. Медиазагрузка отдельно не подтверждена из показанных записей `media=false`, равно как и визуальная плавность перетаскивания на устройстве.
+
 ## Archive 2026-11-05 11:21 — ложная классификация PASS как FAIL
 
 Проверен пользовательский `ui-tests-20261105-112148.zip`. Первый самостоятельный тест `InstrumentationBootstrapIssue135Test#runnerCanAccessTargetPackage` **прошёл на телефоне**, а проверочный сценарий ошибочно пометил его `FAIL` и остановил весь набор:
