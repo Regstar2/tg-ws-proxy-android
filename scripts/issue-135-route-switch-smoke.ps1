@@ -28,12 +28,25 @@ if ($LASTEXITCODE -ne 0 -or @($Installed | Where-Object {
 adb -s $Serial shell am start -n "$Package/com.amurcanov.tgwsproxy.MainActivity"
 if ($LASTEXITCODE -ne 0) { throw "Cannot open target application" }
 
-$Pids = @((adb -s $Serial shell pidof $Package) -split '\s+' |
-    Where-Object { $_ -match '^\d+$' })
-if ($LASTEXITCODE -ne 0 -or $Pids.Count -ne 1) {
-    throw "Expected exactly one running process for $Package, got $($Pids -join ',')"
+# Starting an Activity returns before Android always publishes its process PID.
+# Wait for one stable app PID instead of failing the first time the Activity opens.
+$PidValue = $null
+$ObservedPids = @()
+for ($Attempt = 0; $Attempt -lt 20; $Attempt++) {
+    $PidOutput = @(adb -s $Serial shell pidof $Package 2>$null)
+    if ($LASTEXITCODE -eq 0) {
+        $ObservedPids = @(($PidOutput -join " ") -split '\s+' |
+            Where-Object { $_ -match '^\d+$' } | Select-Object -Unique)
+        if ($ObservedPids.Count -eq 1) {
+            $PidValue = $ObservedPids[0]
+            break
+        }
+    }
+    Start-Sleep -Milliseconds 500
 }
-$PidValue = $Pids[0]
+if (-not $PidValue) {
+    throw "Timed out waiting for one running process for $Package; last PIDs: $($ObservedPids -join ',')"
+}
 
 $Dir = Join-Path $Root "artifacts/issue135"
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
@@ -77,6 +90,25 @@ Write-Host "Connected MTProto sessions: $($Connected.Count)"
 Write-Host "Duplex MTProto sessions: $($Duplex.Count)"
 Write-Host "No-route failures: $($NoRoute.Count)"
 Write-Host "Ingress handshake rejections: $($HandshakeErrors.Count)"
+# A preferred route is not proof of traffic through it. Report real duplex backends.
+$BackendGroups = @($Duplex | ForEach-Object {
+    if ($_ -match '\bactual_backend=([^\s]+)') { $Matches[1] }
+} | Group-Object | Sort-Object Name)
+$GenerationGroups = @($Duplex | ForEach-Object {
+    if ($_ -match '\broute_generation=([0-9]+)') { $Matches[1] }
+} | Group-Object | Sort-Object { [int]$_.Name })
+Write-Host "Duplex sessions by actual backend:"
+foreach ($Group in $BackendGroups) {
+    Write-Host ("  {0}: {1}" -f $Group.Name, $Group.Count)
+}
+Write-Host "Duplex sessions by policy generation:"
+foreach ($Group in $GenerationGroups) {
+    Write-Host ("  generation {0}: {1}" -f $Group.Name, $Group.Count)
+}
+if (@($Updates | Where-Object { $_ -match '\bnewRoutes=awg_warp' }).Count -gt 0 -and
+    @($BackendGroups | Where-Object { $_.Name -eq 'awg_warp' }).Count -eq 0) {
+    Write-Warning "AWG was first in an applied policy, but AWG duplex traffic was not proven."
+}
 $Updates | Select-Object -Last 8 | ForEach-Object { Write-Host $_ }
 $Duplex | Select-Object -Last 5 | ForEach-Object { Write-Host $_ }
 Write-Host "Full log: $Log"
