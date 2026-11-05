@@ -31,12 +31,14 @@ func TestRuntimeStatusExposesLiveBridgeTrafficAndConnectionTime(t *testing.T) {
 	up := []byte("client-payload")
 	down := []byte("upstream-payload")
 	writeAndReadFullForBridgeTest(t, clientPeer, upstreamPeer, up, up)
+	waitForLiveTraffic(t, runtime, int64(len(up)), 0)
 	status := runtime.Status()
 	if status.BytesUp != int64(len(up)) || status.BytesDown != 0 {
 		t.Fatalf("live traffic after upload: up=%d down=%d", status.BytesUp, status.BytesDown)
 	}
 
 	writeAndReadFullForBridgeTest(t, upstreamPeer, clientPeer, down, down)
+	waitForLiveTraffic(t, runtime, int64(len(up)), int64(len(down)))
 	status = runtime.Status()
 	if status.BytesUp != int64(len(up)) || status.BytesDown != int64(len(down)) {
 		t.Fatalf("live duplex counters: up=%d down=%d", status.BytesUp, status.BytesDown)
@@ -97,5 +99,20 @@ func TestTrafficWrapperCountsOnlyBytesAcceptedByConnection(t *testing.T) {
 	}
 	if !bytes.Equal(got, payload) || counter.bytesUp.Load() != int64(len(payload)) {
 		t.Fatalf("payload=%q counter=%d", got, counter.bytesUp.Load())
+	}
+}
+
+func waitForLiveTraffic(t *testing.T, runtime *Runtime, up, down int64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status := runtime.Status()
+		if status.BytesUp == up && status.BytesDown == down {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live counters did not reach up=%d down=%d: got up=%d down=%d", up, down, status.BytesUp, status.BytesDown)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
