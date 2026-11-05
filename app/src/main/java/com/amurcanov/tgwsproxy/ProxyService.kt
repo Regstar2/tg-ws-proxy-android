@@ -632,7 +632,7 @@ class ProxyService : Service() {
                     lastBytesDown = runtime.bytesDown
                     lastBytesAtMs = now
                 }
-                val (downBps, upBps) = speedSampler.sample(runtime.bytesDown, runtime.bytesUp)
+                val (downBps, upBps) = speedSampler.sample(runtime)
                 val previousRoute = ProxyRuntimeState.uiMetrics.value.runtime.currentRouteKind
                 val confirmedRouteChanged = runtime.currentRouteKind.isNotBlank() &&
                     runtime.currentRouteKind != previousRoute
@@ -788,10 +788,17 @@ class ProxyService : Service() {
             getString(R.string.metrics_idle),
         )
         lines += getString(R.string.notification_line_speed, speed)
-        lines += getString(
-            R.string.notification_line_latency,
-            ConnectionMetricsFormatter.formatLatency(ui.runtime.lastLatencyMs),
-        )
+        if (ui.runtime.mode == "mtproto") {
+            lines += getString(
+                R.string.notification_line_connect_time,
+                ConnectionMetricsFormatter.formatLatency(ui.runtime.lastConnectTimeMs),
+            )
+        } else {
+            lines += getString(
+                R.string.notification_line_latency,
+                ConnectionMetricsFormatter.formatLatency(ui.runtime.lastLatencyMs),
+            )
+        }
         lines += getString(R.string.notification_line_connections, ui.runtime.activeConnections)
         if (ui.runtime.lastError.isNotBlank()) {
             lines += getString(R.string.notification_line_last_error, ui.runtime.lastError)

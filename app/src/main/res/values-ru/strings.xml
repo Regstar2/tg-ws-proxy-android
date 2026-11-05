@@ -359,6 +359,7 @@
     <string name="notification_line_route">Маршрут: %1$s</string>
     <string name="notification_line_speed">Скорость: %1$s</string>
     <string name="notification_line_latency">Задержка: %1$s</string>
+    <string name="notification_line_connect_time">Установка последнего исходящего соединения: %1$s</string>
     <string name="notification_line_connections">Соединения: %1$d</string>
     <string name="notification_line_last_error">Последняя ошибка: %1$s</string>
     <string name="section_service">Служба</string>

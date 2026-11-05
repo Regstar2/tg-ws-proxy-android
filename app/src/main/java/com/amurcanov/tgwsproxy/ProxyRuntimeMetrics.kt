@@ -15,6 +15,8 @@ data class ProxyRuntimeMetrics(
     val bytesUp: Long = 0,
     val bytesDown: Long = 0,
     val lastLatencyMs: Long = 0,
+    /** Last successful MTProto outbound connect time, not network round-trip latency. */
+    val lastConnectTimeMs: Long = 0,
     val lastError: String = "",
     val workerEndpointPoolHits: Int = 0,
     val workerEndpointPoolMisses: Int = 0,
@@ -69,6 +71,9 @@ data class ProxyRuntimeMetrics(
                 },
                 activeConnections = status.activeConnections,
                 totalConnections = status.totalConnections,
+                bytesUp = status.bytesUp,
+                bytesDown = status.bytesDown,
+                lastConnectTimeMs = status.lastConnectMs,
                 lastError = status.lastError.noneAsBlank(),
                 routeRuntime = RouteRuntimeState(
                     configuredMode = "mtproto",
@@ -172,6 +177,9 @@ class SpeedSampler(private val windowMs: Long = 4000) {
     private var lastSampleAtMs: Long? = null
     private var downloadBps: Double = 0.0
     private var uploadBps: Double = 0.0
+
+    fun sample(runtime: ProxyRuntimeMetrics, nowMs: Long = System.currentTimeMillis()): Pair<Double, Double> =
+        sample(runtime.bytesUp, runtime.bytesDown, nowMs)
 
     fun sample(bytesUp: Long, bytesDown: Long, nowMs: Long = System.currentTimeMillis()): Pair<Double, Double> {
         val previousSampleAtMs = lastSampleAtMs

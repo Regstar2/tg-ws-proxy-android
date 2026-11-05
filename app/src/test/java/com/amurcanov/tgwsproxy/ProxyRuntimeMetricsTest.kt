@@ -164,6 +164,50 @@ class ProxyRuntimeMetricsTest {
     }
 
     @Test
+    fun mtProtoStatus_trafficAndConnectTimeComeFromConfirmedNativeStatus() {
+        val native = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=awg_warp;fallback_used=true;route_reason=connected;" +
+                "active=2;total=7;bytes_up=4096;bytes_down=16384;connect_ms=218;last_error=none",
+        )
+        assertEquals(4096L, native.bytesUp)
+        assertEquals(16384L, native.bytesDown)
+        assertEquals(218L, native.lastConnectMs)
+
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(native)
+        assertEquals("awg_warp", metrics.currentRouteKind)
+        assertEquals(4096L, metrics.bytesUp)
+        assertEquals(16384L, metrics.bytesDown)
+        assertEquals(218L, metrics.lastConnectTimeMs)
+        // Connection setup time is not an RTT/ping measurement.
+        assertEquals(0L, metrics.lastLatencyMs)
+    }
+
+    @Test
+    fun mtProtoStatus_missingMetricsRemainUnknownRatherThanFabricated() {
+        val native = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;actual_backend=none;bytes_up=bad;" +
+                "bytes_down=-99;connect_ms=-10",
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(native)
+        assertEquals(0L, metrics.bytesUp)
+        assertEquals(0L, metrics.bytesDown)
+        assertEquals(0L, metrics.lastConnectTimeMs)
+    }
+
+    @Test
+    fun speedSampler_runtimeMetricsPreserveDownloadAndUploadDirections() {
+        val sampler = SpeedSampler(windowMs = 1_000)
+        sampler.sample(ProxyRuntimeMetrics(bytesUp = 0L, bytesDown = 0L), nowMs = 0L)
+        val (downloadBps, uploadBps) = sampler.sample(
+            ProxyRuntimeMetrics(bytesUp = 2_048L, bytesDown = 8_192L),
+            nowMs = 1_000L,
+        )
+        assertEquals(8_192.0, downloadBps, 0.001)
+        assertEquals(2_048.0, uploadBps, 0.001)
+    }
+
+    @Test
     fun speedSampler_computesDelta() {
         val sampler = SpeedSampler(windowMs = 1000)
         sampler.sample(0, 0, nowMs = 0)

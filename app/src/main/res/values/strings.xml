@@ -359,6 +359,7 @@
     <string name="notification_line_route">Route: %1$s</string>
     <string name="notification_line_speed">Speed: %1$s</string>
     <string name="notification_line_latency">Latency: %1$s</string>
+    <string name="notification_line_connect_time">Last outbound connection setup: %1$s</string>
     <string name="notification_line_connections">Connections: %1$d</string>
     <string name="notification_line_last_error">Last error: %1$s</string>
     <string name="section_service">Service</string>
