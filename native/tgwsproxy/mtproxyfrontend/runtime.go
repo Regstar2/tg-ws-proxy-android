@@ -266,6 +266,13 @@ func (r *Runtime) Stop() error {
 func (r *Runtime) Status() RuntimeStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	selectedBackend := r.selectedBackend
+	// An ordered policy can change while the listener stays alive. Selected
+	// reports the requested first route immediately, while actual reports only
+	// a backend established by a real outbound MTProto connection.
+	if r.connector != nil && r.runCtx != nil {
+		selectedBackend = r.connector.Capability().SelectedBackend
+	}
 	return RuntimeStatus{
 		Status:                    r.status,
 		Host:                      r.host,
@@ -281,7 +288,7 @@ func (r *Runtime) Status() RuntimeStatus {
 		FakeTLSLastError:          r.fakeTLSLastError,
 		ForceTestDC:               r.forceTestDC,
 		OutboundStatus:            r.outboundStatus,
-		SelectedBackend:           r.selectedBackend,
+		SelectedBackend:           selectedBackend,
 		ActualBackend:             r.actualBackend,
 		FallbackUsed:              r.fallbackUsed,
 		RouteReason:               r.routeReason,
