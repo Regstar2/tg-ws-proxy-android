@@ -133,12 +133,49 @@ class OrderedRoutesIssue135UiTest {
             RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
     }
 
-    @Test fun arrowsUpdateChainWithoutApplyButton() {
+    @Test fun arrowsMoveEveryRowOneVisualSlotAndUpdateActiveChain() {
         render()
+        // CF passes two inactive rows before crossing another active one.
+        repeat(2) {
+            compose.onNodeWithTag("routes.down.cf_proxy_ws").performClick()
+            assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+        }
         compose.onNodeWithTag("routes.down.cf_proxy_ws").performClick()
         assertChain(RouteKind.DIRECT_WS, RouteKind.CF_PROXY_WS, RouteKind.TCP_FALLBACK)
+
+        // A disabled row can move with the very same arrow buttons.
+        compose.onNodeWithTag("routes.down.awg_warp").performClick()
+        compose.onNodeWithTag("routes.toggle.awg_warp").assertIsOff()
+        assertChain(RouteKind.DIRECT_WS, RouteKind.CF_PROXY_WS, RouteKind.TCP_FALLBACK)
+
         compose.onNodeWithTag("routes.up.cf_proxy_ws").performClick()
         assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+    }
+
+    @Test fun activeGripCanLandBetweenTwoDisabledRows() {
+        render()
+        val density = InstrumentationRegistry.getInstrumentation()
+            .targetContext.resources.displayMetrics.density
+        val before = compose.onNodeWithTag("routes.row.cf_proxy_ws")
+            .fetchSemanticsNode().boundsInRoot.top
+        compose.onNodeWithTag("routes.drag.cf_proxy_ws").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 85f * density * 1.2f))
+            up()
+        }
+        compose.waitForIdle()
+
+        val after = compose.onNodeWithTag("routes.row.cf_proxy_ws")
+            .fetchSemanticsNode().boundsInRoot.top
+        org.junit.Assert.assertTrue(after > before + 0.7f * 85f * density)
+        compose.onNodeWithTag("routes.toggle.awg_warp").assertIsOff()
+        compose.onNodeWithTag("routes.toggle.worker_ws").assertIsOff()
+        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+
+        // Enabling the row above CF now gives AWG the first priority.
+        compose.onNodeWithTag("routes.toggle.awg_warp").performClick()
+        assertChain(RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS,
+            RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
     }
 
     @Test fun lastActiveCannotBeDisabled() {
