@@ -117,7 +117,13 @@ try {
                     $_ -match '^INSTRUMENTATION_STATUS_CODE:\s*-2\s*$' -or
                     $_ -match 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed'
                 }).Count -gt 0
-                $Status = if ($ExitCode -eq 0 -and $RunnerFinished -and
+                # Some PowerShell/ADB combinations leave Process.ExitCode null even
+                # after WaitForExit, despite AndroidJUnitRunner reporting completion.
+                # A missing host exit code is NOT an Android test failure: require
+                # exactly one successful test and the runner's terminal PASS marker.
+                # A known nonzero host exit code always remains a failure.
+                $HostExitedSuccessfully = $null -eq $ExitCode -or $ExitCode -eq 0
+                $Status = if ($HostExitedSuccessfully -and $RunnerFinished -and
                     $CompletedTests -eq 1 -and -not $Failure) { "PASS" } else { "FAIL" }
             }
         } catch {
