@@ -81,6 +81,54 @@ class ProxyRuntimeMetricsTest {
     }
 
     @Test
+    fun mtProtoStatus_tcpToAwgFallbackShowsActualAwgAndRequestedTcp() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=awg_warp;fallback_used=true;route_reason=connected;" +
+                "active=2;total=5;last_error=none",
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+
+        assertEquals("awg_warp", metrics.currentRouteKind)
+        assertEquals("awg_warp", metrics.routeRuntime.activeRoute)
+        assertEquals("tcp_fallback", metrics.routeRuntime.selectedRoute)
+        assertEquals("awg_warp", metrics.routeRuntime.lastSuccessfulRoute)
+        assertEquals("tcp", metrics.transportType)
+    }
+
+    @Test
+    fun mtProtoStatus_withoutConfirmedConnectionDoesNotPretendTcpIsActive() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=none;fallback_used=false;route_reason=handshake_failed;" +
+                "active=1;total=2",
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+
+        assertTrue(metrics.running)
+        assertEquals("", metrics.currentRouteKind)
+        assertEquals("", metrics.routeRuntime.activeRoute)
+        assertEquals("", metrics.routeRuntime.lastSuccessfulRoute)
+        assertEquals("tcp_fallback", metrics.routeRuntime.selectedRoute)
+        assertEquals("", metrics.transportType)
+    }
+
+    @Test
+    fun mtProtoStatus_directTcpNativeBackendMapsToFallbackLabelAndTransport() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=direct_tcp;fallback_used=false;route_reason=connected",
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+
+        assertEquals("tcp_fallback", metrics.currentRouteKind)
+        assertEquals("tcp_fallback", metrics.routeRuntime.activeRoute)
+        assertEquals("tcp", metrics.transportType)
+        assertEquals(R.string.route_display_tcp_fallback,
+            RouteDisplayNames.routeLabelRes("direct_tcp"))
+    }
+
+    @Test
     fun parseStatus_ignoresBrokenPoolMetricNumbers() {
         val raw = "running=1;worker_endpoint_pool_hits=x;worker_endpoint_pool_misses=bad;cf_pool_hits=;cf_pool_refill_errors=nope"
         val metrics = ProxyRuntimeMetrics.parseStatus(raw)!!
