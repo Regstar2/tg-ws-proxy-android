@@ -104,6 +104,27 @@ if ($uiTestSource -notmatch 'WaitForExit\(' -or
     throw "Issue #135 UI test runner lacks watchdog/ZIP or calls forbidden destructive commands"
 }
 
+# The live route smoke script runs on persistent devices; CI checks its syntax
+# and enforces the bounded PID wait and actual-backend evidence without ADB.
+$routeSmokeScript = Join-Path $PSScriptRoot 'issue-135-route-switch-smoke.ps1'
+if (-not (Test-Path -LiteralPath $routeSmokeScript)) {
+    throw "Issue #135 route switching smoke script is missing"
+}
+$smokeTokens = $null
+$smokeErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeSmokeScript, [ref]$smokeTokens, [ref]$smokeErrors
+) | Out-Null
+if ($smokeErrors) {
+    throw "Issue #135 route smoke script has invalid PowerShell syntax: $($smokeErrors -join '; ')"
+}
+$smokeSource = Get-Content -LiteralPath $routeSmokeScript -Raw
+if ($smokeSource -notmatch 'Start-Sleep -Milliseconds 500' -or
+    $smokeSource -notmatch 'Duplex sessions by actual backend:' -or
+    $smokeSource -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)') {
+    throw "Issue #135 route smoke requires a bounded PID wait, backend evidence and safe app handling"
+}
+
 # Guard against an AGP instrumentation cleanup removing the production app.
 $routeInstallSource = Get-Content -LiteralPath $routeInstallScript -Raw
 if ($routeInstallSource -match '(?m)^[^#\r\n]*:app:connectedDebugAndroidTest') {
