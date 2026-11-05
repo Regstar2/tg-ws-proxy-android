@@ -12,6 +12,7 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $AppId = "io.github.regstar2.tgwsproxy"
 $Runner = "$AppId.test/androidx.test.runner.AndroidJUnitRunner"
 $Adb = (Get-Command adb -ErrorAction Stop).Source
+. (Join-Path $PSScriptRoot "issue-135-instrumentation-status.ps1")
 
 if ([string]::IsNullOrWhiteSpace($Serial)) {
     $Devices = @(adb devices | Where-Object { $_ -match '^\S+\s+device\s*$' })
@@ -107,24 +108,8 @@ try {
                 $Process.Refresh()
                 $ExitCode = $Process.ExitCode
                 $Output = @(Get-Content -LiteralPath $Stdout -ErrorAction SilentlyContinue)
-                $CompletedTests = @($Output | Where-Object {
-                    $_ -match '^INSTRUMENTATION_STATUS_CODE:\s*0\s*$'
-                }).Count
-                $RunnerFinished = @($Output | Where-Object {
-                    $_ -match '^INSTRUMENTATION_CODE:\s*-1\s*$'
-                }).Count -eq 1
-                $Failure = @($Output | Where-Object {
-                    $_ -match '^INSTRUMENTATION_STATUS_CODE:\s*-2\s*$' -or
-                    $_ -match 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed'
-                }).Count -gt 0
-                # Some PowerShell/ADB combinations leave Process.ExitCode null even
-                # after WaitForExit, despite AndroidJUnitRunner reporting completion.
-                # A missing host exit code is NOT an Android test failure: require
-                # exactly one successful test and the runner's terminal PASS marker.
-                # A known nonzero host exit code always remains a failure.
-                $HostExitedSuccessfully = $null -eq $ExitCode -or $ExitCode -eq 0
-                $Status = if ($HostExitedSuccessfully -and $RunnerFinished -and
-                    $CompletedTests -eq 1 -and -not $Failure) { "PASS" } else { "FAIL" }
+                $Status = Get-Issue135InstrumentationStatus `
+                    -HostExitCode $ExitCode -OutputLines $Output
             }
         } catch {
             Write-Warning "$Test runner failed: $_"
