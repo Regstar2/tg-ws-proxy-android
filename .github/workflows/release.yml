@@ -12,49 +12,26 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: Build and publish release
+  release-source-ci:
+    name: Release source CI (GitHub-hosted)
     if: >
       github.actor == 'Regstar2' &&
       github.triggering_actor == 'Regstar2'
-    # Only the owner's trusted Windows runner may handle signing material.
-    runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 120
-
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: native/tgwsproxy/go.mod
-          cache-dependency-path: native/tgwsproxy/go.sum
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
 
       - name: Validate and checkout exact release tag
         shell: pwsh
@@ -84,6 +61,24 @@ jobs:
               throw "Failed to checkout tag '$tag'."
           }
 
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native/tgwsproxy/go.mod
+          cache-dependency-path: native/tgwsproxy/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: Run release-source CI
         shell: pwsh
         run: |
@@ -92,6 +87,79 @@ jobs:
           }
 
           ./scripts/ci.ps1
+
+
+  release:
+    needs: [release-source-ci]
+    permissions:
+      contents: write
+    name: Build and publish release
+    if: >
+      github.actor == 'Regstar2' &&
+      github.triggering_actor == 'Regstar2'
+    # Only the owner's trusted Windows runner may handle signing material.
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 120
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and checkout exact release tag
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+              throw 'Release tag is empty.'
+          }
+
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+              throw "Invalid release tag: $tag"
+          }
+
+          git fetch --tags --force
+          if ($LASTEXITCODE -ne 0) {
+              throw 'git fetch --tags failed.'
+          }
+
+          git rev-parse "refs/tags/$tag^{commit}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+              throw "Tag '$tag' does not exist."
+          }
+
+          git checkout --detach "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to checkout tag '$tag'."
+          }
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native/tgwsproxy/go.mod
+          cache-dependency-path: native/tgwsproxy/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Restore release signing keystore
         shell: pwsh

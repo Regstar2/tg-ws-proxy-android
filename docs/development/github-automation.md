@@ -12,7 +12,7 @@ Project-specific commands live in PowerShell scripts. GitHub Actions only orches
 | `scripts/release.ps1 -Version vX.Y.Z` | Signed release APK build, signature verification, stable artifact naming and SHA-256 generation into `dist/` |
 | `.github/workflows/trusted-ci.yml` | Public PR CI and manual CI dispatch on a GitHub-hosted Windows runner |
 | `.github/workflows/project-sync.yml` | Add Issues and Pull Requests to the Development Project on a GitHub-hosted runner |
-| `.github/workflows/release.yml` | Owner-only release validation/build/publication on the trusted self-hosted Windows runner |
+| `.github/workflows/release.yml` | Owner-only release: mandatory exact-tag CI on GitHub-hosted Windows, then signed build/publication on trusted self-hosted Windows |
 
 ## Public CI
 
@@ -69,22 +69,23 @@ The token needs only the permissions required by GitHub for adding repository Is
 
 `release.yml` is intentionally separate from public CI. It runs only for an owner-triggered `v*` tag push or an owner `workflow_dispatch` that references an existing release tag.
 
-The release job still uses the trusted self-hosted Windows/X64 runner because the current signing model expects a keystore and signing environment that remain outside the repository checkout.
+The first release job runs `scripts/ci.ps1` for the exact tag on an ephemeral GitHub-hosted Windows runner, with read-only repository access and no signing secrets. Only after CI passes does the signed build/publish job start on the trusted self-hosted Windows/X64 runner. Windows security software on that persistent machine is not disabled or bypassed.
 
-Public PR code is never executed by this release workflow. The release workflow checks out only the exact owner-controlled release tag before running the project scripts.
+Public PR code is never executed by this release workflow. Both jobs independently check out the exact owner-controlled release tag before running their project scripts. Release-signing secrets are scoped to the signing job only.
 
 Release flow:
 
 ```text
 exact owner-controlled tag
-  -> scripts/ci.ps1
-  -> clean dist/
-  -> scripts/release.ps1 -Version <tag>
+  -> GitHub-hosted Windows: scripts/ci.ps1 (no signing secrets)
+  -> CI SUCCESS gate
+  -> trusted self-hosted Windows: clean dist/
+  -> scripts/release.ps1 -Version <tag> (release signing)
   -> verify APK + SHA-256 output
   -> create GitHub Release
 ```
 
-The workflow refuses to silently replace an existing GitHub Release.
+The workflow refuses to silently replace an existing GitHub Release. For a failed release with an existing immutable tag, merge a workflow-only fix to `main` and manually dispatch that updated workflow with `gh workflow run release.yml --repo Regstar2/tg-ws-proxy-android --ref main -f tag=vX.Y.Z`; do not rewrite the tag. The checkout and CI still use the tag's source, not `main`.
 
 Alpha, beta and RC tags are created as GitHub prereleases.
 
