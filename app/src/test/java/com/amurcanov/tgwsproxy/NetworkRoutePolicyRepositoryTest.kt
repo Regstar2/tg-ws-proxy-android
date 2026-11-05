@@ -283,6 +283,27 @@ class NetworkRoutePolicyRepositoryTest {
     }
 
     @Test
+    fun enabledRouteCanPersistBetweenDisabledRowsWithoutChangingItsActiveChain() {
+        val prefs = InMemorySharedPreferences()
+        val repo = NetworkRoutePolicyRepository(prefs)
+        val original = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val moved = NetworkRoutePolicyEditor.moveRoute(original, 0, 1)
+        repo.save(moved)
+        val restored = NetworkRoutePolicyRepository(prefs).load(NetworkProfileType.WIFI)
+
+        assertEquals(moved.displayOrder, restored.displayOrder)
+        assertEquals(listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS), restored.activeRoutes)
+        assertEquals(original.enabledRoutes, restored.enabledRoutes)
+        assertEquals(RouteKind.CF_PROXY_WS, restored.preferredRoute)
+    }
+
+    @Test
     fun loadingOldV2SnapshotDoesNotDropActiveRoutes() {
         val prefs = InMemorySharedPreferences()
         prefs.edit().putString("route_policy_wifi_v2",
