@@ -99,6 +99,7 @@ type Runtime struct {
 	outboundStatus            string
 	selectedBackend           string
 	actualBackend             string
+	actualRouteGeneration     uint64 // latest policy generation with a confirmed outbound route
 	fallbackUsed              bool
 	routeReason               string
 	lastError                 string
@@ -189,6 +190,7 @@ func (r *Runtime) Start(config Config) StartResult {
 	r.lastError = ""
 	r.fakeTLSLastError = ""
 	r.actualBackend = ""
+	r.actualRouteGeneration = 0
 	r.fallbackUsed = false
 	r.routeReason = "awaiting_connection"
 	r.activeConnections.Store(0)
@@ -530,15 +532,34 @@ func (r *Runtime) updateRouteTruthFor(ctx context.Context, result OutboundResult
 	if r.runCtx != ctx || ctx.Err() != nil {
 		return
 	}
-	r.selectedBackend = result.SelectedBackend
-	r.actualBackend = result.ActualBackend
-	r.fallbackUsed = result.FallbackUsed
-	r.routeReason = result.Reason
+	// Closing an older session is not a new routing decision. In particular,
+	// it must not overwrite a more recent successful fallback connection.
+	if result.Reason == "connection_closed" || result.RouteGeneration < r.actualRouteGeneration {
+		return
+	}
+	if result.SelectedBackend != "" {
+		r.selectedBackend = result.SelectedBackend
+	}
 	if result.Err != nil {
 		r.lastError = result.Err.Error()
-	} else {
-		r.lastError = ""
+		// Failed handshakes and unsuccessful route attempts have no actual backend.
+		// Preserve the most recently confirmed connection for the status UI.
+		if r.actualBackend == "" {
+			r.routeReason = result.Reason
+		}
+		return
 	}
+	if result.ActualBackend == "" {
+		if r.actualBackend == "" {
+			r.routeReason = result.Reason
+		}
+		return
+	}
+	r.actualBackend = result.ActualBackend
+	r.actualRouteGeneration = result.RouteGeneration
+	r.fallbackUsed = result.FallbackUsed
+	r.routeReason = result.Reason
+	r.lastError = ""
 }
 
 func (r *Runtime) noteFakeTLSAccepted() {
