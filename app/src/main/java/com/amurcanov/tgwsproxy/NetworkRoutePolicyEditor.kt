@@ -52,6 +52,28 @@ object NetworkRoutePolicyEditor {
     }
 
     /**
+     * Reorder a disabled item within the full five-row visual list.
+     * Active routes retain their relative fallback order and enabled state.
+     */
+    fun moveInactiveRoute(
+        policy: NetworkRoutePolicy,
+        route: RouteKind,
+        toDisplayIndex: Int,
+    ): NetworkRoutePolicy {
+        val current = normalize(policy)
+        val fromIndex = current.displayOrder.indexOf(route)
+        if (route in current.enabledRoutes ||
+            fromIndex < 0 ||
+            toDisplayIndex !in current.displayOrder.indices ||
+            fromIndex == toDisplayIndex
+        ) return current
+
+        val slots = current.displayOrder.toMutableList()
+        slots.add(toDisplayIndex, slots.removeAt(fromIndex))
+        return current.withOrderedSlots(slots, current.enabledRoutes)
+    }
+
+    /**
      * A route with missing local configuration cannot be the only usable choice.
      * Network reachability itself is checked by the native connector.
      */
