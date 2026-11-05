@@ -1,6 +1,6 @@
 # Release workflow — v1.11.7
 
-**Состояние:** подготовка, публичный релиз и tag `v1.11.7` ещё не созданы. Последняя опубликованная стабильная версия — [v1.11.6](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.6); план v1.11.7 — [milestone #11](https://github.com/Regstar2/tg-ws-proxy-android/milestone/11), основная работа — [Issue #135](https://github.com/Regstar2/tg-ws-proxy-android/issues/135) / [PR #137](https://github.com/Regstar2/tg-ws-proxy-android/pull/137).
+**Состояние:** аннотированный tag `v1.11.7` создан на `c9e78cbd2736fc6066e5fb34f04f8638372fb953`; автоматическая публикация остановилась на локальной блокировке временного файла Go-теста антивирусом self-hosted Windows runner. GitHub Release ещё не опубликован. Последняя опубликованная стабильная версия — [v1.11.6](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.6); план v1.11.7 — [milestone #11](https://github.com/Regstar2/tg-ws-proxy-android/milestone/11), основная работа — [Issue #135](https://github.com/Regstar2/tg-ws-proxy-android/issues/135) / [PR #137](https://github.com/Regstar2/tg-ws-proxy-android/pull/137).
 
 ## Метаданные
 
@@ -10,7 +10,7 @@
 - [Полные RU notes](v1.11.7.md) · [EN notes](v1.11.7_EN.md) · [Краткий GitHub Release](RELEASE_NOTES_v1.11.7.md) · [Release checklist](RELEASE_CHECKLIST.md).
 - На данный момент **неизвестны** SHA-256 и размер релизного APK; их нельзя подставлять из Debug.
 
-## Требования до тега
+## Условия публикации и оставшиеся проверки
 
 1. Довести PR #137 до полной приёмки #135, проверить отдельные Wi-Fi/mobile политики, strict-only, порядок отключённых/включённых, миграцию v1 → v2, сброс и hot-apply. Не закрывать Issue, пока обязательные критерии не подтверждены.
 2. Проанализировать [#138](https://github.com/Regstar2/tg-ws-proxy-android/issues/138): 11 801 локальных отказов Fake TLS за ~34 секунды в одном Xiaomi-логе. Нужны источник, повторяемость и влияние на ресурсы; определить, блокирует ли проблема стабильный релиз.
@@ -19,17 +19,17 @@
 5. Проверить RU/EN ресурсы и текст, отсутствие приватных файлов, и что сохранившиеся настройки v1.11.6 не потерялись. Убедиться, что последний опубликованный v1.11.6 и целевой v1.11.7 используют одинаковый `applicationId`.
 6. На доверенном Windows-окружении с **оригинальным релизным ключом** подготовить `scripts/release.ps1 -Version v1.11.7`. Проверить `aapt`, `apksigner`, SHA-256 и `dist/`. Скрипт очищает **только `dist/`** перед сборкой; не хранить секреты в репозитории.
 7. Установить собранный **Release APK** поверх v1.11.6 с сохранением данных; проверить пакет/версию, экран маршрутов, запуск, двустороннюю передачу и уведомление. Не выполнять `adb uninstall` или `pm clear` для этой проверки.
-8. Зафиксировать точный проверенный commit итогового `main`. Перед тегированием удостовериться, что `v1.11.7` не существует в удалённом Git и нет уже опубликованного GitHub Release с таким tag.
+8. Тег `v1.11.7` уже существует на проверенном commit `c9e78cbd2736fc6066e5fb34f04f8638372fb953`. Не удалять, не перемещать и не создавать его повторно; отдельно удостовериться, что GitHub Release отсутствует перед повторной публикацией.
 
 ## Сборка и публикация
 
 Выполнять **только после** полного PASS [чек-листа](RELEASE_CHECKLIST.md).
 
-- Релиз создаётся из одного проверенного commit `main`, на который ставится аннотированный tag `v1.11.7` без перезаписи существующих тегов.
-- [Release workflow](../../.github/workflows/release.yml) разрешён только владельцу `Regstar2`; checkout делает точный tag, запускает `scripts/ci.ps1`, восстанавливает signing key из GitHub Actions secrets и вызывает `scripts/release.ps1 -Version v1.11.7`. Проверить наличие доверенного self-hosted Windows runner и release secrets до запуска.
+- Релиз строится из существующего неизменяемого аннотированного tag `v1.11.7`; GitHub Release при неудаче workflow можно повторить без изменения tag.
+- [Release workflow](../../.github/workflows/release.yml) разрешён только владельцу `Regstar2`: первым заданием GitHub-hosted Windows выполняет полный `scripts/ci.ps1` для точного tag без секретов, затем после PASS доверенный self-hosted Windows runner восстанавливает ключ из GitHub Actions secrets и запускает `scripts/release.ps1 -Version v1.11.7`. Для существующего тега исправленный workflow с `main` запускается вручную: `gh workflow run release.yml --repo Regstar2/tg-ws-proxy-android --ref main -f tag=v1.11.7`.
 - `scripts/release.ps1` проверяет метаданные Android APK, подпись и создаёт два файла в `dist/`: APK и `apk.sha256`. При выпуске используется `RELEASE_NOTES_v1.11.7.md`; ссылки на полные русскую и английскую версии должны вести на **tag**, не на `main`.
 - Никогда не включать в release APK или Assets debug-сборки, пользовательские runtime-логи, приватные AWG-конфигурации, keystore, токены или локальные правила проекта.
-- Если CI, сертификат, доступность runner, подпись, device smoke или анализ #138 не подтверждены — **остановить выпуск** и оставить tag не созданным. Не заменять release gate хорошими показателями другого commit.
+- Если CI, сертификат, доступность runner, подпись, device smoke или анализ #138 не подтверждены — **остановить выпуск**; существующий tag не изменять и не публиковать непроверенный APK. Не заменять release gate хорошими показателями другого commit.
 
 ## После публикации
 
@@ -43,4 +43,4 @@
 .\scripts\release.ps1 -Version v1.11.7 -PreflightOnly
 ```
 
-Для сборки подписанного release-артефакта при доступном исходном keystore и настроенных переменных подписи: `.\scripts\release.ps1 -Version v1.11.7`. Публикацию тега и GitHub Release выполнять отдельно только после принятия решения GO.
+Для сборки подписанного release-артефакта при доступном исходном keystore и настроенных переменных подписи: `.\scripts\release.ps1 -Version v1.11.7`. GitHub Release повторно запускать для существующего тега отдельно и только после решения GO.
