@@ -118,6 +118,29 @@ if ($gradleProperties -notmatch '(?m)^android\.injected\.androidTest\.leaveApksI
     throw "Connected device tests must not uninstall the existing application."
 }
 
+$routeResultParser = Join-Path $PSScriptRoot 'issue-135-instrumentation-status.ps1'
+$routeResultTest = Join-Path $PSScriptRoot 'tests/issue-135-instrumentation-status-test.ps1'
+foreach ($path in @($routeResultParser, $routeResultTest)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Issue #135 instrumentation result regression file is missing: $path"
+    }
+    $tokens = $null
+    $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $path, [ref]$tokens, [ref]$errors
+    ) | Out-Null
+    if ($errors) {
+        throw "Issue #135 instrumentation status script syntax error in $path : $($errors -join '; ')"
+    }
+}
+Write-Host "`n==> Issue #135 instrumentation result classification (Windows PowerShell 5.1)"
+Invoke-CheckedCommand -Label 'Issue #135 instrumentation results under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source -Arguments @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $routeResultTest
+    )
+Write-Host "`n==> Issue #135 instrumentation result classification (PowerShell)"
+& $routeResultTest
+
 $nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
 Invoke-CheckedCommand `
     -Label 'Test native stderr handling under Windows PowerShell 5.1' `
