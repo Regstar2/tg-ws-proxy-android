@@ -129,6 +129,71 @@ class NetworkRoutePolicyEditorTest {
     }
 
     @Test
+    fun moveRouteMovesActiveBetweenInactiveWithoutChangingItsEnabledState() {
+        val original = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val moved = NetworkRoutePolicyEditor.moveRoute(original, 0, 1)
+        assertEquals(
+            listOf(RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS,
+                RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            moved.displayOrder
+        )
+        assertEquals(original.activeRoutes, moved.activeRoutes)
+        assertEquals(original.enabledRoutes, moved.enabledRoutes)
+        assertEquals(original.preferredRoute, moved.preferredRoute)
+        assertEquals(original.allowFallback, moved.allowFallback)
+
+        val enabled = NetworkRoutePolicyEditor.setRouteEnabled(moved, RouteKind.AWG_WARP, true)
+        assertEquals(
+            listOf(RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS,
+                RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            enabled.activeRoutes
+        )
+    }
+
+    @Test
+    fun moveRouteAcrossEnabledRoutesChangesFallbackPriorityNotEnabledMembership() {
+        val original = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val moved = NetworkRoutePolicyEditor.moveRoute(original, 0, 4)
+        assertEquals(
+            listOf(RouteKind.AWG_WARP, RouteKind.WORKER_WS, RouteKind.DIRECT_WS,
+                RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS),
+            moved.displayOrder
+        )
+        assertEquals(listOf(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS),
+            moved.activeRoutes)
+        assertEquals(original.enabledRoutes, moved.enabledRoutes)
+        assertEquals(RouteKind.DIRECT_WS, moved.preferredRoute)
+        assertTrue(moved.allowFallback)
+    }
+
+    @Test
+    fun moveRouteHandlesDisabledAndActiveWithSameIndexRules() {
+        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE)
+        val movedDisabled = NetworkRoutePolicyEditor.moveRoute(original, 1, 0)
+        assertEquals(
+            listOf(RouteKind.AWG_WARP, RouteKind.CF_PROXY_WS),
+            movedDisabled.displayOrder.take(2)
+        )
+        assertEquals(original.activeRoutes, movedDisabled.activeRoutes)
+        assertEquals(original, NetworkRoutePolicyEditor.moveRoute(original, -1, 3))
+        assertEquals(original, NetworkRoutePolicyEditor.moveRoute(original, 1, 5))
+        assertEquals(original, NetworkRoutePolicyEditor.moveRoute(original, 2, 2))
+        assertEquals(original.enabledRoutes, movedDisabled.enabledRoutes)
+    }
+
+    @Test
     fun movingInactiveRouteAcrossEnabledRowsKeepsActiveFallbackUnchanged() {
         val initial = NetworkRoutePolicyEditor.normalize(
             DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
