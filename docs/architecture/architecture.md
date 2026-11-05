@@ -10,7 +10,7 @@ Telegram app
         -> Android ProxyService (foreground)
             -> Go runtime (libtgwsproxy.so)
                 -> route selection + pools
-                    -> direct_ws | cf_worker_ws | cf_proxy_ws | tcp_fallback
+                    -> direct_ws | cf_worker_ws | cf_proxy_ws | awg_warp | tcp_fallback
 ```
 
 ## Layers
@@ -82,7 +82,13 @@ Telegram app
 | `cf_proxy_ws` | WebSocket via Cloudflare proxy host `kws{dc}.<domain>/apiws` |
 | `tcp_fallback` | TCP to DC IP:443 |
 
-### Strategy / mode (preference order)
+### Current v1.11.7 MTProto route policy
+
+`NetworkRoutePolicyRepository` persists a stable visible order of all five route kinds and an enabled ordered chain per Wi-Fi/mobile profile. `EffectiveRoutePolicyResolver` and `ProxyRuntimeConfigFactory` serialize that chain in `@route_order` for native MTProto connections. The MTProto planner attempts only enabled candidates in order. Cooldown can skip a temporarily unavailable route, but legacy scoring and preferred-mode fields do not reorder allowed candidates. One enabled route is strict-only. Policy reconfiguration applies to **new** connections without intentionally closing established sessions.
+
+`mtproxyfrontend.Runtime.StatusString()` distinguishes first requested backend (`selected_backend`) from latest successful outbound backend (`actual_backend`). It exports live duplex relayed `bytes_up`/`bytes_down`, and `connect_ms` for last successful outbound connection setup. Android notification speed uses these counters and shows the connection setup time **separately from ping/RTT**. A failed local handshake cannot by itself replace an already confirmed backend.
+
+### Historical strategy / mode (legacy behavior)
 
 Legacy connection modes sent to Go as `connection_mode`:
 

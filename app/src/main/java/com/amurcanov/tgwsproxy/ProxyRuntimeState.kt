@@ -17,6 +17,8 @@ data class ProxyUiMetrics(
     val runtime: ProxyRuntimeMetrics = ProxyRuntimeMetrics(),
     val downloadBps: Double = 0.0,
     val uploadBps: Double = 0.0,
+    /** Planned first route after hot apply; separate from last observed actual backend. */
+    val configuredRouteKind: String = "",
 )
 
 object ProxyRuntimeState {

@@ -77,6 +77,91 @@ foreach ($acceptanceScriptName in @('worker-issue-101-device-smoke.ps1', 'build-
     }
 }
 
+$routeInstallScript = Join-Path $PSScriptRoot 'issue-135-rebuild-device.ps1'
+$routeParseTokens = $null
+$routeParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeInstallScript, [ref]$routeParseTokens, [ref]$routeParseErrors
+) | Out-Null
+if ($routeParseErrors) { throw "Issue #135 installation script has invalid PowerShell syntax: $($routeParseErrors -join '; ')" }
+
+$routeUiTestScript = Join-Path $PSScriptRoot 'issue-135-run-ui-tests.ps1'
+if (-not (Test-Path -LiteralPath $routeUiTestScript)) {
+    throw "Issue #135 bounded UI test script missing"
+}
+$uiParseTokens = $null
+$uiParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeUiTestScript, [ref]$uiParseTokens, [ref]$uiParseErrors
+) | Out-Null
+if ($uiParseErrors) {
+    throw "Issue #135 bounded UI test script has invalid PowerShell syntax: $($uiParseErrors -join '; ')"
+}
+$uiTestSource = Get-Content -LiteralPath $routeUiTestScript -Raw
+if ($uiTestSource -notmatch 'WaitForExit\(' -or
+    $uiTestSource -notmatch 'Compress-Archive' -or
+    $uiTestSource -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)') {
+    throw "Issue #135 UI test runner lacks watchdog/ZIP or calls forbidden destructive commands"
+}
+
+# The live route smoke script runs on persistent devices; CI checks its syntax
+# and enforces the bounded PID wait and actual-backend evidence without ADB.
+$routeSmokeScript = Join-Path $PSScriptRoot 'issue-135-route-switch-smoke.ps1'
+if (-not (Test-Path -LiteralPath $routeSmokeScript)) {
+    throw "Issue #135 route switching smoke script is missing"
+}
+$smokeTokens = $null
+$smokeErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $routeSmokeScript, [ref]$smokeTokens, [ref]$smokeErrors
+) | Out-Null
+if ($smokeErrors) {
+    throw "Issue #135 route smoke script has invalid PowerShell syntax: $($smokeErrors -join '; ')"
+}
+$smokeSource = Get-Content -LiteralPath $routeSmokeScript -Raw
+if ($smokeSource -notmatch 'Start-Sleep -Milliseconds 500' -or
+    $smokeSource -notmatch 'Duplex sessions by actual backend:' -or
+    $smokeSource -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)') {
+    throw "Issue #135 route smoke requires a bounded PID wait, backend evidence and safe app handling"
+}
+
+# Guard against an AGP instrumentation cleanup removing the production app.
+$routeInstallSource = Get-Content -LiteralPath $routeInstallScript -Raw
+if ($routeInstallSource -match '(?m)^[^#\r\n]*:app:connectedDebugAndroidTest') {
+    throw "Issue #135 device acceptance must use direct instrumentation, not Gradle connected tests."
+}
+if ($routeInstallSource -notmatch 'Test-ApplicationInstalled' -or
+    $routeInstallSource -notmatch 'AllowFreshInstall') {
+    throw "Issue #135 device acceptance lacks its missing-package safety guard."
+}
+$gradleProperties = Get-Content -LiteralPath (Join-Path $root 'gradle.properties') -Raw
+if ($gradleProperties -notmatch '(?m)^android\.injected\.androidTest\.leaveApksInstalledAfterRun=true\s*$') {
+    throw "Connected device tests must not uninstall the existing application."
+}
+
+$routeResultParser = Join-Path $PSScriptRoot 'issue-135-instrumentation-status.ps1'
+$routeResultTest = Join-Path $PSScriptRoot 'tests/issue-135-instrumentation-status-test.ps1'
+foreach ($path in @($routeResultParser, $routeResultTest)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Issue #135 instrumentation result regression file is missing: $path"
+    }
+    $tokens = $null
+    $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $path, [ref]$tokens, [ref]$errors
+    ) | Out-Null
+    if ($errors) {
+        throw "Issue #135 instrumentation status script syntax error in $path : $($errors -join '; ')"
+    }
+}
+Write-Host "`n==> Issue #135 instrumentation result classification (Windows PowerShell 5.1)"
+Invoke-CheckedCommand -Label 'Issue #135 instrumentation results under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source -Arguments @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $routeResultTest
+    )
+Write-Host "`n==> Issue #135 instrumentation result classification (PowerShell)"
+& $routeResultTest
+
 $nativeAdbTest = Join-Path $PSScriptRoot 'tests\worker-issue-101-native-command-test.ps1'
 Invoke-CheckedCommand `
     -Label 'Test native stderr handling under Windows PowerShell 5.1' `
@@ -102,7 +187,7 @@ Invoke-CheckedCommand `
 & $dc2ABTest
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
-& $releaseAudit -ExpectedVersion '1.11.6' -ExpectedVersionCode 62
+& $releaseAudit -ExpectedVersion '1.11.7' -ExpectedVersionCode 63
 if ($LASTEXITCODE -ne 0) {
     throw "Release audit failed with exit code $LASTEXITCODE."
 }
@@ -114,12 +199,12 @@ Invoke-CheckedCommand `
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', $releaseAudit,
-        '-ExpectedVersion', '1.11.6',
-        '-ExpectedVersionCode', '62'
+        '-ExpectedVersion', '1.11.7',
+        '-ExpectedVersionCode', '63'
     )
 
 Write-Host "`n==> Validate release-script metadata preflight"
-& $releaseScript -Version 'v1.11.6' -PreflightOnly
+& $releaseScript -Version 'v1.11.7' -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
     throw "Release-script preflight failed with exit code $LASTEXITCODE."
 }
@@ -138,7 +223,7 @@ else {
     Invoke-CheckedCommand -Label 'Run native Go tests' -FilePath $go.Source -Arguments @('test', './...') -WorkingDirectory $nativeDir
 }
 
-Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'assembleDebug', '--stacktrace')
+Invoke-CheckedCommand -Label 'Run Android unit tests and build debug APK' -FilePath $gradle -Arguments @('--no-daemon', 'testDebugUnitTest', 'lintDebug', 'assembleDebug', 'assembleDebugAndroidTest', '--stacktrace')
 
 $quickSettingsManifestTest = Join-Path $PSScriptRoot 'tests\quick-settings-preferences-manifest-test.ps1'
 Write-Host "`n==> Verify merged Android Quick Settings preferences manifest"

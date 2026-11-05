@@ -359,6 +359,7 @@
     <string name="notification_line_route">Маршрут: %1$s</string>
     <string name="notification_line_speed">Скорость: %1$s</string>
     <string name="notification_line_latency">Задержка: %1$s</string>
+    <string name="notification_line_connect_time">Установка последнего исходящего соединения: %1$s</string>
     <string name="notification_line_connections">Соединения: %1$d</string>
     <string name="notification_line_last_error">Последняя ошибка: %1$s</string>
     <string name="section_service">Служба</string>
@@ -970,4 +971,26 @@
     <string name="quick_tile_setup">Откройте приложение для настройки</string>
     <string name="quick_tile_config_changed">Настройки изменились · запустите прокси в приложении</string>
     <string name="quick_tile_confirm_required">Запустите прокси в приложении для подтверждения настроек</string>
+    <string name="routes_network_profile">Профиль сети</string>
+    <string name="routes_wifi_tab">Wi-Fi</string>
+    <string name="routes_mobile_tab">Мобильная сеть</string>
+    <string name="routes_priority_heading">Приоритет маршрутов</string>
+    <string name="routes_enabled_counter">Включено %1$d из %2$d</string>
+    <string name="routes_fallback_heading">Как будет работать fallback</string>
+    <string name="routes_fallback_none">Используется только один маршрут. Fallback отсутствует.</string>
+    <string name="routes_fallback_next">При недоступности первого маршрута выбирается следующий из %1$d включённых путей.</string>
+    <string name="routes_reset_selected">Сбросить профиль</string>
+    <string name="routes_reset_question">Сбросить настройки только выбранной сети до значений по умолчанию?</string>
+    <string name="routes_reset_action">Сбросить</string>
+    <string name="routes_reset_cancel">Отмена</string>
+    <string name="routes_drag_label">Перетащить %1$s для изменения приоритета</string>
+    <string name="routes_up_label">Поднять маршрут %1$s</string>
+    <string name="routes_down_label">Опустить маршрут %1$s</string>
+    <string name="routes_toggle_label">Включить или выключить %1$s</string>
+    <string name="routes_inactive_text">Неактивно</string>
+    <string name="routes_minimum_one">Хотя бы один маршрут должен оставаться включённым</string>
+    <string name="routes_no_configured_route">Настройте Worker/WARP</string>
+    <string name="routes_live_apply_failed">Маршруты сохранены, но не применены к работающему прокси</string>
+    <string name="routes_configuration_required">Требуется настройка</string>
+    <string name="notification_configured_priority">Приоритет: %1$s</string>
 </resources>

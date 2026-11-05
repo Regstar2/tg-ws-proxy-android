@@ -172,23 +172,32 @@ func readClientInit(
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	first := make([]byte, 1)
-	if _, err := io.ReadFull(conn, first); err != nil {
+	prefix := make([]byte, 5)
+	if _, err := io.ReadFull(conn, prefix); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
 		return nil, conn, fmt.Errorf("%w: %v", ErrHandshakeRead, err)
 	}
-	if first[0] != tlsRecordHandshake {
+	recordLen := int(binary.BigEndian.Uint16(prefix[3:5]))
+	isClientHelloRecord := prefix[0] == tlsRecordHandshake &&
+		prefix[1] == 0x03 && prefix[2] <= 0x04 &&
+		recordLen >= 40 && recordLen <= 16384
+	if !isClientHelloRecord {
+		// A Telegram DD/obfuscated client can retain an older proxy link.
+		// Only the configured secret can authenticate this alternate ingress.
+		_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
+		rest := make([]byte, 64-len(prefix))
+		_, readErr := io.ReadFull(conn, rest)
 		_ = conn.SetReadDeadline(time.Time{})
+		if readErr == nil {
+			raw := append(prefix, rest...)
+			if isValidRawObfuscatedInit(raw, secret) {
+				return raw, conn, nil
+			}
+		}
 		_ = writeFakeTLSRedirect(conn, fakeTLSDomain)
 		return nil, conn, ErrFakeTLSExpected
 	}
 
-	headerRest := make([]byte, 4)
-	if _, err := io.ReadFull(conn, headerRest); err != nil {
-		_ = conn.SetReadDeadline(time.Time{})
-		return nil, conn, fmt.Errorf("%w: %v", ErrHandshakeRead, err)
-	}
-	recordLen := int(binary.BigEndian.Uint16(headerRest[2:4]))
 	body := make([]byte, recordLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
@@ -196,7 +205,7 @@ func readClientInit(
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	clientHello := append(append([]byte{first[0]}, headerRest...), body...)
+	clientHello := append(append([]byte(nil), prefix...), body...)
 	clientRandom, sessionID, ok := verifyFakeTLSClientHello(clientHello, secret, time.Now())
 	if !ok {
 		if fakeTLSMaskingPassthrough {
@@ -220,6 +229,31 @@ func readClientInit(
 		return nil, stream, fmt.Errorf("%w: %v", ErrHandshakeRead, readErr)
 	}
 	return handshake, stream, nil
+}
+
+// A raw client is accepted in Fake TLS mode only if its header decrypts to
+// a supported MTProto transport and DC using the configured 16-byte secret.
+func isValidRawObfuscatedInit(raw, secret []byte) bool {
+	if len(raw) != 64 || len(secret) != 16 || isHTTPTransport(raw) {
+		return false
+	}
+	stream, err := secretStream(raw[8:40], raw[40:56], secret)
+	if err != nil {
+		return false
+	}
+	decoded := make([]byte, len(raw))
+	stream.XORKeyStream(decoded, raw)
+	if _, ok := transportForProto(binary.LittleEndian.Uint32(decoded[56:60])); !ok {
+		return false
+	}
+	dc := int(int16(binary.LittleEndian.Uint16(decoded[60:62])))
+	if dc < 0 {
+		dc = -dc
+	}
+	if dc >= 10000 {
+		dc -= 10000
+	}
+	return validDC(dc)
 }
 
 func generateRelayInit(

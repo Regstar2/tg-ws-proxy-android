@@ -1,3 +1,5 @@
+> **v1.11.7 update:** The mode tables below document **legacy** behavior, not the new ordered MTProto UI. In Settings → Routes users reorder all five routes and enable the exact allowed chain per Wi-Fi/mobile profile. `@route_order` is authoritative for new MTProto sessions, with no hidden fallback and no Auto score override. Existing SOCKS5 compatibility may still follow separate legacy selection behavior. The latest contract is [#135 acceptance](../testing/issue-135-rebuild-acceptance.md).
+
 # Режимы подключения (v1.4.0)
 
 Документация к ветке `feature/cf-worker-v1.7`.

@@ -20,7 +20,8 @@ jobs:
     if: >
       github.actor == 'Regstar2' &&
       github.triggering_actor == 'Regstar2'
-    runs-on: windows-latest
+    # Only the owner's trusted Windows runner may handle signing material.
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 120
 
     env:

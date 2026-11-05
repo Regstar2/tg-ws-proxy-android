@@ -16,46 +16,34 @@ enum class RouteKind(val prefValue: String) {
     }
 }
 
+/**
+ * Active routes are the native fallback chain. displayOrder is the stable visual
+ * order of all routes, including disabled entries. Legacy fields remain readable.
+ */
 data class NetworkRoutePolicy(
     val networkType: NetworkProfileType,
     val enabledRoutes: Set<RouteKind>,
     val preferredRoute: RouteKind?,
     val autoStrategy: AutoStrategy,
     val allowFallback: Boolean,
+    val activeRoutes: List<RouteKind> = emptyList(),
+    val inactiveRoutes: List<RouteKind> = emptyList(),
+    val displayOrder: List<RouteKind> = emptyList(),
 )
 
 object DefaultNetworkRoutePolicies {
     fun forType(type: NetworkProfileType): NetworkRoutePolicy {
-        return when (type) {
-            NetworkProfileType.WIFI -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.DIRECT_WS,
-                    RouteKind.CF_PROXY_WS,
-                    RouteKind.TCP_FALLBACK,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = true,
-            )
-            NetworkProfileType.MOBILE -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.CF_PROXY_WS,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = false,
-            )
-            NetworkProfileType.UNKNOWN -> NetworkRoutePolicy(
-                networkType = type,
-                enabledRoutes = linkedSetOf(
-                    RouteKind.CF_PROXY_WS,
-                ),
-                preferredRoute = RouteKind.CF_PROXY_WS,
-                autoStrategy = AutoStrategy.CF_PREFERRED,
-                allowFallback = false,
-            )
-        }
+        // Direct WS and TCP are opt-in, not silent fallback routes.
+        val active = listOf(RouteKind.CF_PROXY_WS)
+        return NetworkRoutePolicy(
+            networkType = type,
+            enabledRoutes = active.toSet(),
+            preferredRoute = active.first(),
+            autoStrategy = AutoStrategy.CF_PREFERRED,
+            allowFallback = active.size > 1,
+            activeRoutes = active,
+            inactiveRoutes = NetworkRoutePolicyEditor.routeOrder.filterNot { it in active },
+            displayOrder = NetworkRoutePolicyEditor.routeOrder,
+        )
     }
 }

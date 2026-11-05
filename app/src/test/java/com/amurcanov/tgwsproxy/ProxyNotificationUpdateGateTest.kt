@@ -52,6 +52,20 @@ class ProxyNotificationUpdateGateTest {
     }
 
     @Test
+    fun actualBackendChangeCanPublishBeforeSpeedMetricsInterval() {
+        val gate = ProxyNotificationUpdateGate()
+        val tcp = connected.copy(contentText = "Route: TCP fallback")
+        val awg = connected.copy(contentText = "Route: AmneziaWG")
+        gate.onForegroundStarted(tcp, wallTimeMillis = 1_000L, elapsedTimeMillis = 500L)
+
+        assertTrue(gate.shouldPublish(awg, elapsedTimeMillis = 1_200L, force = true))
+        gate.onPublished(awg, elapsedTimeMillis = 1_200L)
+        val speedOnly = awg.copy(contentText = "Route: AmneziaWG · 2 KB/s")
+        assertFalse(gate.shouldPublish(speedOnly, elapsedTimeMillis = 1_400L))
+        assertFalse(gate.shouldPublish(awg, elapsedTimeMillis = 1_400L, force = true))
+    }
+
+    @Test
     fun unchangedVisibleTextDoesNotPublishWhenMetricsAreDisabled() {
         val gate = ProxyNotificationUpdateGate()
         gate.onForegroundStarted(connected, wallTimeMillis = 1_000L, elapsedTimeMillis = 500L)

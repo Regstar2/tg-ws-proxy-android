@@ -78,60 +78,23 @@ fun RoutesSettingsScreen(
     onCopyPolicyDiagnostics: () -> Unit,
     onRunRouteProbe: () -> Unit,
     onCopyRouteProbeReport: () -> Unit,
+    workerConfigured: Boolean = false,
+    awgConfigured: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     when (page) {
-        RoutesSettingsPage.OVERVIEW -> {
-            RoutesOverview(
-                modifier = modifier,
-                currentProfile = currentProfile,
-                connectionMode = connectionMode,
-                isProxyRunning = isProxyRunning,
+        RoutesSettingsPage.OVERVIEW, RoutesSettingsPage.WIFI, RoutesSettingsPage.MOBILE -> {
+            OrderedRoutesSettings(
                 wifiPolicy = wifiPolicy,
                 mobilePolicy = mobilePolicy,
-                hasSavedWifiPolicy = hasSavedWifiPolicy,
-                hasSavedMobilePolicy = hasSavedMobilePolicy,
-                policySnapshot = policySnapshot,
-                onConnectionModeChange = onConnectionModeChange,
-                onApplyRecommendedPreset = onApplyRecommendedPreset,
-                onOpenWifi = { onPageChange(RoutesSettingsPage.WIFI) },
-                onOpenMobile = { onPageChange(RoutesSettingsPage.MOBILE) },
-                onOpenAdvanced = { onPageChange(RoutesSettingsPage.ADVANCED) },
+                onWifiPolicyChange = onWifiPolicyChange,
+                onMobilePolicyChange = onMobilePolicyChange,
+                onResetWifiPolicy = onResetWifiPolicy,
+                onResetMobilePolicy = onResetMobilePolicy,
+                reconfigureStatus = reconfigureStatus,
+                workerConfigured = workerConfigured,
+                awgConfigured = awgConfigured,
             )
-        }
-        RoutesSettingsPage.WIFI -> {
-            RoutesSubpageScaffold(
-                titleRes = R.string.routes_wifi_profile_title,
-                onBack = { onPageChange(RoutesSettingsPage.OVERVIEW) },
-                modifier = modifier,
-            ) {
-                RouteProfileEditor(
-                    profileType = NetworkProfileType.WIFI,
-                    policy = wifiPolicy,
-                    isCurrentProfile = currentProfile.type == NetworkProfileType.WIFI,
-                    hasSavedPolicy = hasSavedWifiPolicy,
-                    isProxyRunning = isProxyRunning,
-                    onPolicyChange = onWifiPolicyChange,
-                    onResetPolicy = onResetWifiPolicy,
-                )
-            }
-        }
-        RoutesSettingsPage.MOBILE -> {
-            RoutesSubpageScaffold(
-                titleRes = R.string.routes_mobile_profile_title,
-                onBack = { onPageChange(RoutesSettingsPage.OVERVIEW) },
-                modifier = modifier,
-            ) {
-                RouteProfileEditor(
-                    profileType = NetworkProfileType.MOBILE,
-                    policy = mobilePolicy,
-                    isCurrentProfile = currentProfile.type == NetworkProfileType.MOBILE,
-                    hasSavedPolicy = hasSavedMobilePolicy,
-                    isProxyRunning = isProxyRunning,
-                    onPolicyChange = onMobilePolicyChange,
-                    onResetPolicy = onResetMobilePolicy,
-                )
-            }
         }
         RoutesSettingsPage.ADVANCED -> {
             RoutesSubpageScaffold(

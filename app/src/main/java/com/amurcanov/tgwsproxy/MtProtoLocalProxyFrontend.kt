@@ -45,33 +45,42 @@ internal class MtProtoLocalProxyFrontend(
             )
 
         val awgConfig = AwgWarpRuntimeConfig.fromRuntimeTokens(config.runtimeConfig)
-        if (awgConfig.enabled && awgConfig.configPath.isBlank()) {
+        val routeOrder = config.runtimeConfig.split(',')
+            .firstOrNull { it.trim().startsWith("@route_order=") }
+            ?.substringAfter('=').orEmpty().split('|').filter { it.isNotBlank() }
+        val awgOnly = routeOrder == listOf(RouteKind.AWG_WARP.prefValue) ||
+            (routeOrder.isEmpty() && awgConfig.enabled && awgConfig.preferred && !awgConfig.allowFallback)
+        if (awgConfig.enabled && awgConfig.configPath.isBlank() && awgOnly) {
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
-                message = "AWG/WARP route is enabled but no config has been imported.",
+                message = "AWG/WARP is the only allowed route but no profile is configured.",
             )
         }
-        val awgConfigure = runCatching { awgRuntime.configure(awgConfig) }
+        val configureAwg = awgConfig.enabled && awgConfig.configPath.isNotBlank()
+        val awgConfigure = if (configureAwg) runCatching { awgRuntime.configure(awgConfig) }
+            else Result.success(0)
         if (awgConfigure.isFailure) {
-            resetAwgRuntimeAfterFailedConfigure()
+            if (awgOnly) resetAwgRuntimeAfterFailedConfigure()
             val errorType = awgConfigure.exceptionOrNull()?.javaClass?.simpleName.orEmpty()
-            return fail(
-                errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
-                message = if (errorType.isBlank()) {
-                    "AWG/WARP native runtime initialization failed unexpectedly."
-                } else {
-                    "AWG/WARP native runtime initialization failed ($errorType)."
-                },
-            )
+            if (awgOnly) {
+                return fail(
+                    errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
+                    message = if (errorType.isBlank()) {
+                        "AWG/WARP native runtime initialization failed unexpectedly."
+                    } else {
+                        "AWG/WARP native runtime initialization failed ($errorType)."
+                    },
+                )
+            }
         }
-        if (awgConfigure.getOrThrow() != 0) {
+        if (awgConfigure.getOrNull() != 0 && awgOnly) {
             resetAwgRuntimeAfterFailedConfigure()
             return fail(
                 errorCode = MtProtoRuntimeErrorCode.INVALID_CONFIG,
                 message = "AWG/WARP route configuration was rejected by native runtime.",
             )
         }
-        claimAwgRuntimeOwnership()
+        if (configureAwg && awgConfigure.getOrNull() == 0) claimAwgRuntimeOwnership()
 
         val mapping = MtProtoRuntimeConfigMapper.fromProxyConfig(
             config = proxyConfig,
@@ -160,10 +169,17 @@ internal class MtProtoLocalProxyFrontend(
     }
 
     private fun resetAwgRuntimeAfterFailedConfigure() {
-        synchronized(awgRuntimeOwnerLock) {
-            awgRuntimeOwners.remove(awgRuntime)
+        val canReset = synchronized(awgRuntimeOwnerLock) {
+            val owner = awgRuntimeOwners[awgRuntime]
+            if (owner == null || owner === this) {
+                awgRuntimeOwners.remove(awgRuntime)
+                true
+            } else {
+                false
+            }
         }
-        runCatching { awgRuntime.reset() }
+        // Never reset an AWG dialer owned by an existing live frontend.
+        if (canReset) runCatching { awgRuntime.reset() }
     }
 
     private fun fail(

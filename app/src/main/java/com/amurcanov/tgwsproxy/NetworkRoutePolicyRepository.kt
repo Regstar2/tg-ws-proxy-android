@@ -2,149 +2,116 @@ package com.amurcanov.tgwsproxy
 
 import android.content.SharedPreferences
 
-class NetworkRoutePolicyRepository(
-    private val prefs: SharedPreferences,
-) {
+/** V2 stores a stable visual order and enabled chain; old snapshots remain readable. */
+class NetworkRoutePolicyRepository(private val prefs: SharedPreferences) {
     fun load(type: NetworkProfileType): NetworkRoutePolicy {
-        return parse(type, prefs.getString(keyFor(type), null))
+        val v2 = prefs.getString(keyFor(type, true), null)
+        if (!v2.isNullOrBlank()) return parseV2(type, v2)
+        return parseV1(type, prefs.getString(keyFor(type, false), null))
     }
 
     fun hasSavedPolicy(type: NetworkProfileType): Boolean {
-        return prefs.contains(keyFor(type))
+        return prefs.contains(keyFor(type, true)) || prefs.contains(keyFor(type, false))
     }
 
     fun save(policy: NetworkRoutePolicy) {
-        val normalized = normalize(policy)
-        prefs.edit().putString(keyFor(normalized.networkType), encode(normalized)).apply()
+        val normalized = NetworkRoutePolicyEditor.normalize(policy)
+        val active = normalized.activeRoutes.joinToString("|") { it.prefValue }
+        val inactive = normalized.inactiveRoutes.joinToString("|") { it.prefValue }
+        val order = normalized.displayOrder.joinToString("|") { it.prefValue }
+        prefs.edit().putString(keyFor(normalized.networkType, true),
+            "active=$active;inactive=$inactive;order=$order;strategy=${normalized.autoStrategy.prefValue}").apply()
     }
 
     fun reset(type: NetworkProfileType) {
-        prefs.edit().remove(keyFor(type)).apply()
-    }
-
-    fun resetAll() {
+        // An explicit default v2 snapshot is necessary: removing both keys would
+        // reactivate a previously saved legacy global connection_mode in the resolver.
+        val defaults = DefaultNetworkRoutePolicies.forType(type)
+        val active = defaults.activeRoutes.joinToString("|") { it.prefValue }
+        val inactive = defaults.inactiveRoutes.joinToString("|") { it.prefValue }
+        val order = defaults.displayOrder.joinToString("|") { it.prefValue }
         prefs.edit()
-            .remove(KEY_WIFI)
-            .remove(KEY_MOBILE)
-            .remove(KEY_UNKNOWN)
+            .remove(keyFor(type, false))
+            .putString(keyFor(type, true),
+                "active=$active;inactive=$inactive;order=$order;strategy=${defaults.autoStrategy.prefValue}")
             .apply()
     }
 
-    fun loadAll(): Map<NetworkProfileType, NetworkRoutePolicy> {
-        return NetworkProfileType.entries.associateWith { load(it) }
+    fun resetAll() {
+        val edit = prefs.edit()
+        NetworkProfileType.entries.forEach {
+            edit.remove(keyFor(it, true)).remove(keyFor(it, false))
+        }
+        edit.apply()
     }
 
-    private fun parse(type: NetworkProfileType, raw: String?): NetworkRoutePolicy {
-        if (raw.isNullOrBlank()) {
-            return DefaultNetworkRoutePolicies.forType(type)
-        }
+    fun loadAll(): Map<NetworkProfileType, NetworkRoutePolicy> =
+        NetworkProfileType.entries.associateWith { load(it) }
 
-        return runCatching {
-            val fields = raw.split(';')
-                .mapNotNull { field ->
-                    val index = field.indexOf('=')
-                    if (index <= 0) {
-                        null
-                    } else {
-                        field.substring(0, index).trim().lowercase() to field.substring(index + 1).trim()
-                    }
-                }
-                .toMap()
-
-            if (fields.isEmpty()) {
-                return@runCatching DefaultNetworkRoutePolicies.forType(type)
-            }
-
-            val routes = fields["routes"]
-                ?.split('|')
-                .orEmpty()
-                .mapNotNull { RouteKind.fromPref(it) }
-                .toSetInStableOrder()
-            val defaults = DefaultNetworkRoutePolicies.forType(type)
-            val preferred = RouteKind.fromPref(fields["preferred"])
-            val strategy = parseStrategy(fields["strategy"]) ?: defaults.autoStrategy
-            val fallback = parseFallback(fields["fallback"]) ?: defaults.allowFallback
-
-            normalize(
-                NetworkRoutePolicy(
-                    networkType = type,
-                    enabledRoutes = routes,
-                    preferredRoute = preferred,
-                    autoStrategy = strategy,
-                    allowFallback = fallback,
-                ),
-            )
-        }.getOrElse {
-            DefaultNetworkRoutePolicies.forType(type)
-        }
-    }
-
-    private fun encode(policy: NetworkRoutePolicy): String {
-        val routes = orderedRoutes(policy.enabledRoutes).joinToString("|") { it.prefValue }
-        val preferred = policy.preferredRoute?.prefValue.orEmpty()
-        val fallback = if (policy.allowFallback) "1" else "0"
-        return "routes=$routes;preferred=$preferred;strategy=${policy.autoStrategy.prefValue};fallback=$fallback"
-    }
-
-    private fun normalize(policy: NetworkRoutePolicy): NetworkRoutePolicy {
-        val routes = orderedRoutes(policy.enabledRoutes).toSet()
-        if (routes.isEmpty()) {
-            return DefaultNetworkRoutePolicies.forType(policy.networkType)
-        }
-        val preferred = policy.preferredRoute
-            ?.takeIf { it in routes }
-            ?: routes.first()
-        return policy.copy(
-            enabledRoutes = routes,
-            preferredRoute = preferred,
+    private fun parseV2(type: NetworkProfileType, raw: String): NetworkRoutePolicy {
+        val fields = parseFields(raw)
+        if (!fields.containsKey("active")) return DefaultNetworkRoutePolicies.forType(type)
+        val active = parseRoutes(fields["active"])
+        if (active.isEmpty()) return DefaultNetworkRoutePolicies.forType(type)
+        val inactive = parseRoutes(fields["inactive"]).filterNot { it in active }
+        val strategy = fields["strategy"]?.let(AutoStrategy::fromPref)
+            ?: DefaultNetworkRoutePolicies.forType(type).autoStrategy
+        return NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(type).copy(
+                autoStrategy = strategy,
+                activeRoutes = active,
+                inactiveRoutes = inactive,
+                displayOrder = parseRoutes(fields["order"]),
+            ),
         )
     }
 
-    private fun parseStrategy(raw: String?): AutoStrategy? {
-        val normalized = raw?.trim()?.lowercase().orEmpty()
-        if (normalized.isBlank()) {
-            return null
-        }
-        val parsed = AutoStrategy.fromPref(normalized)
-        return parsed.takeIf { it.prefValue == normalized }
-    }
-
-    private fun parseFallback(raw: String?): Boolean? {
-        return when (raw?.trim()?.lowercase()) {
-            "1", "true", "yes" -> true
+    private fun parseV1(type: NetworkProfileType, raw: String?): NetworkRoutePolicy {
+        if (raw.isNullOrBlank()) return DefaultNetworkRoutePolicies.forType(type)
+        val fields = parseFields(raw)
+        val routes = parseRoutes(fields["routes"]).toSet()
+        if (routes.isEmpty()) return DefaultNetworkRoutePolicies.forType(type)
+        val defaults = DefaultNetworkRoutePolicies.forType(type)
+        val first = RouteKind.fromPref(fields["preferred"])?.takeIf { it in routes }
+            ?: parseRoutes(fields["routes"]).first()
+        val fallback = when (fields["fallback"]?.trim()?.lowercase()) {
             "0", "false", "no" -> false
-            else -> null
+            "1", "true", "yes" -> true
+            else -> defaults.allowFallback
         }
-    }
-
-    private fun orderedRoutes(routes: Set<RouteKind>): List<RouteKind> {
-        return ROUTE_ORDER.filter { it in routes }
-    }
-
-    private fun List<RouteKind>.toSetInStableOrder(): Set<RouteKind> {
-        val values = toSet()
-        return orderedRoutes(values).toSet()
-    }
-
-    private fun keyFor(type: NetworkProfileType): String {
-        return when (type) {
-            NetworkProfileType.WIFI -> KEY_WIFI
-            NetworkProfileType.MOBILE -> KEY_MOBILE
-            NetworkProfileType.UNKNOWN -> KEY_UNKNOWN
-        }
-    }
-
-    private companion object {
-        const val KEY_WIFI = "route_policy_wifi_v1"
-        const val KEY_MOBILE = "route_policy_mobile_v1"
-        const val KEY_UNKNOWN = "route_policy_unknown_v1"
-
-        val ROUTE_ORDER = listOf(
-            RouteKind.DIRECT_WS,
-            RouteKind.WORKER_WS,
-            RouteKind.CF_PROXY_WS,
-            RouteKind.AWG_WARP,
-            RouteKind.TCP_FALLBACK,
+        val strategy = AutoStrategy.fromPref(fields["strategy"])
+        return NetworkRoutePolicyEditor.normalize(
+            defaults.copy(
+                enabledRoutes = routes,
+                preferredRoute = first,
+                allowFallback = fallback,
+                autoStrategy = strategy,
+                activeRoutes = emptyList(),
+                inactiveRoutes = emptyList(),
+                // v1 has no persisted visual slots: derive them from the
+                // legacy preferred route before filling in disabled items.
+                displayOrder = emptyList(),
+            ),
         )
+    }
+
+    private fun parseFields(raw: String): Map<String, String> =
+        raw.split(';').mapNotNull { field ->
+            val separator = field.indexOf('=')
+            if (separator <= 0) null else
+                field.substring(0, separator).trim().lowercase() to
+                    field.substring(separator + 1).trim()
+        }.toMap()
+
+    private fun parseRoutes(raw: String?): List<RouteKind> =
+        raw.orEmpty().split('|').mapNotNull(RouteKind::fromPref).distinct()
+
+    private fun keyFor(type: NetworkProfileType, v2: Boolean): String {
+        val suffix = when (type) {
+            NetworkProfileType.WIFI -> "wifi"
+            NetworkProfileType.MOBILE -> "mobile"
+            NetworkProfileType.UNKNOWN -> "unknown"
+        }
+        return "route_policy_${suffix}_v${if (v2) 2 else 1}"
     }
 }

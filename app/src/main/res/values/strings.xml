@@ -359,6 +359,7 @@
     <string name="notification_line_route">Route: %1$s</string>
     <string name="notification_line_speed">Speed: %1$s</string>
     <string name="notification_line_latency">Latency: %1$s</string>
+    <string name="notification_line_connect_time">Last outbound connection setup: %1$s</string>
     <string name="notification_line_connections">Connections: %1$d</string>
     <string name="notification_line_last_error">Last error: %1$s</string>
     <string name="section_service">Service</string>
@@ -970,4 +971,26 @@
     <string name="quick_tile_setup">Open app to set up</string>
     <string name="quick_tile_config_changed">Proxy settings changed · start once in app</string>
     <string name="quick_tile_confirm_required">Start proxy once in app to confirm settings</string>
+    <string name="routes_network_profile">Network profile</string>
+    <string name="routes_wifi_tab">Wi-Fi</string>
+    <string name="routes_mobile_tab">Mobile network</string>
+    <string name="routes_priority_heading">Route priority</string>
+    <string name="routes_enabled_counter">Enabled %1$d of %2$d</string>
+    <string name="routes_fallback_heading">How fallback works</string>
+    <string name="routes_fallback_none">Only one route is enabled. No fallback.</string>
+    <string name="routes_fallback_next">If a route is unavailable, the next of %1$d enabled routes is tried.</string>
+    <string name="routes_reset_selected">Reset profile</string>
+    <string name="routes_reset_question">Reset only the selected network profile to defaults?</string>
+    <string name="routes_reset_action">Reset</string>
+    <string name="routes_reset_cancel">Cancel</string>
+    <string name="routes_drag_label">Drag %1$s to change priority</string>
+    <string name="routes_up_label">Move %1$s up</string>
+    <string name="routes_down_label">Move %1$s down</string>
+    <string name="routes_toggle_label">Enable or disable %1$s</string>
+    <string name="routes_inactive_text">Inactive</string>
+    <string name="routes_minimum_one">At least one route must stay enabled</string>
+    <string name="routes_no_configured_route">Configure Worker/WARP first</string>
+    <string name="routes_live_apply_failed">Route changes saved but not applied to the running proxy</string>
+    <string name="routes_configuration_required">Configuration required</string>
+    <string name="notification_configured_priority">Priority: %1$s</string>
 </resources>

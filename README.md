@@ -32,7 +32,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Версия исходников:** `1.11.6` (`versionCode 62`)  
+**Версия исходников (готовится к релизу):** `1.11.7` (`versionCode 63`)  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
@@ -73,7 +73,6 @@ TgWsProxy запускает локальный прокси на Android-уст
   <img src="docs/assets/screenshots/screenshot-main.jpg" width="210" alt="Главный экран TgWsProxy со статусом локального прокси">
   <img src="docs/assets/screenshots/screenshot-settings-all.jpg" width="210" alt="Общий экран настроек TgWsProxy">
   <img src="docs/assets/screenshots/screenshot-settings-connection.jpg" width="210" alt="Настройки локального подключения">
-  <img src="docs/assets/screenshots/screenshot-settings-routes.jpg" width="210" alt="Политики маршрутов для разных сетей">
   <br>
   <img src="docs/assets/screenshots/screenshot-settings-cloudflare.jpg" width="210" alt="Настройки Cloudflare Proxy и Worker">
   <img src="docs/assets/screenshots/screenshot-settings-app.jpg" width="210" alt="Настройки поведения и оформления приложения">
@@ -173,7 +172,7 @@ WebSocket — транспорт. Фактический путь в интер�
 
 ## Конфигурация
 
-Значения по умолчанию для версии `1.11.0`:
+Значения по умолчанию **нового или сброшенного профиля** начиная с `1.11.7` (уже сохранённые пользовательские политики не заменяются):
 
 | Параметр | Значение |
 |---|---|
@@ -181,14 +180,14 @@ WebSocket — транспорт. Фактический путь в интер�
 | Локальный порт | `1443` |
 | Frontend | MTProto Proxy |
 | Мобильная сеть | только `cf_proxy_ws`, без fallback |
-| Wi-Fi | `cf_proxy_ws` → `direct_ws` → `tcp_fallback` |
+| Wi-Fi | только `cf_proxy_ws`, без fallback |
 | Неизвестная сеть | только `cf_proxy_ws`, без fallback |
 | Runtime-сбор логов | выключен |
 | Persistent file logs | выключены |
 
 `awg_warp` не включается в default route policy автоматически; пользователь явно настраивает и выбирает WARP/AWG-профиль.
 
-Миграция значений по умолчанию применяется только к пользователям, которые не меняли политики маршрутов вручную.
+Миграция сохраняет существующую разрешённую политику Wi-Fi/мобильной сети и по возможности предпочтительный маршрут. Новый список хранит визуальный порядок и отдельный список включённых путей. Если в старой политике fallback был запрещён, миграция не должна включить запасные пути. Перед изменением настроек сохраните нужные параметры.
 
 > [!WARNING]
 > Включайте masking-domain passthrough только для доверенного домена. Приложение будет устанавливать реальные исходящие соединения с указанным хостом.
@@ -250,6 +249,16 @@ TgWsProxy обрабатывает соединения, которые Telegram
 
 Runtime использует тег `TgWsProxy` в logcat. Диагностические проверки не должны менять активную политику маршрутов.
 
+## Маршруты (v1.11.7 — подготовка релиза)
+
+В **Настройки → Маршруты** есть два независимых профиля: Wi-Fi и мобильная сеть. Все пять путей отображаются **в одном списке**, включая отключённые. Положение строки сохраняется при включении/выключении, а её приоритет меняется стрелками или перетаскиванием. В MTProto включённые маршруты используются **строго сверху вниз**, пропуская выключенные; при единственном включённом fallback отсутствует.
+
+Новая политика сохраняется сразу и применяется к новым MTProto-соединениям без перезапуска локального прокси. Текущие сессии не разрываются специально ради перестановки. Для новых и сброшенных профилей включён только Cloudflare Proxy; доступность AWG/WARP и Worker зависит от их отдельной настройки.
+
+Экран статуса показывает **последний подтверждённый исходящий MTProto-маршрут**, а не просто первый маршрут в списке. Например, после недоступного TCP и успешного AWG отображается AWG. В уведомлении скорость считается по фактически переданным через MTProto байтам, а «Установка последнего исходящего соединения» показывает **время подключения**, не сетевой ping/RTT. Метрики скорости усредняются, уведомление не обновляется на каждый пакет.
+
+Уже собранные снимки маршрутов на старых скриншотах могут не соответствовать новому экрану. Проверка release APK и поведения уведомления на устройстве остаётся обязательной: [приёмка #135](docs/testing/issue-135-rebuild-acceptance.md).
+
 ## Сборка
 
 Текущий стек:
@@ -284,7 +293,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.6
+.\scripts\release.ps1 -Version v1.11.7
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -305,7 +314,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Для v1.11.6 перед тегом проверьте новый Android-пакет, запуск/остановку прокси, Telegram и сетевые маршруты. Из-за нового `applicationId` это отдельная установка без автоматического переноса настроек и профилей. Финальный подписанный Release APK проверяется отдельно от Debug APK. Требования: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Для v1.11.7 проверьте миграцию настроек с v1.11.6, строгий порядок, TCP → AWG и реальную скорость в уведомлении. Обновление поверх v1.11.6 возможно только с той же подписью; установленное до смены `applicationId` приложение `com.amurcanov.tgwsproxy` остаётся отдельным пакетом. Подписанный Release APK проверяется отдельно от Debug APK: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
@@ -319,7 +328,7 @@ app\build\outputs\apk\debug\app-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.6` | [docs/releases/v1.11.6.md](docs/releases/v1.11.6.md) |
+| Release notes `1.11.7` | [docs/releases/v1.11.7.md](docs/releases/v1.11.7.md) · [English](docs/releases/v1.11.7_EN.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 

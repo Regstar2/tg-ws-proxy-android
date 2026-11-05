@@ -106,6 +106,53 @@ func TestPrepareOutboundRequestRejectsUnsupportedTransport(t *testing.T) {
 	}
 }
 
+func TestPrepareOutboundRequestAcceptsAuthenticatedRawWhenFakeTLSIsEnabled(t *testing.T) {
+	wire, _, _ := buildClientHandshake(t, testSecret, protoPaddedIntermediate, 2)
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	go func() { _ = writeFull(client, wire) }()
+
+	request, clientConn, err := prepareOutboundRequest(server, testSecret, "www.example.com", false, false)
+	if err != nil {
+		t.Fatalf("valid raw MTProto handshake rejected in Fake TLS mode: %v", err)
+	}
+	if clientConn != server {
+		t.Fatal("raw MTProto connection must not be wrapped as Fake TLS")
+	}
+	if request.DCID != 2 || request.Transport != TransportPaddedIntermediate {
+		t.Fatalf("unexpected inbound route metadata: %+v", request)
+	}
+}
+
+func TestFakeTLSModeRejectsObfuscatedInitWithWrongSecret(t *testing.T) {
+	wire, _, _ := buildClientHandshake(t, "11111111111111111111111111111111", protoPaddedIntermediate, 2)
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	response := make(chan string, 1)
+	go func() {
+		_ = writeFull(client, wire)
+		_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+		buf := make([]byte, 512)
+		n, _ := client.Read(buf)
+		response <- string(buf[:n])
+	}()
+
+	_, _, err := prepareOutboundRequest(server, testSecret, "www.example.com", false, false)
+	if !errors.Is(err, ErrFakeTLSExpected) {
+		t.Fatalf("unauthenticated MTProto accepted: %v", err)
+	}
+	select {
+	case redirect := <-response:
+		if !bytes.Contains([]byte(redirect), []byte("HTTP/1.1 301")) {
+			t.Fatalf("expected masking redirect for unknown handshake: %q", redirect)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for masking redirect")
+	}
+}
+
 func TestPrepareOutboundRequestAcceptsFakeTLSWrappedHandshake(t *testing.T) {
 	wire, _, _ := buildClientHandshake(t, testSecret, protoPaddedIntermediate, 2)
 	secret := decodeTestSecret(t, testSecret)

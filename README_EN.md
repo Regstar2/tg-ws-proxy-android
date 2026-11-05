@@ -34,7 +34,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Source version:** `1.11.6` (`versionCode 62`)  
+**Source version (release candidate preparation):** `1.11.7` (`versionCode 63`)  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
@@ -72,7 +72,6 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
   <img src="docs/assets/screenshots/screenshot-main.jpg" width="210" alt="TgWsProxy main screen with local proxy status">
   <img src="docs/assets/screenshots/screenshot-settings-all.jpg" width="210" alt="TgWsProxy settings overview">
   <img src="docs/assets/screenshots/screenshot-settings-connection.jpg" width="210" alt="Local connection settings">
-  <img src="docs/assets/screenshots/screenshot-settings-routes.jpg" width="210" alt="Route policies for different networks">
   <br>
   <img src="docs/assets/screenshots/screenshot-settings-cloudflare.jpg" width="210" alt="Cloudflare Proxy and Worker settings">
   <img src="docs/assets/screenshots/screenshot-settings-app.jpg" width="210" alt="Application behavior and appearance settings">
@@ -172,7 +171,7 @@ WebSocket is a transport. The interface and diagnostics identify the actual path
 
 ## Configuration
 
-Defaults for version `1.11.0`:
+Defaults for **new or reset profiles** starting with `1.11.7` (previously saved user policies are not replaced):
 
 | Setting | Value |
 |---|---|
@@ -180,14 +179,14 @@ Defaults for version `1.11.0`:
 | Local port | `1443` |
 | Frontend | MTProto Proxy |
 | Mobile data | `cf_proxy_ws` only, without fallback |
-| Wi-Fi | `cf_proxy_ws` → `direct_ws` → `tcp_fallback` |
+| Wi-Fi | `cf_proxy_ws` only, no fallback |
 | Unknown network | `cf_proxy_ws` only, without fallback |
 | Runtime log collection | disabled |
 | Persistent file logs | disabled |
 
 `awg_warp` is not added to the default route policy automatically; the user explicitly configures and selects a WARP/AWG profile.
 
-Default-setting migration applies only when the user has not changed route policies manually.
+Migration retains saved Wi-Fi/mobile route permissions and, when possible, the previously preferred route. The ordered list persists both visible positions and the enabled chain. A previous no-fallback policy must not gain additional enabled routes. Save important settings before changing the configuration.
 
 > [!WARNING]
 > Enable masking-domain passthrough only for a trusted domain. The application will create real outbound connections to the configured host.
@@ -249,6 +248,16 @@ Built-in diagnostics show:
 
 The runtime uses the `TgWsProxy` logcat tag. Diagnostic probes should not change the active route policy.
 
+## Routes (v1.11.7 release preparation)
+
+Under **Settings → Routes**, Wi-Fi and mobile data have independent policies. All five routes appear in **one reorderable list**, including disabled routes. Enabling or disabling a route does not move its row. Arrows and drag gestures reorder both active and inactive entries; enabled routes are attempted **in visible top-to-bottom order** by the MTProto frontend. With one enabled route, there is no implicit fallback.
+
+Policy changes save immediately and apply to new MTProto sessions without intentionally interrupting existing ones. New or reset profiles enable Cloudflare Proxy only; AWG/WARP and Worker require their respective configurations.
+
+The status and notification report the **last confirmed outbound MTProto backend**, not merely the highest-priority requested route. For example, successful TCP → AWG fallback is shown as AWG. Traffic speed is calculated from live relayed byte counters. The notification's **Last outbound connection setup** value measures connection establishment time, **not network ping/RTT**. Periodic speeds are sampled and notification publications are throttled.
+
+The older route-settings screenshot has been omitted while the v1.11.7 screen is being finalized. Device/release-APK acceptance is still required: [Issue #135 acceptance](docs/testing/issue-135-rebuild-acceptance.md).
+
 ## Build
 
 Current toolchain:
@@ -283,7 +292,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.6
+.\scripts\release.ps1 -Version v1.11.7
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -304,7 +313,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Before tagging v1.11.6, verify the distinct Android package, proxy start/stop, Telegram and network routes. The new `applicationId` creates a separate installation without automatic settings/profile migration. Test the signed Release APK separately from Debug builds. See the [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Before tagging v1.11.7, verify migration from v1.11.6, strict route ordering, TCP → AWG and live throughput in notifications. Updating v1.11.6 in place requires the same signing certificate. Apps installed before the `applicationId` change (`com.amurcanov.tgwsproxy`) remain separate packages. Validate the signed Release APK independently from Debug builds: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
@@ -318,7 +327,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.6` release notes | [docs/releases/v1.11.6_EN.md](docs/releases/v1.11.6_EN.md) |
+| `1.11.7` release notes | [docs/releases/v1.11.7_EN.md](docs/releases/v1.11.7_EN.md) · [Russian](docs/releases/v1.11.7.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 

@@ -2,7 +2,7 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The latest published stable release is `v1.11.5`. The planned `v1.11.6` patch includes CF reliability corrections and a distinct Android application ID. Verify the exact release candidate and signed APK before publication; see [the release checklist](../releases/RELEASE_CHECKLIST.md). CI results from an earlier build do not establish final release acceptance.
+The latest published stable release is `v1.11.6`. The planned `v1.11.7` update adds strict user-ordered MTProto routing and truthful notification metrics. Verify the exact release candidate and signed APK before publication; see [the release checklist](../releases/RELEASE_CHECKLIST.md). Earlier debug/CI results do not establish final-APK acceptance.
 
 ## Automated checks
 
@@ -37,7 +37,7 @@ For changes that affect `.github/workflows/` or `scripts/ci.ps1`:
 - [ ] Project Sync runs on GitHub-hosted `ubuntu-latest` and does not checkout/execute PR code;
 - [ ] external/fork PR code is never executed on the persistent self-hosted runner;
 - [ ] no Project PAT or signing secret is printed in logs;
-- [ ] the owner-controlled release workflow runs the exact release tag on GitHub-hosted `windows-latest` and restores signing material only into the temporary runner directory.
+- [ ] the owner-controlled release workflow runs the exact tag only on a trusted Windows self-hosted runner and restores signing material only into the runner's temporary directory; confirm cleanup and access control.
 
 Release automation is not considered functionally verified by a debug CI run. Before an automated public release, separately validate release signing, `scripts/release.ps1`, the exact release tag and the generated `dist/` artifacts.
 
@@ -118,11 +118,11 @@ Automation contract: [../development/github-automation.md](../development/github
 Release process: [../releases/release.md](../releases/release.md).  
 Detailed checklist: [../releases/RELEASE_CHECKLIST.md](../releases/RELEASE_CHECKLIST.md).
 
-A v1.11.0 stable candidate must additionally verify the AWG/WARP and provisioning paths introduced by #84, #86 and #88:
+For v1.11.7, the following route and notification checks are mandatory in addition to the generic checklist. The AWG/WARP provisioning list below is historical v1.11.0 coverage and is not automatically a new implementation requirement:
 
 - [ ] create and validate an automatic WARP profile;
 - [ ] verify real Telegram MTProto traffic through `awg_warp`;
 - [ ] verify existing-profile → direct API → custom Worker → built-in Worker bootstrap ordering as applicable;
 - [ ] confirm the three built-in project Workers are provisioning-only and never enter the Telegram Worker Pool;
 - [ ] verify built-in Worker opt-out;
-- [ ] install the signed stable APK over both `v1.10.14` and `v1.11.0-beta.1`.
+- [ ] document the separate package-ID upgrade path for releases before v1.11.6 (do not pretend a package-ID change is an in-place update).

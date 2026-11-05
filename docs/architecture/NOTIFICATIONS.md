@@ -1,6 +1,6 @@
-# Foreground notifications (v1.6.0)
+# Foreground notifications (through v1.11.7)
 
-TgWsProxy runs as an Android foreground service while the local SOCKS5 proxy is active. Android requires a **visible notification** for foreground services.
+TgWsProxy runs as an Android foreground service while the local MTProto or SOCKS5 frontend is active. Android requires a **visible notification** for foreground services.
 
 TgWsProxy cannot fully remove the notification while the proxy is running. You can make it **compact** or **minimal**, and open Android notification settings for the app channel.
 
@@ -36,12 +36,7 @@ Do **not** use `PackageManager.getApplicationIcon()` for notification large icon
 
 ### MIUI cache
 
-If the old icon remains after updating:
-
-1. Uninstall the app completely.
-2. Reboot the device (recommended on MIUI).
-3. Install the new APK (`adb uninstall` then `adb install`, not only `-r` while testing).
-4. Start the proxy and confirm channel `tgwsproxy_service_status_v3` in system notification settings.
+If an old notification icon remains on MIUI/HyperOS, first check the active notification channel in Android settings and restart the proxy. Do **not** uninstall/reinstall just to refresh a cached icon: uninstalling can destroy locally saved AWG/WARP profiles and route preferences. Escalate with non-destructive logcat/device diagnostics.
 
 Audit APK: `powershell -File scripts/audit-apk-icons.ps1`
 
@@ -49,9 +44,10 @@ Audit APK: `powershell -File scripts/audit-apk-icons.ps1`
 
 When enabled in Settings → Notifications:
 
-- **Speed** — rolling average from native byte counters (about every 2–3 seconds)
-- **Latency** — last successful route connect latency when available
-- **Connections** — runtime session counter from native stats
+- **Speed** — rolling sampled average of real relayed `bytes_up` and `bytes_down`, using distinct download/upload directions. MTProto counters update while the duplex bridge runs; a new runtime resets them. Short bursts may be missed by the displayed interval.
+- **MTProto connection setup time** — `connect_ms` from the latest successful outbound dial/route fallback. Shown as **Last outbound connection setup / Установка последнего исходящего соединения** in expanded Normal notifications. **This is not ping/RTT.** Before a successful route it is unknown (`—`).
+- **SOCKS5 latency** — the legacy `latency_ms` field when available. It is not interchangeable with MTProto `connect_ms`.
+- **Connections** — active native session count, not a network speed measurement
 
 ## Publication stability
 
@@ -60,12 +56,14 @@ for the lifetime of a service session. Rebuilding it retains the timestamp from
 the first `startForeground` call (`Notification.when`); that timestamp is not
 displayed in the notification.
 
-The runtime metrics sampler continues to run every 2 seconds in normal/compact
-mode or 3 seconds in minimal mode for the app's UI and diagnostics.
+The service polls native runtime metrics approximately every 750 ms, independent
+of notification display mode; the speed sampler uses an interval window.
 Notification publication is separate: an unchanged presentation does not
 call `NotificationManager.notify`, and changed periodic content is limited to
-one update per 3 seconds. Start, reconnect and other lifecycle status changes
-can update immediately; duplicate content remains suppressed. Notification
+one update per 3 seconds. A newly confirmed MTProto actual route, start,
+reconnect and other lifecycle status changes may publish sooner; duplicate
+content remains suppressed. A failed handshake or closed older session must
+not replace the last successful MTProto backend with an unconfirmed value. Notification
 presentation includes visible text, expanded text, display mode and available
 actions. Disabling notification metrics leaves sampling enabled for the app
 but prevents new notifications when the displayed presentation is unchanged.
@@ -85,14 +83,14 @@ so this device smoke must pass before closing the issue.
 
 | Mode | Behavior |
 |------|----------|
-| Normal | Title, status, mode, route, speed, latency, expanded details, actions |
+| Normal | Title, status, actual route, sampled speed, expanded MTProto connection-setup time (or legacy SOCKS5 latency), connections and actions |
 | Compact | Shorter content; compact speed format |
 | Minimal | Short status only; fewer actions |
 
 ## Channels
 
-- `tgwsproxy_service_status_v2` — low importance, no sound (ongoing status)
-- `tgwsproxy_alerts_v2` — optional important errors
+- `tgwsproxy_service_status_v3` — low importance, no sound (ongoing status)
+- `tgwsproxy_alerts_v3` — optional important errors
 
 Legacy channels `proxy_status` / `proxy_alerts` are deleted on first launch after update (MIUI caches notification artwork per channel id).
 

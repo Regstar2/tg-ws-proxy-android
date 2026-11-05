@@ -22,7 +22,10 @@ object RouteDefaultsMigration {
         val currentVersion = prefs.getInt(KEY_DEFAULTS_VERSION, 0)
         if (currentVersion >= DEFAULTS_VERSION_1800) return
 
-        val userModified = prefs.getBoolean(KEY_USER_MODIFIED, false)
+        val userModified = prefs.getBoolean(KEY_USER_MODIFIED, false) ||
+            NetworkProfileType.entries.any { repository.hasSavedPolicy(it) } ||
+            prefs.contains("connection_mode") || prefs.contains("cfproxy_enabled") ||
+            prefs.contains("cfproxy_priority") || prefs.contains("cfproxy_only")
         if (userModified) {
             Log.i(TAG, "Skipping route defaults migration: userModifiedRoutePolicy=true")
             prefs.edit().putInt(KEY_DEFAULTS_VERSION, DEFAULTS_VERSION_1800).apply()

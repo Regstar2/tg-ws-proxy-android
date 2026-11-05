@@ -37,8 +37,9 @@ object ConnectionRuntimeConfig {
         flowsealMediaFixDc: Int = WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
         flowsealMediaFixIp: String = WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
     ): String {
-        val effectiveMode = if (routePolicy != null) {
-            NetworkRoutePolicyMapper.toLegacyConnectionMode(routePolicy)
+        val orderedPolicy = routePolicy?.let(NetworkRoutePolicyEditor::normalize)
+        val effectiveMode = if (orderedPolicy != null) {
+            NetworkRoutePolicyMapper.toLegacyConnectionMode(orderedPolicy)
         } else {
             when {
                 mode != ConnectionMode.DirectWithFallback -> mode
@@ -46,21 +47,21 @@ object ConnectionRuntimeConfig {
             }
         }
 
-        val cfEnabled = if (routePolicy != null) {
-            RouteKind.CF_PROXY_WS in routePolicy.enabledRoutes
+        val cfEnabled = if (orderedPolicy != null) {
+            RouteKind.CF_PROXY_WS in orderedPolicy.activeRoutes
         } else {
             when (effectiveMode) {
                 ConnectionMode.DirectOnly -> false
                 else -> true
             }
         }
-        val cfPriority = if (routePolicy != null) {
-            routePolicy.preferredRoute == RouteKind.CF_PROXY_WS && routePolicy.allowFallback
+        val cfPriority = if (orderedPolicy != null) {
+            orderedPolicy.activeRoutes.first() == RouteKind.CF_PROXY_WS && orderedPolicy.allowFallback
         } else {
             effectiveMode == ConnectionMode.CFFirst
         }
-        val cfOnly = if (routePolicy != null) {
-            routePolicy.enabledRoutes == setOf(RouteKind.CF_PROXY_WS) && !routePolicy.allowFallback
+        val cfOnly = if (orderedPolicy != null) {
+            orderedPolicy.activeRoutes == listOf(RouteKind.CF_PROXY_WS)
         } else {
             effectiveMode == ConnectionMode.CFOnly
         }
@@ -71,12 +72,14 @@ object ConnectionRuntimeConfig {
             add("@cfproxy=${if (cfEnabled) 1 else 0}")
             add("@cfproxy_priority=${if (cfPriority) 1 else 0}")
             add("@cfproxy_only=${if (cfOnly) 1 else 0}")
-            routePolicy?.let { policy ->
-                add("@route_direct_ws=${if (RouteKind.DIRECT_WS in policy.enabledRoutes) 1 else 0}")
-                add("@route_worker_ws=${if (RouteKind.WORKER_WS in policy.enabledRoutes) 1 else 0}")
-                add("@route_cf_proxy_ws=${if (RouteKind.CF_PROXY_WS in policy.enabledRoutes) 1 else 0}")
-                add("@route_awg_warp=${if (RouteKind.AWG_WARP in policy.enabledRoutes) 1 else 0}")
-                add("@route_tcp_fallback=${if (RouteKind.TCP_FALLBACK in policy.enabledRoutes) 1 else 0}")
+            orderedPolicy?.let { policy ->
+                // The native MTProto planner uses this list as authoritative, ignoring legacy scoring.
+                add("@route_order=${policy.activeRoutes.joinToString("|") { it.prefValue }}")
+                add("@route_direct_ws=${if (RouteKind.DIRECT_WS in policy.activeRoutes) 1 else 0}")
+                add("@route_worker_ws=${if (RouteKind.WORKER_WS in policy.activeRoutes) 1 else 0}")
+                add("@route_cf_proxy_ws=${if (RouteKind.CF_PROXY_WS in policy.activeRoutes) 1 else 0}")
+                add("@route_awg_warp=${if (RouteKind.AWG_WARP in policy.activeRoutes) 1 else 0}")
+                add("@route_tcp_fallback=${if (RouteKind.TCP_FALLBACK in policy.activeRoutes) 1 else 0}")
                 add("@preferred_route=${policy.preferredRoute?.prefValue.orEmpty()}")
                 add("@route_fallback=${if (policy.allowFallback) 1 else 0}")
             }
@@ -104,8 +107,8 @@ object ConnectionRuntimeConfig {
             }
             val normalizedWorker = workerFailover?.primaryDomain?.takeIf { it.isNotBlank() }
                 ?: WorkerDomain.normalize(workerDomain)
-            val workerOn = if (routePolicy != null) {
-                RouteKind.WORKER_WS in routePolicy.enabledRoutes
+            val workerOn = if (orderedPolicy != null) {
+                RouteKind.WORKER_WS in orderedPolicy.activeRoutes
             } else {
                 workerEnabled || normalizedWorker.isNotBlank() ||
                     effectiveMode == ConnectionMode.WorkerFirst ||

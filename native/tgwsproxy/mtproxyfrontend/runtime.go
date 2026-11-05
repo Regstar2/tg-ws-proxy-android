@@ -73,11 +73,20 @@ type RuntimeStatus struct {
 	RouteReason               string
 	ActiveConnections         int64
 	TotalConnections          int64
+	BytesUp                   int64
+	BytesDown                 int64
+	LastConnectMs             int64
 	LastError                 string
 }
 
 type Logger interface {
 	Printf(format string, args ...any)
+}
+
+type mtProtoTrafficCounters struct {
+	bytesUp       atomic.Int64
+	bytesDown     atomic.Int64
+	lastConnectMs atomic.Int64
 }
 
 type Runtime struct {
@@ -99,9 +108,11 @@ type Runtime struct {
 	outboundStatus            string
 	selectedBackend           string
 	actualBackend             string
+	actualRouteGeneration     uint64 // latest policy generation with a confirmed outbound route
 	fallbackUsed              bool
 	routeReason               string
 	lastError                 string
+	traffic                   *mtProtoTrafficCounters
 	activeConnections         atomic.Int64
 	totalConnections          atomic.Int64
 	fakeTLSAccepted           atomic.Int64
@@ -116,6 +127,7 @@ func NewRuntime(logger Logger, connectors ...OutboundConnector) *Runtime {
 		logger:         logger,
 		status:         StatusDisabled,
 		outboundStatus: OutboundUnsupported,
+		traffic:        &mtProtoTrafficCounters{},
 	}
 	if len(connectors) > 0 {
 		runtime.connector = connectors[0]
@@ -189,10 +201,12 @@ func (r *Runtime) Start(config Config) StartResult {
 	r.lastError = ""
 	r.fakeTLSLastError = ""
 	r.actualBackend = ""
+	r.actualRouteGeneration = 0
 	r.fallbackUsed = false
 	r.routeReason = "awaiting_connection"
 	r.activeConnections.Store(0)
 	r.totalConnections.Store(0)
+	r.traffic = &mtProtoTrafficCounters{}
 	r.fakeTLSAccepted.Store(0)
 	r.fakeTLSRejected.Store(0)
 	r.fakeTLSRedirected.Store(0)
@@ -264,6 +278,19 @@ func (r *Runtime) Stop() error {
 func (r *Runtime) Status() RuntimeStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	selectedBackend := r.selectedBackend
+	// An ordered policy can change while the listener stays alive. Selected
+	// reports the requested first route immediately, while actual reports only
+	// a backend established by a real outbound MTProto connection.
+	if r.connector != nil && r.runCtx != nil {
+		selectedBackend = r.connector.Capability().SelectedBackend
+	}
+	var up, down, connectMs int64
+	if r.traffic != nil {
+		up = r.traffic.bytesUp.Load()
+		down = r.traffic.bytesDown.Load()
+		connectMs = r.traffic.lastConnectMs.Load()
+	}
 	return RuntimeStatus{
 		Status:                    r.status,
 		Host:                      r.host,
@@ -279,12 +306,15 @@ func (r *Runtime) Status() RuntimeStatus {
 		FakeTLSLastError:          r.fakeTLSLastError,
 		ForceTestDC:               r.forceTestDC,
 		OutboundStatus:            r.outboundStatus,
-		SelectedBackend:           r.selectedBackend,
+		SelectedBackend:           selectedBackend,
 		ActualBackend:             r.actualBackend,
 		FallbackUsed:              r.fallbackUsed,
 		RouteReason:               r.routeReason,
 		ActiveConnections:         r.activeConnections.Load(),
 		TotalConnections:          r.totalConnections.Load(),
+		BytesUp:                   up,
+		BytesDown:                 down,
+		LastConnectMs:             connectMs,
 		LastError:                 r.lastError,
 	}
 }
@@ -292,7 +322,7 @@ func (r *Runtime) Status() RuntimeStatus {
 func (r *Runtime) StatusString() string {
 	status := r.Status()
 	return fmt.Sprintf(
-		"status=%s;host=%s;port=%d;outbound=%s;selected_backend=%s;actual_backend=%s;fallback_used=%t;route_reason=%s;active=%d;total=%d;last_error=%s;secret_fingerprint=%s;fake_tls=%t;masking_passthrough=%t;fake_tls_accepted=%d;fake_tls_rejected=%d;fake_tls_redirected=%d;fake_tls_probe=%d;fake_tls_passthrough=%d;fake_tls_last_error=%s;force_test_dc=%t",
+		"status=%s;host=%s;port=%d;outbound=%s;selected_backend=%s;actual_backend=%s;fallback_used=%t;route_reason=%s;active=%d;total=%d;bytes_up=%d;bytes_down=%d;connect_ms=%d;last_error=%s;secret_fingerprint=%s;fake_tls=%t;masking_passthrough=%t;fake_tls_accepted=%d;fake_tls_rejected=%d;fake_tls_redirected=%d;fake_tls_probe=%d;fake_tls_passthrough=%d;fake_tls_last_error=%s;force_test_dc=%t",
 		status.Status,
 		status.Host,
 		status.Port,
@@ -303,6 +333,9 @@ func (r *Runtime) StatusString() string {
 		emptyStatusField(status.RouteReason),
 		status.ActiveConnections,
 		status.TotalConnections,
+		status.BytesUp,
+		status.BytesDown,
+		status.LastConnectMs,
 		sanitizeStatusField(status.LastError),
 		status.SecretFingerprint,
 		status.FakeTLSEnabled,
@@ -388,6 +421,12 @@ func (r *Runtime) restartListener(
 }
 
 func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Config) {
+	r.mu.Lock()
+	traffic := r.traffic
+	if r.runCtx != ctx {
+		traffic = nil
+	}
+	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		if r.runCtx == ctx {
@@ -456,10 +495,15 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		return
 	}
 	if config.FakeTLSDomain != "" {
-		r.noteFakeTLSAccepted()
+		if _, wrapped := clientConn.(*fakeTLSStream); wrapped {
+			r.noteFakeTLSAccepted()
+		} else {
+			r.log("MTProto legacy obfuscated client accepted on Fake TLS-enabled local listener remote=%s", remote)
+		}
 	}
 
 	sessionID := SessionIDForRequest(request)
+	connectStarted := time.Now()
 	outbound, result := r.connector.Connect(ctx, request)
 	r.updateRouteTruthFor(ctx,result)
 	logRequest := result.Reason != "cfproxy_unavailable" || LogCFPoolMiss(result.CFPoolMissCount)
@@ -477,6 +521,13 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 		return
 	}
 	defer outbound.Close()
+	if traffic != nil && ctx.Err() == nil {
+		connectMs := time.Since(connectStarted).Milliseconds()
+		if connectMs < 1 {
+			connectMs = 1
+		}
+		traffic.lastConnectMs.Store(connectMs)
+	}
 
 	diagnostics := RouteDiagnosticsFor(outbound, request)
 	if diagnostics.SessionID != "" {
@@ -487,6 +538,10 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 	r.log("MTProto route connected frontend=MTProto session_id=%s route_generation=%d signed_dc=%d dc=%d media=%t worker_dst=%s selected_backend=%s actual_backend=%s fallback_used=%t reason=%s",
 		sessionID, result.RouteGeneration, request.SignedDC, request.DCID, request.IsMedia, workerDst,
 		result.SelectedBackend, result.ActualBackend, result.FallbackUsed, result.Reason)
+	if traffic != nil {
+		clientConn = &mtProtoTrafficConn{Conn: clientConn, bytesWritten: &traffic.bytesDown}
+		outbound = &mtProtoTrafficConn{Conn: outbound, bytesWritten: &traffic.bytesUp}
+	}
 	bridge := bridgeTransformedStreams(ctx, clientConn, outbound, request.ClientToRelay, request.RelayToClient)
 	bridgeError := "none"
 	if bridge.Err != nil {
@@ -526,15 +581,34 @@ func (r *Runtime) updateRouteTruthFor(ctx context.Context, result OutboundResult
 	if r.runCtx != ctx || ctx.Err() != nil {
 		return
 	}
-	r.selectedBackend = result.SelectedBackend
-	r.actualBackend = result.ActualBackend
-	r.fallbackUsed = result.FallbackUsed
-	r.routeReason = result.Reason
+	// Closing an older session is not a new routing decision. In particular,
+	// it must not overwrite a more recent successful fallback connection.
+	if result.Reason == "connection_closed" || result.RouteGeneration < r.actualRouteGeneration {
+		return
+	}
+	if result.SelectedBackend != "" {
+		r.selectedBackend = result.SelectedBackend
+	}
 	if result.Err != nil {
 		r.lastError = result.Err.Error()
-	} else {
-		r.lastError = ""
+		// Failed handshakes and unsuccessful route attempts have no actual backend.
+		// Preserve the most recently confirmed connection for the status UI.
+		if r.actualBackend == "" {
+			r.routeReason = result.Reason
+		}
+		return
 	}
+	if result.ActualBackend == "" {
+		if r.actualBackend == "" {
+			r.routeReason = result.Reason
+		}
+		return
+	}
+	r.actualBackend = result.ActualBackend
+	r.actualRouteGeneration = result.RouteGeneration
+	r.fallbackUsed = result.FallbackUsed
+	r.routeReason = result.Reason
+	r.lastError = ""
 }
 
 func (r *Runtime) noteFakeTLSAccepted() {
@@ -610,6 +684,21 @@ func emptyStatusField(value string) string {
 		return "none"
 	}
 	return value
+}
+
+// mtProtoTrafficConn counts successfully written relayed payload bytes while
+// the stream is active. A counter belongs to one runtime generation.
+type mtProtoTrafficConn struct {
+	net.Conn
+	bytesWritten *atomic.Int64
+}
+
+func (c *mtProtoTrafficConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.bytesWritten.Add(int64(n))
+	}
+	return n, err
 }
 
 type bridgeDirectionResult struct {

@@ -1,4 +1,8 @@
-# Adaptive Auto routing (v1.5.1)
+# Adaptive Auto routing (legacy v1.5.1)
+
+> **v1.11.7:** This document describes the earlier scoring-based Auto/Direct modes for compatibility and historical behavior. The new **ordered MTProto routing policy** takes precedence: `@route_order` passes the enabled routes in the saved user order, and scores/last-good routes must **not reorder that chain**. Health, cooldown and backoff can make a candidate temporarily unavailable but cannot enable a disabled route. A one-route chain is strict-only; no hidden Direct/TCP path. See [Issue #135 acceptance](../testing/issue-135-rebuild-acceptance.md).
+
+## Historical Auto behavior (legacy modes)
 
 Auto mode is adaptive in the Android fork. It does not blindly follow a fixed desktop order on every connection.
 It uses recent route health, network profile, DC direction, cooldowns, last-good route, and an **Auto strategy** preset to choose the most likely working path.

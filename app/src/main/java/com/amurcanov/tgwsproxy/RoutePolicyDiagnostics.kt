@@ -46,8 +46,7 @@ object RoutePolicyDiagnostics {
     ): String {
         val yes = context.getString(R.string.common_yes)
         val no = context.getString(R.string.common_no)
-        val routes = snapshot.policy.enabledRoutes
-            .orderedRoutes()
+        val routes = NetworkRoutePolicyEditor.normalize(snapshot.policy).activeRoutes
             .joinToString(", ") { RoutePolicyDisplayNames.routeLabel(context, it) }
         val preferred = snapshot.policy.preferredRoute
             ?.let { RoutePolicyDisplayNames.routeLabel(context, it) }
@@ -83,7 +82,7 @@ object RoutePolicyDiagnosticsFormatter {
             "routes=${routeValues(policy)} " +
             "preferred=${policy.preferredRoute?.prefValue.orEmpty()} " +
             "fallback=${policy.allowFallback} " +
-            "strategy=${policy.autoStrategy.prefValue}"
+            "strategy_legacy_ignored=${policy.autoStrategy.prefValue}"
     }
 
     fun formatMarkdown(snapshot: RoutePolicyDiagnosticsSnapshot): String {
@@ -102,7 +101,7 @@ object RoutePolicyDiagnosticsFormatter {
     }
 
     fun routeValues(policy: NetworkRoutePolicy): String {
-        return policy.enabledRoutes.orderedRoutes().joinToString("|") { it.prefValue }
+        return NetworkRoutePolicyEditor.normalize(policy).activeRoutes.joinToString("|") { it.prefValue }
     }
 }
 

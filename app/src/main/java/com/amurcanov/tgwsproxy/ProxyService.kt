@@ -62,6 +62,10 @@ class ProxyService : Service() {
         )
         private val LEGACY_NOTIFICATION_IDS = listOf(1, 2)
 
+        // UI route truth should follow native MTProto connections within one second.
+        // NotificationUpdateGate independently limits SystemUI updates to 3 seconds.
+        private const val METRICS_POLL_INTERVAL_MS = 750L
+
         private const val PREFS = PROXY_PREFS_NAME
         private const val KEY_NOTIFICATION_CHANNELS_MIGRATED = "notification_channels_v3_migrated"
 
@@ -471,6 +475,40 @@ class ProxyService : Service() {
         poolSize: Int,
         frontendType: LocalProxyFrontendType,
     ) {
+        if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL &&
+            _isRunning.value && currentFrontend.type == frontendType &&
+            port == lastPort && poolSize == lastPoolSize
+        ) {
+            // Apply only to future outbound MTProto sessions. The listener and
+            // established sockets continue running under the previous snapshots.
+            val applied = runCatching { NativeProxy.updateMtProtoRoutePolicy(ips) }.getOrDefault(-1)
+            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val profileType = NetworkProfileProvider.current(this).type
+            ReconfigureStatusStore.save(prefs, ReconfigureStatus(
+                type = if (applied == 0) ReconfigureStatusType.SUCCESS else ReconfigureStatusType.FAILED,
+                networkType = profileType,
+                message = if (applied == 0) "hot_policy_updated" else "native_hot_policy_update_failed",
+                updatedAtMs = System.currentTimeMillis(),
+            ))
+            if (applied == 0) {
+                saveLastConfig(port, ips, poolSize, frontendType)
+                // Native hot apply completed: refresh app state and notification immediately.
+                // Existing MTProto sockets keep their last actual backend until reconnect.
+                val runtime = readRuntimeMetrics(frontendType)
+                val configuredFirst = ips.split(',')
+                    .firstOrNull { it.startsWith("@route_order=") }
+                    ?.substringAfter('=')
+                    ?.substringBefore('|')
+                    .orEmpty()
+                ProxyRuntimeState.update {
+                    it.copy(runtime = runtime, configuredRouteKind = configuredFirst)
+                }
+                updateNotification(force = true)
+            } else {
+                Log.e("TgWsProxy", "MTProto route policy hot-update rejected; existing sessions preserved")
+            }
+            return
+        }
         if (frontendType == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL || !_isRunning.value) {
             startProxy(port, ips, poolSize, frontendType)
             return
@@ -552,9 +590,7 @@ class ProxyService : Service() {
             var lastBytesDown: Long? = null
             var lastBytesAtMs: Long? = null
             while (isActive && _isRunning.value) {
-                val prefs = NotificationPreferences.load(this@ProxyService)
-                val interval = if (prefs.displayMode == NotificationDisplayMode.MINIMAL) 3000L else 2000L
-                delay(interval)
+                delay(METRICS_POLL_INTERVAL_MS)
                 if (!_isRunning.value) {
                     continue
                 }
@@ -596,7 +632,10 @@ class ProxyService : Service() {
                     lastBytesDown = runtime.bytesDown
                     lastBytesAtMs = now
                 }
-                val (downBps, upBps) = speedSampler.sample(runtime.bytesDown, runtime.bytesUp)
+                val (downBps, upBps) = speedSampler.sample(runtime)
+                val previousRoute = ProxyRuntimeState.uiMetrics.value.runtime.currentRouteKind
+                val confirmedRouteChanged = runtime.currentRouteKind.isNotBlank() &&
+                    runtime.currentRouteKind != previousRoute
                 ProxyRuntimeState.update {
                     it.copy(
                         runtime = runtime,
@@ -609,7 +648,9 @@ class ProxyService : Service() {
                     )
                 }
                 launch(Dispatchers.Main) {
-                    updateNotification()
+                    // Show a newly connected backend promptly; regular speed/status
+                    // refreshes remain throttled by ProxyNotificationUpdateGate.
+                    updateNotification(force = confirmedRouteChanged)
                 }
             }
         }
@@ -688,11 +729,22 @@ class ProxyService : Service() {
                 ui.runtime.routeLabel(this),
             )
         }
+        // Show the applied priority immediately, without claiming an already
+        // established MTProto session switched its actual transport.
+        val configured = ui.configuredRouteKind.takeIf {
+            ui.serviceStatus == ProxyServiceStatus.RUNNING && it.isNotBlank()
+        }?.let { route ->
+            getString(
+                R.string.notification_configured_priority,
+                RouteDisplayNames.routeLabel(this, route),
+            )
+        }
+        val statusWithPriority = if (configured == null) status else "$status · $configured"
         if (!prefs.showMetricsInNotification || prefs.displayMode == NotificationDisplayMode.MINIMAL) {
-            return status
+            return statusWithPriority
         }
         if (ui.serviceStatus != ProxyServiceStatus.RUNNING) {
-            return status
+            return statusWithPriority
         }
         val speed = when (prefs.displayMode) {
             NotificationDisplayMode.COMPACT ->
@@ -708,7 +760,7 @@ class ProxyService : Service() {
                     getString(R.string.metrics_idle),
                 )
         }
-        return "$status · $speed"
+        return "$statusWithPriority · $speed"
     }
 
     private fun notificationExpandedText(
@@ -724,16 +776,29 @@ class ProxyService : Service() {
         val lines = mutableListOf<String>()
         lines += getString(R.string.notification_line_mode, ui.runtime.modeLabel(this))
         lines += getString(R.string.notification_line_route, ui.runtime.routeLabel(this))
+        if (ui.configuredRouteKind.isNotBlank()) {
+            lines += getString(
+                R.string.notification_configured_priority,
+                RouteDisplayNames.routeLabel(this, ui.configuredRouteKind),
+            )
+        }
         val speed = ConnectionMetricsFormatter.formatSpeedPair(
             ui.downloadBps,
             ui.uploadBps,
             getString(R.string.metrics_idle),
         )
         lines += getString(R.string.notification_line_speed, speed)
-        lines += getString(
-            R.string.notification_line_latency,
-            ConnectionMetricsFormatter.formatLatency(ui.runtime.lastLatencyMs),
-        )
+        if (ui.runtime.mode == "mtproto") {
+            lines += getString(
+                R.string.notification_line_connect_time,
+                ConnectionMetricsFormatter.formatLatency(ui.runtime.lastConnectTimeMs),
+            )
+        } else {
+            lines += getString(
+                R.string.notification_line_latency,
+                ConnectionMetricsFormatter.formatLatency(ui.runtime.lastLatencyMs),
+            )
+        }
         lines += getString(R.string.notification_line_connections, ui.runtime.activeConnections)
         if (ui.runtime.lastError.isNotBlank()) {
             lines += getString(R.string.notification_line_last_error, ui.runtime.lastError)

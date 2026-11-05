@@ -302,7 +302,11 @@ private fun ProxyScreen(
         AdaptiveRouteStatsRepository(prefs)
     }
     val routePolicyRepository = remember {
-        NetworkRoutePolicyRepository(prefs)
+        NetworkRoutePolicyRepository(prefs).also { repository ->
+            // Initialize persisted policies before Compose reads Wi-Fi/mobile state.
+            RouteDefaultsMigration.applyIfNeeded(prefs, repository)
+            OrderedRoutePolicyMigration.applyIfNeeded(prefs, repository)
+        }
     }
     val workerPoolRepository = remember {
         WorkerPoolRepository(SharedPreferencesWorkerPoolPersistence(prefs))
@@ -315,10 +319,6 @@ private fun ProxyScreen(
     }
 
     LaunchedEffect(Unit) {
-        RouteDefaultsMigration.applyIfNeeded(
-            prefs = prefs,
-            repository = routePolicyRepository,
-        )
         WorkerPoolMigration.applyIfNeeded(prefs, workerPoolRepository)
     }
     val cfDomainListUpdater = remember {
@@ -1437,7 +1437,9 @@ private fun ProxyScreen(
             return
         }
         val configKey = runtimeConfigKey(config)
-        if (configKey == lastRuntimeConfigKey) {
+        if (configKey == lastRuntimeConfigKey &&
+            ReconfigureStatusStore.load(prefs).type != ReconfigureStatusType.FAILED
+        ) {
             saveReconfigureStatus(
                 ReconfigureStatus(
                     type = ReconfigureStatusType.SKIPPED,
@@ -1457,9 +1459,9 @@ private fun ProxyScreen(
         Log.i("TgWsProxy", RoutePolicyDiagnostics.formatLogLine(snapshot))
         saveReconfigureStatus(
             ReconfigureStatus(
-                type = ReconfigureStatusType.SUCCESS,
+                type = ReconfigureStatusType.SKIPPED,
                 networkType = config.profile.type,
-                message = "action_reconfigure_sent",
+                message = "pending_runtime_apply",
                 updatedAtMs = System.currentTimeMillis(),
             ),
         )
@@ -1500,6 +1502,21 @@ private fun ProxyScreen(
         } else {
             pendingReconfigureJob = null
             runNetworkReconfigure(profile)
+        }
+    }
+
+    // Service publishes the result immediately; no 300 ms polling or timeout.
+    val liveReconfigureStatus by ReconfigureStatusStore.liveStatus.collectAsStateWithLifecycle()
+    LaunchedEffect(liveReconfigureStatus) {
+        val applied = liveReconfigureStatus ?: return@LaunchedEffect
+        if (applied.updatedAtMs < reconfigureStatus.updatedAtMs) return@LaunchedEffect
+        reconfigureStatus = applied
+        if (applied.type == ReconfigureStatusType.FAILED) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.routes_live_apply_failed),
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -1968,6 +1985,10 @@ private fun ProxyScreen(
                             mobilePolicy = mobileRoutePolicy,
                             hasSavedWifiPolicy = hasSavedWifiRoutePolicy,
                             hasSavedMobilePolicy = hasSavedMobileRoutePolicy,
+                            workerConfigured = WorkerRouteResolver.resolveDomain(
+                                workerPoolRepository, workerDomainText,
+                            ).isNotBlank(),
+                            awgConfigured = !AwgWarpConfigStore.configPath(context).isNullOrBlank(),
                             policySnapshot = routePolicySnapshot,
                             reconfigureStatus = reconfigureStatus,
                             routeProbeReport = routeProbeReport,
@@ -2021,6 +2042,12 @@ private fun ProxyScreen(
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
+                                }
                             },
                             onMobilePolicyChange = { policy ->
                                 val normalized = NetworkRoutePolicyEditor.normalize(
@@ -2031,6 +2058,12 @@ private fun ProxyScreen(
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
+                                }
                             },
                             onResetWifiPolicy = {
                                 routePolicyRepository.reset(NetworkProfileType.WIFI)
@@ -2038,6 +2071,12 @@ private fun ProxyScreen(
                                 wifiRoutePolicy = routePolicyRepository.load(NetworkProfileType.WIFI)
                                 hasSavedWifiRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.WIFI)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.WIFI) {
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
+                                }
                                 Toast.makeText(
                                     context,
                                     context.getString(R.string.route_policy_reset_done),
@@ -2050,6 +2089,12 @@ private fun ProxyScreen(
                                 mobileRoutePolicy = routePolicyRepository.load(NetworkProfileType.MOBILE)
                                 hasSavedMobileRoutePolicy = routePolicyRepository.hasSavedPolicy(NetworkProfileType.MOBILE)
                                 refreshRoutePolicySnapshot()
+                                if (isRunning && currentNetworkProfile.type == NetworkProfileType.MOBILE) {
+                                    // User-initiated changes apply now; debounce only real network transitions.
+                                    pendingReconfigureJob?.cancel()
+                                    pendingReconfigureJob = null
+                                    runNetworkReconfigure(currentNetworkProfile)
+                                }
                                 Toast.makeText(
                                     context,
                                     context.getString(R.string.route_policy_reset_done),

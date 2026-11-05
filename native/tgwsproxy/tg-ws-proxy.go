@@ -3216,7 +3216,18 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				settings.MtProtoWorkerPreconnect = parseBoolValue(val)
 			case "force_test_dc":
 				settings.ForceTestDC = parseBoolValue(val)
-			case "route_direct_ws":
+			case "route_order":
+                routes, err := parseOrderedRoutes(val)
+                if err != nil { return nil, settings, err }
+                settings.OrderedPolicy = true
+                settings.PolicyPresent = true
+                settings.OrderedRoutes = routes
+            case "route_awg_warp":
+                settings.PolicyPresent = true
+                settings.AllowAWG = parseBoolValue(val)
+            case "awg_warp_config_path":
+                settings.AWGConfigPath = val
+            case "route_direct_ws":
 				settings.PolicyPresent = true
 				settings.AllowDirect = parseBoolValue(val)
 			case "route_worker_ws":
@@ -3321,6 +3332,12 @@ func (mtProtoLogWriter) Printf(format string, args ...any) {
 }
 
 func startMtProtoWorkerPreconnect(dcOptMap map[int]string, settings runtimeSettings) {
+    // Do not open a lower-priority Worker transport merely for speculative warmup.
+    if settings.OrderedPolicy &&
+        (len(settings.OrderedRoutes) == 0 || settings.OrderedRoutes[0] != routeCFWorkerWS) {
+        stopMtProtoWorkerPreconnect(false)
+        return
+    }
 	workerDomains := workerWarmupDomains(settings)
 	active := workerWsPreconnectActiveForSettings(settings)
 	if !settings.workerRouteAvailable() || !active || len(workerDomains) == 0 {
@@ -3446,6 +3463,10 @@ func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfi
 		logError.Printf("MTProto parseRuntimeConfig: %v", err)
 		return -4
 	}
+	if err := validateMtProtoRequestedRoutes(settings); err != nil {
+		logError.Printf("MTProto frontend start rejected before runtime change: %v", err)
+		return -4
+	}
 	setRuntimeSettings(settings)
 	setCfProxyConfig(settings.CF)
 	dcOptMu.Lock()
@@ -3473,6 +3494,51 @@ func StartMtProtoProxy(cHost *C.char, port C.int, cSecret *C.char, cRuntimeConfi
 	default:
 		return -4
 	}
+}
+
+//export UpdateMtProtoRoutePolicy
+// Atomically change policy for future MTProto sessions without restarting the listener.
+func UpdateMtProtoRoutePolicy(cRuntimeConfig *C.char) C.int {
+    dcMap, settings, err := parseRuntimeConfig(C.GoString(cRuntimeConfig))
+    if err != nil || !settings.OrderedPolicy {
+        if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
+        return -4
+    }
+    if err := validateMtProtoRequestedRoutes(settings); err != nil {
+        if logError != nil { logError.Printf("MTProto route policy update rejected: %v", err) }
+        return -4
+    }
+    // Configure a newly enabled AWG route before publishing the new policy.
+    // Unconfigured AWG may be skipped only when another explicitly allowed path exists.
+    if settings.AllowAWG {
+        previous := globalAWGWarpRouteRuntime.Policy()
+        if settings.AWGConfigPath == "" && len(settings.OrderedRoutes) == 1 {
+            return -4
+        }
+        if settings.AWGConfigPath != "" &&
+            (!previous.Enabled || previous.ConfigPath != settings.AWGConfigPath) {
+            if err := globalAWGWarpRouteRuntime.Configure(
+                settings.AWGConfigPath, true, false, len(settings.OrderedRoutes) > 1,
+            ); err != nil {
+                if logWarn != nil { logWarn.Printf("AWG route configuration failed: %v", err) }
+                if len(settings.OrderedRoutes) == 1 { return -4 }
+            }
+        }
+    }
+    setRuntimeSettings(settings)
+    setCfProxyConfig(settings.CF)
+    dcOptMu.Lock()
+    dcOpt = dcMap
+    dcOptMu.Unlock()
+    // Cancel preconnect for routes removed from the policy. Keep connections
+    // already owned by existing sessions; do not close the Worker pool here.
+    startMtProtoWorkerPreconnect(dcMap, settings)
+    if logInfo != nil {
+        logInfo.Printf("MTProto route policy updated network=%s order=%s generation=%d",
+            settings.NetworkProfileType, strings.Join(routeKindStrings(settings.OrderedRoutes), "|"),
+            getRuntimeSettings().PolicyGen)
+    }
+    return 0
 }
 
 //export StopMtProtoProxy
