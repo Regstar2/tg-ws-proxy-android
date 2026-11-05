@@ -72,7 +72,6 @@ internal fun OrderedRoutesSettings(
     reconfigureStatus: ReconfigureStatus? = null,
     workerConfigured: Boolean = false,
     awgConfigured: Boolean = false,
-    onOpenDiagnostics: () -> Unit = {},
 ) {
     var selectedNetwork by rememberSaveable { mutableStateOf(NetworkProfileType.WIFI) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -329,12 +328,6 @@ internal fun OrderedRoutesSettings(
             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("routes.reset"),
         ) {
             Text(stringResource(R.string.routes_reset_selected))
-        }
-        TextButton(
-            onClick = onOpenDiagnostics,
-            modifier = Modifier.align(Alignment.End).testTag("routes.diagnostics"),
-        ) {
-            Text(stringResource(R.string.routes_overview_advanced_title))
         }
     }
 
