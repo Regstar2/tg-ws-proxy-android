@@ -24,12 +24,18 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class OrderedRoutesIssue135UiTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+
+    // Outer rule runs in the already-instrumented process so MIUI cannot
+    // discard the pre-test foreground Activity when AndroidJUnitRunner starts.
+    @get:Rule val rules: RuleChain =
+        RuleChain.outerRule(ForegroundComposeHostRule()).around(compose)
 
     @Test fun allFiveRoutesShareOneCompactList() {
         render()
