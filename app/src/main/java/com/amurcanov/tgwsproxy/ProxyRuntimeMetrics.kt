@@ -52,16 +52,21 @@ data class ProxyRuntimeMetrics(
 
     companion object {
         internal fun fromMtProtoStatus(status: MtProtoNativeStatus): ProxyRuntimeMetrics {
-            val activeRoute = status.actualBackend.noneAsBlank()
-                .ifBlank { status.selectedBackend.noneAsBlank() }
-            val selectedRoute = status.selectedBackend.noneAsBlank()
+            // "Selected" is the first requested route, not proof of a connection.
+            // MTProto uses "direct_tcp" internally for the TCP fallback route.
+            val activeRoute = status.actualBackend.canonicalMtProtoRoute()
+            val selectedRoute = status.selectedBackend.canonicalMtProtoRoute()
             return ProxyRuntimeMetrics(
                 running = status.toRuntimeState() == MtProtoRuntimeState.RUNNING ||
                     status.toRuntimeState() == MtProtoRuntimeState.LISTENING_LOCAL_ONLY,
                 mode = "mtproto",
                 route = activeRoute,
                 activeRouteKind = activeRoute,
-                transportType = if (activeRoute.isBlank()) "" else "websocket",
+                transportType = when (activeRoute) {
+                    "" -> ""
+                    "tcp_fallback", "awg_warp" -> "tcp"
+                    else -> "websocket"
+                },
                 activeConnections = status.activeConnections,
                 totalConnections = status.totalConnections,
                 lastError = status.lastError.noneAsBlank(),
@@ -140,6 +145,11 @@ data class ProxyRuntimeMetrics(
 
 private fun String.noneAsBlank(): String {
     return trim().takeUnless { it.equals("none", ignoreCase = true) }.orEmpty()
+}
+
+private fun String.canonicalMtProtoRoute(): String = when (val backend = noneAsBlank()) {
+    "direct_tcp" -> "tcp_fallback"
+    else -> backend
 }
 
 private fun Map<String, String>.safeInt(vararg keys: String): Int {
