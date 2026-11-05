@@ -129,6 +129,60 @@ class NetworkRoutePolicyEditorTest {
     }
 
     @Test
+    fun movingInactiveRouteAcrossEnabledRowsKeepsActiveFallbackUnchanged() {
+        val initial = NetworkRoutePolicyEditor.normalize(
+            DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI).copy(
+                activeRoutes = listOf(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+                displayOrder = listOf(RouteKind.CF_PROXY_WS, RouteKind.AWG_WARP,
+                    RouteKind.WORKER_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK),
+            )
+        )
+        val moved = NetworkRoutePolicyEditor.moveInactiveRoute(initial, RouteKind.AWG_WARP, 4)
+
+        assertEquals(
+            listOf(RouteKind.CF_PROXY_WS, RouteKind.WORKER_WS, RouteKind.DIRECT_WS,
+                RouteKind.TCP_FALLBACK, RouteKind.AWG_WARP),
+            moved.displayOrder,
+        )
+        assertEquals(initial.activeRoutes, moved.activeRoutes)
+        assertEquals(initial.enabledRoutes, moved.enabledRoutes)
+        assertEquals(initial.preferredRoute, moved.preferredRoute)
+        assertEquals(initial.allowFallback, moved.allowFallback)
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.AWG_WARP), moved.inactiveRoutes)
+        assertEquals(initial, NetworkRoutePolicyEditor.moveInactiveRoute(initial, RouteKind.AWG_WARP, 1))
+    }
+
+    @Test
+    fun movingInactiveRouteToFirstSlotControlsItsFutureEnabledPriority() {
+        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.WIFI)
+        val moved = NetworkRoutePolicyEditor.moveInactiveRoute(original, RouteKind.WORKER_WS, 0)
+        val restored = NetworkRoutePolicyEditor.setRouteEnabled(moved, RouteKind.WORKER_WS, true)
+
+        assertEquals(RouteKind.WORKER_WS, restored.displayOrder.first())
+        assertEquals(listOf(RouteKind.CF_PROXY_WS), moved.activeRoutes)
+        assertEquals(setOf(RouteKind.CF_PROXY_WS), moved.enabledRoutes)
+        assertEquals(listOf(RouteKind.WORKER_WS, RouteKind.CF_PROXY_WS), restored.activeRoutes)
+    }
+
+    @Test
+    fun movingInactiveRouteCannotMoveEnabledItemOrInvalidIndex() {
+        val original = DefaultNetworkRoutePolicies.forType(NetworkProfileType.MOBILE)
+        assertEquals(original, NetworkRoutePolicyEditor.moveInactiveRoute(
+            original, RouteKind.CF_PROXY_WS, 4
+        ))
+        assertEquals(original, NetworkRoutePolicyEditor.moveInactiveRoute(
+            original, RouteKind.AWG_WARP, -1
+        ))
+        assertEquals(original, NetworkRoutePolicyEditor.moveInactiveRoute(
+            original, RouteKind.AWG_WARP, 5
+        ))
+        assertEquals(RouteKind.entries.size,
+            NetworkRoutePolicyEditor.moveInactiveRoute(original, RouteKind.AWG_WARP, 0)
+                .displayOrder.distinct().size
+        )
+    }
+
+    @Test
     fun resettingBothProfilesEnablesOnlyCloudflareProxy() {
         for (type in listOf(NetworkProfileType.WIFI, NetworkProfileType.MOBILE)) {
             val policy = DefaultNetworkRoutePolicies.forType(type)
