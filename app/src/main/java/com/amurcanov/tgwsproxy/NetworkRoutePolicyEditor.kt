@@ -30,6 +30,27 @@ object NetworkRoutePolicyEditor {
         return current.withOrderedSlots(current.displayOrder, enabledSet)
     }
 
+    /**
+     * Every route, whether enabled or disabled, occupies one visual slot.
+     * Reordering only changes those slots; the effective fallback chain is
+     * always the enabled subset in the same top-to-bottom order.
+     */
+    fun moveRoute(
+        policy: NetworkRoutePolicy,
+        fromDisplayIndex: Int,
+        toDisplayIndex: Int,
+    ): NetworkRoutePolicy {
+        val current = normalize(policy)
+        if (fromDisplayIndex !in current.displayOrder.indices ||
+            toDisplayIndex !in current.displayOrder.indices ||
+            fromDisplayIndex == toDisplayIndex
+        ) return current
+
+        val slots = current.displayOrder.toMutableList()
+        slots.add(toDisplayIndex, slots.removeAt(fromDisplayIndex))
+        return current.withOrderedSlots(slots, current.enabledRoutes)
+    }
+
     fun moveEnabledRoute(
         policy: NetworkRoutePolicy,
         fromIndex: Int,
@@ -68,9 +89,7 @@ object NetworkRoutePolicyEditor {
             fromIndex == toDisplayIndex
         ) return current
 
-        val slots = current.displayOrder.toMutableList()
-        slots.add(toDisplayIndex, slots.removeAt(fromIndex))
-        return current.withOrderedSlots(slots, current.enabledRoutes)
+        return moveRoute(current, fromIndex, toDisplayIndex)
     }
 
     /**
