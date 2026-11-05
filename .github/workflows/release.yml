@@ -189,12 +189,13 @@ jobs:
 
                   $checksumLine = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
                   $escapedApkName = [regex]::Escape($apkName)
-                  if ($checksumLine -notmatch "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$") {
+                  $checksumMatch = [regex]::Match($checksumLine, "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$")
+                  if (-not $checksumMatch.Success) {
                       throw "Published checksum file does not contain the expected SHA-256 line for $apkName."
                   }
 
                   $apkHash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()
-                  if ($Matches.hash.ToLowerInvariant() -cne $apkHash) {
+                  if ($checksumMatch.Groups['hash'].Value.ToLowerInvariant() -cne $apkHash) {
                       throw "Published APK does not match its SHA-256 checksum file."
                   }
 
@@ -319,11 +320,12 @@ jobs:
 
           $checksumLine = (Get-Content -LiteralPath $checksums[0].FullName -Raw).Trim()
           $escapedApkName = [regex]::Escape($apkName)
-          if ($checksumLine -notmatch "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$") {
+          $checksumMatch = [regex]::Match($checksumLine, "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$")
+          if (-not $checksumMatch.Success) {
               throw "Release checksum file has an invalid format."
           }
           $actualHash = (Get-FileHash -LiteralPath $apk[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($Matches.hash.ToLowerInvariant() -cne $actualHash) {
+          if ($checksumMatch.Groups['hash'].Value.ToLowerInvariant() -cne $actualHash) {
               throw "Release APK does not match its SHA-256 checksum file."
           }
 
