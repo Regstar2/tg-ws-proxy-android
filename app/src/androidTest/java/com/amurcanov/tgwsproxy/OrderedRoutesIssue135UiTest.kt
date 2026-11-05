@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
@@ -43,6 +44,50 @@ class OrderedRoutesIssue135UiTest {
             compose.onNodeWithTag("routes.row.${route.prefValue}").assertExists()
         }
         compose.onNodeWithTag("routes.diagnostics").assertDoesNotExist()
+    }
+
+    @Test fun statusCardShowsConfirmedAwgAfterTcpFallback() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=awg_warp;fallback_used=true;route_reason=connected"
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+        compose.setContent {
+            MaterialTheme {
+                ProxyConnectionMetricsCard(
+                    ui = ProxyUiMetrics(
+                        serviceStatus = ProxyServiceStatus.RUNNING,
+                        runtime = metrics,
+                    ),
+                    showMetrics = true,
+                )
+            }
+        }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.onNodeWithText(context.getString(R.string.route_policy_awg_warp)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.route_display_tcp_fallback)).assertDoesNotExist()
+    }
+
+    @Test fun statusCardDoesNotShowSelectedTcpBeforeRealConnection() {
+        val status = MtProtoNativeStatus.parse(
+            "status=LISTENING_ROUTE_READY;selected_backend=direct_tcp;" +
+                "actual_backend=none;fallback_used=false;route_reason=awaiting_connection"
+        )
+        val metrics = ProxyRuntimeMetrics.fromMtProtoStatus(status)
+        compose.setContent {
+            MaterialTheme {
+                ProxyConnectionMetricsCard(
+                    ui = ProxyUiMetrics(
+                        serviceStatus = ProxyServiceStatus.RUNNING,
+                        runtime = metrics,
+                    ),
+                    showMetrics = true,
+                )
+            }
+        }
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.onNodeWithText(context.getString(R.string.metrics_no_active_route)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.route_display_tcp_fallback)).assertDoesNotExist()
     }
 
     @Test fun wifiAndMobileTabsAreIndependent() {
