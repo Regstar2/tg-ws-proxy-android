@@ -102,11 +102,7 @@ jobs:
     timeout-minutes: 120
 
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-      KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
 
     steps:
       - name: Checkout
@@ -143,25 +139,116 @@ jobs:
               throw "Failed to checkout tag '$tag'."
           }
 
+      - name: Detect and verify existing GitHub Release
+        id: existing_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $response = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>&1
+          $queryExitCode = $LASTEXITCODE
+          $responseText = $response -join "`n"
+
+          if ($queryExitCode -eq 0) {
+              try {
+                  $release = $responseText | ConvertFrom-Json
+              }
+              catch {
+                  throw "GitHub returned invalid release metadata: $($_.Exception.Message)"
+              }
+
+              if ($release.tag_name -ne $tag -or $release.draft -or $release.prerelease) {
+                  throw "Existing release '$tag' is not the expected published stable release."
+              }
+
+              $apkName = "TgWsProxy-Android-$tag-arm64-v8a.apk"
+              $checksumName = "$apkName.sha256"
+              $expectedNames = @($apkName, $checksumName) | Sort-Object
+              $actualNames = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
+
+              if ($actualNames.Count -ne 2 -or
+                  ($actualNames -join "`n") -cne ($expectedNames -join "`n")) {
+                  throw "Existing release '$tag' must contain exactly the expected APK and SHA-256 assets."
+              }
+
+              $downloadDir = Join-Path $env:RUNNER_TEMP ("tgwsproxy-release-verify-" + [guid]::NewGuid().ToString('N'))
+              New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+              try {
+                  & gh release download $tag --dir $downloadDir
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Could not download existing release assets for '$tag'."
+                  }
+
+                  $apkPath = Join-Path $downloadDir $apkName
+                  $checksumPath = Join-Path $downloadDir $checksumName
+                  if (-not (Test-Path -LiteralPath $apkPath) -or
+                      -not (Test-Path -LiteralPath $checksumPath)) {
+                      throw "Existing release '$tag' is missing an expected asset."
+                  }
+
+                  $checksumLine = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
+                  $escapedApkName = [regex]::Escape($apkName)
+                  if ($checksumLine -notmatch "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$") {
+                      throw "Published checksum file does not contain the expected SHA-256 line for $apkName."
+                  }
+
+                  $apkHash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                  if ($Matches.hash.ToLowerInvariant() -cne $apkHash) {
+                      throw "Published APK does not match its SHA-256 checksum file."
+                  }
+
+                  $apkAsset = $release.assets | Where-Object { $_.name -eq $apkName } | Select-Object -First 1
+                  if ($apkAsset.digest -and $apkAsset.digest -cne "sha256:$apkHash") {
+                      throw "GitHub APK asset digest does not match the downloaded APK."
+                  }
+
+                  $checksumAsset = $release.assets | Where-Object { $_.name -eq $checksumName } | Select-Object -First 1
+                  $checksumAssetHash = (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                  if ($checksumAsset.digest -and $checksumAsset.digest -cne "sha256:$checksumAssetHash") {
+                      throw "GitHub checksum asset digest does not match the downloaded checksum file."
+                  }
+              }
+              finally {
+                  if (Test-Path -LiteralPath $downloadDir) {
+                      Remove-Item -LiteralPath $downloadDir -Recurse -Force
+                  }
+              }
+
+              "skip_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              Write-Host "Existing release '$tag' and both published assets passed SHA-256 verification. Build and upload will be skipped."
+          }
+          elseif ($responseText -match '(?i)(HTTP 404|Not Found|release not found)') {
+              "skip_build=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              Write-Host "No existing release found for '$tag'; a new signed release will be built."
+          }
+          else {
+              throw "Could not query existing release '$tag': $responseText"
+          }
+
       - name: Set up Java 17
+        if: steps.existing_release.outputs.skip_build != 'true'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Go
+        if: steps.existing_release.outputs.skip_build != 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: native/tgwsproxy/go.mod
-          cache-dependency-path: native/tgwsproxy/go.sum
+          # A persistent signing runner must not wait on post-job cache save.
+          cache: false
 
       - name: Set up Python
+        if: steps.existing_release.outputs.skip_build != 'true'
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Restore release signing keystore
+        if: steps.existing_release.outputs.skip_build != 'true'
         shell: pwsh
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -169,13 +256,6 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_KEYSTORE_BASE64)) {
               throw 'GitHub Actions secret RELEASE_KEYSTORE_BASE64 is not configured.'
           }
-          if ([string]::IsNullOrWhiteSpace($env:KEYSTORE_PASSWORD)) {
-              throw 'GitHub Actions secret RELEASE_KEYSTORE_PASSWORD is not configured.'
-          }
-          if ([string]::IsNullOrWhiteSpace($env:KEY_PASSWORD)) {
-              throw 'GitHub Actions secret RELEASE_KEY_PASSWORD is not configured.'
-          }
-
           $keystorePath = Join-Path $env:RUNNER_TEMP 'tgwsproxy-release.jks'
           try {
               $bytes = [Convert]::FromBase64String($env:RELEASE_KEYSTORE_BASE64)
@@ -192,6 +272,7 @@ jobs:
           Write-Host 'Release keystore restored into the hosted runner temporary directory.'
 
       - name: Prepare release output
+        if: steps.existing_release.outputs.skip_build != 'true'
         shell: pwsh
         run: |
           if (Test-Path './dist') {
@@ -201,7 +282,12 @@ jobs:
           New-Item -ItemType Directory -Path './dist' | Out-Null
 
       - name: Build release artifacts
+        if: steps.existing_release.outputs.skip_build != 'true'
         shell: pwsh
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
           if (-not (Test-Path './scripts/release.ps1')) {
               throw 'Required script scripts/release.ps1 was not found.'
@@ -210,6 +296,7 @@ jobs:
           ./scripts/release.ps1 -Version $env:RELEASE_TAG
 
       - name: Verify release artifacts
+        if: steps.existing_release.outputs.skip_build != 'true'
         shell: pwsh
         run: |
           $files = @(Get-ChildItem './dist' -File -Recurse)
@@ -220,15 +307,35 @@ jobs:
 
           $apk = @($files | Where-Object Extension -eq '.apk')
           $checksums = @($files | Where-Object Name -like '*.sha256')
-          if ($apk.Count -ne 1 -or $checksums.Count -ne 1) {
-              throw "Expected one APK and one SHA-256 file in dist/; found APK=$($apk.Count), checksum=$($checksums.Count)."
+          if ($files.Count -ne 2 -or $apk.Count -ne 1 -or $checksums.Count -ne 1) {
+              throw "Expected exactly one APK and one SHA-256 file in dist/; found files=$($files.Count), APK=$($apk.Count), checksum=$($checksums.Count)."
           }
 
+          $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-arm64-v8a.apk"
+          $checksumName = "$apkName.sha256"
+          if ($apk[0].Name -cne $apkName -or $checksums[0].Name -cne $checksumName) {
+              throw "Release artifact names do not match the expected versioned names."
+          }
+
+          $checksumLine = (Get-Content -LiteralPath $checksums[0].FullName -Raw).Trim()
+          $escapedApkName = [regex]::Escape($apkName)
+          if ($checksumLine -notmatch "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$") {
+              throw "Release checksum file has an invalid format."
+          }
+          $actualHash = (Get-FileHash -LiteralPath $apk[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($Matches.hash.ToLowerInvariant() -cne $actualHash) {
+              throw "Release APK does not match its SHA-256 checksum file."
+          }
+
+          Write-Host "Verified APK SHA-256: $actualHash"
           Write-Host 'Release artifacts:'
           $files | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Publish GitHub Release
+        if: steps.existing_release.outputs.skip_build != 'true'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) {
