@@ -7,9 +7,11 @@ import (
 	"testing"
 )
 
-func runtimeForStatusTest() (*Runtime, context.Context) {
+func runtimeForStatusTest(t *testing.T) (*Runtime, context.Context) {
+	t.Helper()
 	r := NewRuntime(nil)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	r.mu.Lock()
 	r.runCtx = ctx
 	r.mu.Unlock()
@@ -17,7 +19,7 @@ func runtimeForStatusTest() (*Runtime, context.Context) {
 }
 
 func TestMTProtoStatusKeepsConfirmedAWGAfterFailedHandshakeAndClosedTCP(t *testing.T) {
-	r, ctx := runtimeForStatusTest()
+	r, ctx := runtimeForStatusTest(t)
 	r.updateRouteTruthFor(ctx, OutboundResult{
 		RouteGeneration: 4, SelectedBackend: "direct_tcp",
 		ActualBackend: "awg_warp", FallbackUsed: true, Reason: "connected",
@@ -48,7 +50,7 @@ func TestMTProtoStatusKeepsConfirmedAWGAfterFailedHandshakeAndClosedTCP(t *testi
 }
 
 func TestMTProtoStatusNeverClaimsSelectedRouteAsActualBeforeSuccess(t *testing.T) {
-	r, ctx := runtimeForStatusTest()
+	r, ctx := runtimeForStatusTest(t)
 	r.updateRouteTruthFor(ctx, OutboundResult{
 		RouteGeneration: 3, SelectedBackend: "direct_tcp",
 		Reason: "tcp_connect_failed", Err: errors.New("tcp unavailable"),
@@ -60,7 +62,7 @@ func TestMTProtoStatusNeverClaimsSelectedRouteAsActualBeforeSuccess(t *testing.T
 }
 
 func TestMTProtoStatusIgnoresOldGenerationAfterNewBackendSucceeded(t *testing.T) {
-	r, ctx := runtimeForStatusTest()
+	r, ctx := runtimeForStatusTest(t)
 	r.updateRouteTruthFor(ctx, OutboundResult{
 		RouteGeneration: 8, SelectedBackend: "direct_tcp",
 		ActualBackend: "awg_warp", FallbackUsed: true, Reason: "connected",
@@ -83,8 +85,9 @@ func TestMTProtoStatusIgnoresOldGenerationAfterNewBackendSucceeded(t *testing.T)
 }
 
 func TestMTProtoStatusPreservesRunIsolation(t *testing.T) {
-	r, oldCtx := runtimeForStatusTest()
-	newCtx := context.Background()
+	r, oldCtx := runtimeForStatusTest(t)
+	newCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	r.mu.Lock()
 	r.runCtx = newCtx
 	r.mu.Unlock()
