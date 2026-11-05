@@ -86,12 +86,20 @@ internal fun OrderedRoutesSettings(
     var dragDistancePx by remember(selectedNetwork) { mutableFloatStateOf(0f) }
     val rowStridePx = with(LocalDensity.current) { 85.dp.toPx() }
     val dragStartIndex = policy.activeRoutes.indexOf(draggedRoute)
+    val dragStartDisplayIndex = policy.displayOrder.indexOf(draggedRoute)
     val activeSlots = policy.displayOrder.indices.filter {
         policy.displayOrder[it] in policy.enabledRoutes
     }
     val dragTargetIndex = RouteDragTarget.indexForDisplaySlots(
         dragStartIndex, policy.displayOrder, policy.activeRoutes, dragDistancePx, rowStridePx
     )
+    val dragTargetDisplayIndex = if (dragStartIndex >= 0) {
+        activeSlots.getOrNull(dragTargetIndex) ?: dragStartDisplayIndex
+    } else {
+        RouteDragTarget.index(
+            dragStartDisplayIndex, policy.displayOrder.size, dragDistancePx, rowStridePx
+        )
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -169,9 +177,17 @@ internal fun OrderedRoutesSettings(
                         )
                     }
                     val index = policy.activeRoutes.indexOf(route)
-                    val dragging = draggedRoute == route && index >= 0
+                    val dragging = draggedRoute == route && dragStartDisplayIndex >= 0
                     val shifting = when {
-                        dragStartIndex < 0 || index < 0 || dragging -> 0f
+                        dragStartDisplayIndex < 0 || dragging -> 0f
+                        dragStartIndex < 0 -> when {
+                            position > dragStartDisplayIndex &&
+                                position <= dragTargetDisplayIndex -> -rowStridePx
+                            position >= dragTargetDisplayIndex &&
+                                position < dragStartDisplayIndex -> rowStridePx
+                            else -> 0f
+                        }
+                        index < 0 -> 0f
                         dragTargetIndex > dragStartIndex &&
                             index > dragStartIndex && index <= dragTargetIndex ->
                             (activeSlots[index - 1] - activeSlots[index]) * rowStridePx
@@ -217,24 +233,42 @@ internal fun OrderedRoutesSettings(
                             },
                             onDragBy = { delta ->
                                 if (draggedRoute == route) {
-                                    val sourceSlot = activeSlots[index]
-                                    val minimum = (activeSlots.first() - sourceSlot) * rowStridePx
-                                    val maximum = (activeSlots.last() - sourceSlot) * rowStridePx
+                                    val minimum = if (index >= 0) {
+                                        (activeSlots.first() - activeSlots[index]) * rowStridePx
+                                    } else {
+                                        -position * rowStridePx
+                                    }
+                                    val maximum = if (index >= 0) {
+                                        (activeSlots.last() - activeSlots[index]) * rowStridePx
+                                    } else {
+                                        (policy.displayOrder.lastIndex - position) * rowStridePx
+                                    }
                                     dragDistancePx = (dragDistancePx + delta).coerceIn(minimum, maximum)
                                 }
                             },
                             onDragEnd = {
                                 if (draggedRoute == route) {
-                                    val target = RouteDragTarget.indexForDisplaySlots(
-                                        index, policy.displayOrder, policy.activeRoutes,
-                                        dragDistancePx, rowStridePx
-                                    )
+                                    val updated = if (index >= 0) {
+                                        val target = RouteDragTarget.indexForDisplaySlots(
+                                            index, policy.displayOrder, policy.activeRoutes,
+                                            dragDistancePx, rowStridePx
+                                        )
+                                        NetworkRoutePolicyEditor.moveEnabledRoute(
+                                            policy, index, target
+                                        )
+                                    } else {
+                                        val target = RouteDragTarget.index(
+                                            position, policy.displayOrder.size,
+                                            dragDistancePx, rowStridePx
+                                        )
+                                        NetworkRoutePolicyEditor.moveInactiveRoute(
+                                            policy, route, target
+                                        )
+                                    }
                                     draggedRoute = null
                                     dragDistancePx = 0f
-                                    if (target != index) {
-                                        onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                                            policy, index, target
-                                        ))
+                                    if (updated.displayOrder != policy.displayOrder) {
+                                        onPolicyChange(updated)
                                     }
                                 }
                             },
@@ -361,33 +395,29 @@ private fun RoutePriorityRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // The grip remains the only draggable surface; it never reorders inactive routes.
+        // The grip reorders both enabled and disabled rows without toggling either.
         Box(
             modifier = Modifier
                 .width(28.dp)
                 .heightIn(min = 84.dp)
                 .semantics { contentDescription = dragLabel }
                 .testTag("routes.drag.${route.prefValue}")
-                .then(
-                    if (enabled) Modifier.pointerInput(route) {
-                        detectDragGestures(
-                            onDragStart = { currentStart() },
-                            onDragEnd = { currentEnd() },
-                            onDragCancel = { currentCancel() },
-                        ) { change, delta ->
-                            change.consume()
-                            currentDrag(delta.y)
-                        }
-                    } else Modifier
-                ),
+                .pointerInput(route) {
+                    detectDragGestures(
+                        onDragStart = { currentStart() },
+                        onDragEnd = { currentEnd() },
+                        onDragCancel = { currentCancel() },
+                    ) { change, delta ->
+                        change.consume()
+                        currentDrag(delta.y)
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Default.DragIndicator,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                    alpha = if (enabled) 0.8f else 0.35f
-                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 modifier = Modifier.size(20.dp),
             )
         }
