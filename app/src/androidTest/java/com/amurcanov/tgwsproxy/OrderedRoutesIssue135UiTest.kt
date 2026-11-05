@@ -78,6 +78,54 @@ class OrderedRoutesIssue135UiTest {
         assertChain(RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK, RouteKind.CF_PROXY_WS)
     }
 
+    @Test fun inactiveGripCanMoveBelowActiveRoutesWithoutEnabling() {
+        render()
+        val density = InstrumentationRegistry.getInstrumentation()
+            .targetContext.resources.displayMetrics.density
+        val before = compose.onNodeWithTag("routes.row.awg_warp")
+            .fetchSemanticsNode().boundsInRoot.top
+
+        compose.onNodeWithTag("routes.drag.awg_warp").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 85f * density * 3.2f))
+            up()
+        }
+        compose.waitForIdle()
+
+        val after = compose.onNodeWithTag("routes.row.awg_warp")
+            .fetchSemanticsNode().boundsInRoot.top
+        org.junit.Assert.assertTrue(after > before + 2f * 85f * density)
+        compose.onNodeWithTag("routes.toggle.awg_warp").assertIsOff()
+        assertCount(3)
+        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+
+        compose.onNodeWithTag("routes.toggle.awg_warp").performScrollTo().performClick()
+        assertCount(4)
+        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS,
+            RouteKind.TCP_FALLBACK, RouteKind.AWG_WARP)
+    }
+
+    @Test fun inactiveGripCanMoveToFirstSlotAndSetFuturePriority() {
+        render()
+        val density = InstrumentationRegistry.getInstrumentation()
+            .targetContext.resources.displayMetrics.density
+        compose.onNodeWithTag("routes.drag.worker_ws").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -85f * density * 2.2f))
+            up()
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("routes.toggle.worker_ws").assertIsOff()
+        assertCount(3)
+        assertChain(RouteKind.CF_PROXY_WS, RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+
+        compose.onNodeWithTag("routes.toggle.worker_ws").performClick()
+        assertCount(4)
+        assertChain(RouteKind.WORKER_WS, RouteKind.CF_PROXY_WS,
+            RouteKind.DIRECT_WS, RouteKind.TCP_FALLBACK)
+    }
+
     @Test fun arrowsUpdateChainWithoutApplyButton() {
         render()
         compose.onNodeWithTag("routes.down.cf_proxy_ws").performClick()
