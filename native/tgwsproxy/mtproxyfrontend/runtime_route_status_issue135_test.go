@@ -3,6 +3,7 @@ package mtproxyfrontend
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,42 @@ func TestMTProtoStatusIgnoresOldGenerationAfterNewBackendSucceeded(t *testing.T)
 	})
 	if got := r.Status(); got.ActualBackend != "cf_proxy_ws" || got.FallbackUsed {
 		t.Fatalf("newer confirmed route was not displayed: %+v", got)
+	}
+}
+
+type issue135MutableCapabilityConnector struct {
+	selected string
+}
+
+func (c *issue135MutableCapabilityConnector) Capability() OutboundCapability {
+	return OutboundCapability{Status: "READY", SelectedBackend: c.selected}
+}
+
+func (c *issue135MutableCapabilityConnector) Connect(
+	context.Context, OutboundRequest,
+) (net.Conn, OutboundResult) {
+	return nil, OutboundResult{Reason: "not_used"}
+}
+
+func TestMTProtoStatusSelectedTracksHotPolicyWithoutRewritingActual(t *testing.T) {
+	connector := &issue135MutableCapabilityConnector{selected: "direct_tcp"}
+	r := NewRuntime(nil, connector)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.mu.Lock()
+	r.runCtx = ctx
+	r.status = StatusListeningRouteReady
+	r.mu.Unlock()
+
+	r.updateRouteTruthFor(ctx, OutboundResult{
+		SelectedBackend: "direct_tcp", ActualBackend: "awg_warp",
+		RouteGeneration: 4, FallbackUsed: true, Reason: "connected",
+	})
+	connector.selected = "cf_proxy_ws" // a hot policy update, before new sessions
+	got := r.Status()
+	if got.SelectedBackend != "cf_proxy_ws" || got.ActualBackend != "awg_warp" ||
+		!got.FallbackUsed {
+		t.Fatalf("selected and actual must stay independent: %+v", got)
 	}
 }
 
