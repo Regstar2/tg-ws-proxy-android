@@ -633,6 +633,9 @@ class ProxyService : Service() {
                     lastBytesAtMs = now
                 }
                 val (downBps, upBps) = speedSampler.sample(runtime.bytesDown, runtime.bytesUp)
+                val previousRoute = ProxyRuntimeState.uiMetrics.value.runtime.currentRouteKind
+                val confirmedRouteChanged = runtime.currentRouteKind.isNotBlank() &&
+                    runtime.currentRouteKind != previousRoute
                 ProxyRuntimeState.update {
                     it.copy(
                         runtime = runtime,
@@ -645,7 +648,9 @@ class ProxyService : Service() {
                     )
                 }
                 launch(Dispatchers.Main) {
-                    updateNotification()
+                    // Show a newly connected backend promptly; regular speed/status
+                    // refreshes remain throttled by ProxyNotificationUpdateGate.
+                    updateNotification(force = confirmedRouteChanged)
                 }
             }
         }
