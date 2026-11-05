@@ -25,7 +25,7 @@ internal class ForegroundComposeHostRule : TestRule {
                 ).bufferedReader().use { it.readText() }
 
                 Log.i("Issue135UiTest", "foreground Compose host: $output")
-                if (output.contains("Error:", ignoreCase = true) ||
+                if (output.contains("Error", ignoreCase = true) ||
                     output.contains("SecurityException", ignoreCase = true) ||
                     output.contains("Exception occurred", ignoreCase = true)
                 ) {
