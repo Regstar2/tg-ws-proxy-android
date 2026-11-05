@@ -78,21 +78,9 @@ try {
 
         Write-Host "[$($Index + 1)/$($Tests.Count)] START $Test"
         try {
-            if ($Test -like "*OrderedRoutesIssue135UiTest#*") {
-                # MIUI 14 can deny ActivityScenario's in-process ComponentActivity
-                # launch while the application is in the background.
-                # Foreground the existing launcher Activity from the ADB shell
-                # before instrumentation. This never clears app data.
-                $ForegroundLog = Join-Path $RunDir "$BaseName.foreground.txt"
-                $ForegroundResult = @(& $Adb -s $Serial shell am start -n `
-                    "$AppId/com.amurcanov.tgwsproxy.MainActivity" 2>&1)
-                $ForegroundExit = $LASTEXITCODE
-                $ForegroundResult | Out-File -LiteralPath $ForegroundLog -Encoding UTF8
-                if ($ForegroundExit -ne 0) {
-                    throw "Unable to foreground target app before Compose instrumentation"
-                }
-                Start-Sleep -Milliseconds 800
-            }
+            # The Compose test itself launches its debug host via UiAutomation
+            # after instrumentation has started. Pre-launching MainActivity
+            # here only causes Android to kill the foreground task on MIUI.
             $Args = @("-s", $Serial, "shell", "am", "instrument", "-w", "-r",
                 "-e", "class", $Test, $Runner)
             $Process = Start-Process -FilePath $Adb -ArgumentList $Args `
