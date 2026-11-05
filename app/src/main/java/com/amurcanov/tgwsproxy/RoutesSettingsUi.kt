@@ -94,7 +94,6 @@ fun RoutesSettingsScreen(
                 reconfigureStatus = reconfigureStatus,
                 workerConfigured = workerConfigured,
                 awgConfigured = awgConfigured,
-                onOpenDiagnostics = { onPageChange(RoutesSettingsPage.ADVANCED) },
             )
         }
         RoutesSettingsPage.ADVANCED -> {
