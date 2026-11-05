@@ -84,21 +84,10 @@ internal fun OrderedRoutesSettings(
     var draggedRoute by remember(selectedNetwork) { mutableStateOf<RouteKind?>(null) }
     var dragDistancePx by remember(selectedNetwork) { mutableFloatStateOf(0f) }
     val rowStridePx = with(LocalDensity.current) { 85.dp.toPx() }
-    val dragStartIndex = policy.activeRoutes.indexOf(draggedRoute)
     val dragStartDisplayIndex = policy.displayOrder.indexOf(draggedRoute)
-    val activeSlots = policy.displayOrder.indices.filter {
-        policy.displayOrder[it] in policy.enabledRoutes
-    }
-    val dragTargetIndex = RouteDragTarget.indexForDisplaySlots(
-        dragStartIndex, policy.displayOrder, policy.activeRoutes, dragDistancePx, rowStridePx
+    val dragTargetDisplayIndex = RouteDragTarget.index(
+        dragStartDisplayIndex, policy.displayOrder.size, dragDistancePx, rowStridePx
     )
-    val dragTargetDisplayIndex = if (dragStartIndex >= 0) {
-        activeSlots.getOrNull(dragTargetIndex) ?: dragStartDisplayIndex
-    } else {
-        RouteDragTarget.index(
-            dragStartDisplayIndex, policy.displayOrder.size, dragDistancePx, rowStridePx
-        )
-    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -179,20 +168,10 @@ internal fun OrderedRoutesSettings(
                     val dragging = draggedRoute == route && dragStartDisplayIndex >= 0
                     val shifting = when {
                         dragStartDisplayIndex < 0 || dragging -> 0f
-                        dragStartIndex < 0 -> when {
-                            position > dragStartDisplayIndex &&
-                                position <= dragTargetDisplayIndex -> -rowStridePx
-                            position >= dragTargetDisplayIndex &&
-                                position < dragStartDisplayIndex -> rowStridePx
-                            else -> 0f
-                        }
-                        index < 0 -> 0f
-                        dragTargetIndex > dragStartIndex &&
-                            index > dragStartIndex && index <= dragTargetIndex ->
-                            (activeSlots[index - 1] - activeSlots[index]) * rowStridePx
-                        dragTargetIndex < dragStartIndex &&
-                            index >= dragTargetIndex && index < dragStartIndex ->
-                            (activeSlots[index + 1] - activeSlots[index]) * rowStridePx
+                        position > dragStartDisplayIndex &&
+                            position <= dragTargetDisplayIndex -> -rowStridePx
+                        position >= dragTargetDisplayIndex &&
+                            position < dragStartDisplayIndex -> rowStridePx
                         else -> 0f
                     }
                     val animatedShift by animateFloatAsState(
@@ -220,6 +199,8 @@ internal fun OrderedRoutesSettings(
                             route = route,
                             activeIndex = index,
                             activeCount = policy.activeRoutes.size,
+                            displayIndex = position,
+                            displayCount = policy.displayOrder.size,
                             policy = policy,
                             configurationRequired = (route == RouteKind.WORKER_WS && !workerConfigured) ||
                                 (route == RouteKind.AWG_WARP && !awgConfigured),
@@ -232,38 +213,20 @@ internal fun OrderedRoutesSettings(
                             },
                             onDragBy = { delta ->
                                 if (draggedRoute == route) {
-                                    val minimum = if (index >= 0) {
-                                        (activeSlots.first() - activeSlots[index]) * rowStridePx
-                                    } else {
-                                        -position * rowStridePx
-                                    }
-                                    val maximum = if (index >= 0) {
-                                        (activeSlots.last() - activeSlots[index]) * rowStridePx
-                                    } else {
-                                        (policy.displayOrder.lastIndex - position) * rowStridePx
-                                    }
+                                    val minimum = -position * rowStridePx
+                                    val maximum = (policy.displayOrder.lastIndex - position) * rowStridePx
                                     dragDistancePx = (dragDistancePx + delta).coerceIn(minimum, maximum)
                                 }
                             },
                             onDragEnd = {
                                 if (draggedRoute == route) {
-                                    val updated = if (index >= 0) {
-                                        val target = RouteDragTarget.indexForDisplaySlots(
-                                            index, policy.displayOrder, policy.activeRoutes,
-                                            dragDistancePx, rowStridePx
-                                        )
-                                        NetworkRoutePolicyEditor.moveEnabledRoute(
-                                            policy, index, target
-                                        )
-                                    } else {
-                                        val target = RouteDragTarget.index(
-                                            position, policy.displayOrder.size,
-                                            dragDistancePx, rowStridePx
-                                        )
-                                        NetworkRoutePolicyEditor.moveInactiveRoute(
-                                            policy, route, target
-                                        )
-                                    }
+                                    val target = RouteDragTarget.index(
+                                        position, policy.displayOrder.size,
+                                        dragDistancePx, rowStridePx
+                                    )
+                                    val updated = NetworkRoutePolicyEditor.moveRoute(
+                                        policy, position, target
+                                    )
                                     draggedRoute = null
                                     dragDistancePx = 0f
                                     if (updated.displayOrder != policy.displayOrder) {
@@ -358,6 +321,8 @@ private fun RoutePriorityRow(
     route: RouteKind,
     activeIndex: Int,
     activeCount: Int,
+    displayIndex: Int,
+    displayCount: Int,
     policy: NetworkRoutePolicy,
     configurationRequired: Boolean,
     workerConfigured: Boolean,
@@ -456,11 +421,11 @@ private fun RoutePriorityRow(
         ) {
             IconButton(
                 onClick = {
-                    onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                        policy, activeIndex, activeIndex - 1
+                    onPolicyChange(NetworkRoutePolicyEditor.moveRoute(
+                        policy, displayIndex, displayIndex - 1
                     ))
                 },
-                enabled = enabled && activeIndex > 0,
+                enabled = displayIndex > 0,
                 modifier = Modifier.size(40.dp)
                     .semantics { contentDescription = upLabel }
                     .testTag("routes.up.${route.prefValue}"),
@@ -473,11 +438,11 @@ private fun RoutePriorityRow(
             }
             IconButton(
                 onClick = {
-                    onPolicyChange(NetworkRoutePolicyEditor.moveEnabledRoute(
-                        policy, activeIndex, activeIndex + 1
+                    onPolicyChange(NetworkRoutePolicyEditor.moveRoute(
+                        policy, displayIndex, displayIndex + 1
                     ))
                 },
-                enabled = enabled && activeIndex < activeCount - 1,
+                enabled = displayIndex < displayCount - 1,
                 modifier = Modifier.size(40.dp)
                     .semantics { contentDescription = downLabel }
                     .testTag("routes.down.${route.prefValue}"),
