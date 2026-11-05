@@ -62,6 +62,10 @@ class ProxyService : Service() {
         )
         private val LEGACY_NOTIFICATION_IDS = listOf(1, 2)
 
+        // UI route truth should follow native MTProto connections within one second.
+        // NotificationUpdateGate independently limits SystemUI updates to 3 seconds.
+        private const val METRICS_POLL_INTERVAL_MS = 750L
+
         private const val PREFS = PROXY_PREFS_NAME
         private const val KEY_NOTIFICATION_CHANNELS_MIGRATED = "notification_channels_v3_migrated"
 
@@ -586,9 +590,7 @@ class ProxyService : Service() {
             var lastBytesDown: Long? = null
             var lastBytesAtMs: Long? = null
             while (isActive && _isRunning.value) {
-                val prefs = NotificationPreferences.load(this@ProxyService)
-                val interval = if (prefs.displayMode == NotificationDisplayMode.MINIMAL) 3000L else 2000L
-                delay(interval)
+                delay(METRICS_POLL_INTERVAL_MS)
                 if (!_isRunning.value) {
                     continue
                 }
