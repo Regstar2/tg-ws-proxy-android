@@ -75,7 +75,11 @@ data class ProxyRuntimeMetrics(
                     selectedRoute = selectedRoute,
                     activeRoute = activeRoute,
                     lastSuccessfulRoute = if (activeRoute.isNotBlank()) activeRoute else "",
-                    fallbackReason = if (status.fallbackUsed) status.routeReason.noneAsBlank() else "",
+                    // "connected" is a success marker, not a failure reason.
+                    fallbackReason = status.routeReason.noneAsBlank().takeIf {
+                        status.fallbackUsed && activeRoute.isNotBlank() &&
+                            it != "connected" && it != "connection_closed"
+                    }.orEmpty(),
                     lastUpdatedAtMs = System.currentTimeMillis(),
                 ),
             )
