@@ -1,3 +1,14 @@
+## Archive 2026-11-05 11:21 — ложная классификация PASS как FAIL
+
+Проверен пользовательский `ui-tests-20261105-112148.zip`. Первый самостоятельный тест `InstrumentationBootstrapIssue135Test#runnerCanAccessTargetPackage` **прошёл на телефоне**, а проверочный сценарий ошибочно пометил его `FAIL` и остановил весь набор:
+
+- `01-runnerCanAccessTargetPackage.out.txt` содержит `INSTRUMENTATION_STATUS_CODE: 0`, `OK (1 test)`, `INSTRUMENTATION_CODE: -1`. Это полноценные маркеры PASS.
+- `results.csv` содержит `Status=FAIL`, при этом колонка `ExitCode` пуста. `Start-Process` не отдал код выхода дочернего `adb`, поэтому выражение `$ExitCode -eq 0` давало ложный отказ.
+- В `android-logcat.txt` в 11:21:35.575 есть `TestRunner: started`, в 11:21:35.580 — `TestRunner: finished`. Отказа MIUI в запуске Activity в **этом** прогоне нет, потому что Compose-тесты не запускались.
+- Исправлена классификация: известный ненулевой exit code остаётся FAIL, неизвестный код допускается только при одном успешном тесте, единственном финальном `INSTRUMENTATION_CODE: -1` и отсутствии признаков сбоя/краша. Поведение вынесено в `scripts/issue-135-instrumentation-status.ps1` и проверяется автономными PowerShell-регрессиями в `scripts/tests/issue-135-instrumentation-status-test.ps1`.
+- Повторная установка APK для проверки не требуется, если пакет приложения и тестовый пакет уже установлены с последней сборки. Достаточно выполнить обновлённый `scripts/issue-135-run-ui-tests.ps1` и передать новый ZIP.
+- До реального прогона восьми Compose-тестов статус UI acceptance — **BLOCKED/NOT_RUN**, а не PASS.
+
 ## Архив с Xiaomi: подтверждённая блокировка запуска Activity (2026-11-04)
 
 Из полученного `automated-tests-20261104-214712.zip`:
