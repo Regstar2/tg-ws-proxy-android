@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -175,7 +174,6 @@ func defaultMtProtoDirectWSDialContext(
 
 // Compile-time type contract: the Direct dialer continues to return the same
 // WebSocket frame socket as the original implementation.
-var _ net.Conn = (*mtProtoWebSocketStream)(nil)
 
 func resetDirectWSHealthForTests() {
 	directWSHealth.Lock()

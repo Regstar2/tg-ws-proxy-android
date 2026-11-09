@@ -208,3 +208,37 @@ func TestDirectWSConnectorCancellationStopsDial(t *testing.T) {
 		t.Fatal("direct dial did not respond to cancellation")
 	}
 }
+
+func TestDirectWSAlternativeAvailableWhenLegacyPrimaryCooling(t *testing.T) {
+	resetDirectWSHealthForTests()
+	clearDirectIPCooldowns()
+	t.Cleanup(resetDirectWSHealthForTests)
+	t.Cleanup(clearDirectIPCooldowns)
+	withRuntimeSettings(t, func(settings runtimeSettings) runtimeSettings {
+		settings.Mode = modeDirectWithFallback
+		settings.PolicyPresent = false
+		return settings
+	})
+	markDirectIPTimeout("149.154.167.51", monoNow())
+
+	sock := &fakeMtProtoFrameSocket{}
+	var target string
+	connector := newMtProtoDirectWSConnector()
+	connector.resolveTarget = func(int) (string, int, bool) {
+		return "149.154.167.51", 443, true
+	}
+	connector.dialContext = func(ctx context.Context, ip, domain, path string, timeout float64) (mtProtoFrameSocket, error) {
+		target = ip
+		return sock, nil
+	}
+	conn, result := connector.Connect(context.Background(), mtproxyfrontend.OutboundRequest{
+		DCID: 2, RelayInit: buildTestInitWithSignedDC(t, 2),
+	})
+	if result.Err != nil || conn == nil {
+		t.Fatalf("alternate connection failed: %+v", result)
+	}
+	defer conn.Close()
+	if target != "149.154.167.220" {
+		t.Fatalf("expected alternate target after primary cooldown: %s", target)
+	}
+}
