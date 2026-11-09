@@ -104,6 +104,35 @@ if ($uiTestSource -notmatch 'WaitForExit\(' -or
     throw "Issue #135 UI test runner lacks watchdog/ZIP or calls forbidden destructive commands"
 }
 
+# Issue #127 uses a debug-only, permission-protected device fixture.
+# Host CI must reject destructive commands and missing automation files, without
+# trying to access a persistent USB device from the build runner.
+$issue127Script = Join-Path $PSScriptRoot 'issue-127-direct-wifi-ab.ps1'
+$issue127Receiver = Join-Path $root 'app/src/debug/java/com/amurcanov/tgwsproxy/Issue127DirectSmokeReceiver.kt'
+$issue127Manifest = Join-Path $root 'app/src/debug/AndroidManifest.xml'
+foreach ($path in @($issue127Script, $issue127Receiver, $issue127Manifest)) {
+    if (-not (Test-Path -LiteralPath $path)) { throw "Issue #127 fixture missing: $path" }
+}
+$issue127Tokens = $null
+$issue127Errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $issue127Script, [ref]$issue127Tokens, [ref]$issue127Errors
+) | Out-Null
+if ($issue127Errors) { throw "Issue #127 A/B script syntax error: $($issue127Errors -join '; ')" }
+$issue127Source = Get-Content -LiteralPath $issue127Script -Raw
+$issue127ReceiverSource = Get-Content -LiteralPath $issue127Receiver -Raw
+$issue127ManifestSource = Get-Content -LiteralPath $issue127Manifest -Raw
+if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
+    $issue127Source -notmatch 'ISSUE127_DIRECT_RESTORE' -or
+    $issue127Source -notmatch 'actual_backend=direct_ws' -or
+    $issue127Source -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)' -or
+    $issue127ReceiverSource -notmatch 'route_policy_wifi_v2' -or
+    $issue127ReceiverSource -notmatch 'snapshot_exists' -or
+    $issue127ManifestSource -notmatch 'Issue127DirectSmokeReceiver' -or
+    $issue127ManifestSource -notmatch 'android:permission="android.permission.DUMP"') {
+    throw "Issue #127 safety, restore or real Direct-backend acceptance preflight failed"
+}
+
 # The live route smoke script runs on persistent devices; CI checks its syntax
 # and enforces the bounded PID wait and actual-backend evidence without ADB.
 $routeSmokeScript = Join-Path $PSScriptRoot 'issue-135-route-switch-smoke.ps1'
