@@ -17,7 +17,7 @@ $stages = @(
     @{ Name = 'ws_connect_other_failure'; Pattern = 'direct_ws WS connect failed' },
     @{ Name = 'tls_certificate_related'; Pattern = 'direct_ws .*certificate' },
     @{ Name = 'split_two_writes'; Pattern = 'ClientHello tcp_split performed two writes' },
-    @{ Name = 'route_attempt'; Pattern = 'MTProto route attempt .*attempt_backend=direct_ws' },
+    @{ Name = 'route_attempt'; Pattern = 'MTProto route truth .*attempt_backend=direct_ws' },
     @{ Name = 'route_connected'; Pattern = 'MTProto route connected .*actual_backend=direct_ws' },
     @{ Name = 'bridge_closed'; Pattern = 'MTProto bridge closed .*actual_backend=direct_ws' },
     @{ Name = 'local_handshake_rejected'; Pattern = 'MTProto route rejected .*reason=handshake_failed' },
