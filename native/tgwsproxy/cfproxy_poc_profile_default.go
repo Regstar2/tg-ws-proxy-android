@@ -3,4 +3,4 @@
 package main
 
 // The shipped application always uses the unchanged production TLS profile.
-var cfProxyPoCProfile = cfClientHelloPoCProfile{}
+var webSocketClientHelloPoCProfile = cfClientHelloPoCProfile{}
