@@ -67,7 +67,7 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                         EffectiveRoutePolicyResolver(
                             NetworkRoutePolicyRepository(prefs),
                             prefs,
-                        ).resolve(NetworkProfile(NetworkProfileType.WIFI, "", false))
+                        ).resolve(NetworkProfileProvider.current(context))
                             .policy.activeRoutes == listOf(RouteKind.DIRECT_WS)
                     ) { "direct_ws-only policy was not applied" }
                     setResultCode(RESULT_OK)
