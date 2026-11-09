@@ -141,6 +141,11 @@ func defaultMtProtoDirectWSDial(targetIP, domain, path string, timeout float64) 
 	dial := func(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
 		return wsConnectWithCurvesContextDialProfile(context.Background(), ip, domain, path, timeout, nil, nil, webSocketClientHelloPoCProfile)
 	}
+	return mtProtoDirectWSConnectWithDial(targetIP, domain, path, timeout, dial)
+}
+
+// Keep the direct route's existing fallback decision independently testable.
+func mtProtoDirectWSConnectWithDial(targetIP, domain, path string, timeout float64, dial func(string, string, string, float64) (*RawWebSocket, error)) (mtProtoFrameSocket, error) {
 	ws, err := dial(targetIP, domain, path, timeout)
 	if err == nil {
 		return ws, nil
