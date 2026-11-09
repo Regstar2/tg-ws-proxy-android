@@ -719,6 +719,12 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 	return wsConnectWithCurves(ip, domain, path, timeout, nil)
 }
 
+// wsConnectDirectWS uses the explicit ClientHello PoC profile only for
+// direct_ws, including connections created by the legacy WebSocket pool.
+func wsConnectDirectWS(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
+	return wsConnectWithCurvesContextDialProfile(context.Background(), ip, domain, path, timeout, nil, nil, webSocketClientHelloPoCProfile)
+}
+
 type compatibleWebSocketTLSDialer struct {
 	defaultAttempted bool
 	ctx              context.Context
@@ -1553,12 +1559,12 @@ func (p *WsPool) rotate(key [2]int, targetIP string, domains []string) {
 
 func connectOneWS(targetIP string, domains []string) *RawWebSocket {
 	for _, domain := range domains {
-		ws, err := wsConnect(targetIP, domain, "/apiws", 8)
+		ws, err := wsConnectDirectWS(targetIP, domain, "/apiws", 8)
 		if err != nil {
 			if shouldTryDomainDial(err) {
 				logDebug.Printf("WS pool connect retry via DNS for %s after pinned endpoint %s",
 					domain, targetIP)
-				ws, usedIP, resolved, fallbackErr := wsConnectViaResolvedDomain(domain, "/apiws", 8)
+				ws, usedIP, resolved, fallbackErr := wsConnectViaResolvedDomainWithDial(domain, "/apiws", 8, wsConnectDirectWS)
 				if fallbackErr == nil {
 					logDebug.Printf("WS pool connect via DNS succeeded for %s -> %s (%s)",
 						domain, usedIP, resolved.String())
@@ -2763,12 +2769,12 @@ func handleClient(ctx context.Context, conn net.Conn) {
 
 			var connErr error
 			attemptTarget := target
-			ws, connErr = wsConnect(target, domain, "/apiws", wsTimeout)
+			ws, connErr = wsConnectDirectWS(target, domain, "/apiws", wsTimeout)
 			if connErr != nil && shouldTryDomainDial(connErr) {
 				logInfo.Printf("[%s] DC%d%s retry via DNS for %s after pinned endpoint %s",
 					label, dc, mTag, domain, target)
 				var resolved resolvedIPs
-				ws, attemptTarget, resolved, connErr = wsConnectViaResolvedDomain(domain, "/apiws", wsTimeout)
+				ws, attemptTarget, resolved, connErr = wsConnectViaResolvedDomainWithDial(domain, "/apiws", wsTimeout, wsConnectDirectWS)
 				if connErr == nil {
 					logInfo.Printf("[%s] DC%d%s domain-dial success for %s via %s (%s)",
 						label, dc, mTag, domain, attemptTarget, resolved.String())
