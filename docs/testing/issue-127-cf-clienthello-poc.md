@@ -52,6 +52,16 @@ A successful debug message `WebSocket PoC: ClientHello tcp_split performed two w
 - Regression tests cover direct_ws primary target success, DNS-fallback reuse of the same dial/profile, and no DNS fallback on TLS handshake errors. The direct-only legacy WebSocket pool/warmup shares the profile. Routing does not alter `direct_tcp` or Worker.
 - CI runs the normal Go race suite plus builds/tests both explicitly tagged PoC variants. Windows `scripts/ci.ps1` and Android debug compilation are required for this branch. **Never mark PASS before workflow results.**
 
+### Automated Wi-Fi direct_ws device preflight and A/B
+
+The repo now contains `scripts/issue-127-direct-wifi-ab.ps1`, which performs the first **automated, non-interactive** Direct-only Wi-Fi device investigation using the same production signing key and the dedicated debug-only `Issue127DirectSmokeReceiver` (ADB shell permission `android.permission.DUMP`). Unlike the earlier ad hoc PowerShell command, the device fixture configures `route_policy_wifi_v2` itself and verifies that the effective policy is `[direct_ws]`.
+
+The script validates one authorized Android device and Wi-Fi; requires an already installed original-signed app and the existing Telegram package/proxy account configuration; builds and safely installs the `baseline` APK and then `tcp_split` (no uninstall or `pm clear`); starts the existing MTProto frontend using saved preferences and the current network's runtime configuration; launches/restarts Telegram a bounded number of times per profile; captures separate private logs; extracts real `actual_backend=direct_ws` bridge close and nonzero uplink/downlink evidence. On success, failure or interruption it attempts to restore the user's original Wi-Fi route policy and last runtime preferences from a persisted debug backup. If restore fails, rerun the script with `-RestoreOnly` on the existing debug APK, inspect the diagnostics, and do **not** uninstall the app.
+
+This automation does **not** guarantee Telegram sends new messages, downloads media, or exercises all DCs simply because it was launched. `DIRECT_DUPLEX_OBSERVED` reports only native bidirectional bytes, not delivered messages/media or a GO decision. Absent session evidence is `INCONCLUSIVE`; it is not automatically a route failure. Packet segmentation remains `NOT_VERIFIED`. Reports and full logs remain local under `artifacts/issue127`. Avoid publishing logs with personal IPs/DCs/tokens.
+
+The previous user device attempt on 2026-11-09 successfully built and installed `baseline`, then stopped before any connection tests because the original script required Wi-Fi to **already** have only `direct_ws` enabled. The new script removes that prerequisite; this is not yet a passed device test. The script also checks the saved MTProto frontend before startup. The user's last configuration must point Telegram to the correct local proxy.
+
 ### Physical A/B test, still required
 
 1. Use one network on which `cf_proxy_ws` and/or `direct_ws` genuinely fails. If a route currently works reliably, label its result **INCONCLUSIVE**, not GO. Preserve network conditions; no DNS overrides, switching networks, changing route policies or changing active endpoint lists mid-series.
