@@ -125,9 +125,14 @@ $issue127ManifestSource = Get-Content -LiteralPath $issue127Manifest -Raw
 if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
     $issue127Source -notmatch 'Invoke-Issue127Action -Name "RESTORE"' -or
     $issue127Source -notmatch 'actual_backend=direct_ws' -or
+    $issue127Source -notmatch 'Invoke-Issue127Action -Name "PROBE"' -or
+    $issue127Source -notmatch '"logcat", "-T", "1"' -or
+    $issue127Source -notmatch 'nativeInboundConnections' -or
     $issue127Source -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)' -or
     $issue127ReceiverSource -notmatch 'route_policy_wifi_v2' -or
     $issue127ReceiverSource -notmatch 'snapshot_exists' -or
+    $issue127ReceiverSource -notmatch 'ACTION_STATUS' -or
+    $issue127ReceiverSource -notmatch 'ACTION_PROBE' -or
     $issue127ManifestSource -notmatch 'Issue127DirectSmokeReceiver' -or
     $issue127ManifestSource -notmatch 'android:permission="android.permission.DUMP"') {
     throw "Issue #127 safety, restore or real Direct-backend acceptance preflight failed"
