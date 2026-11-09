@@ -136,12 +136,9 @@ func (c *mtProtoDirectWSConnector) Connect(
 }
 
 func defaultMtProtoDirectWSDial(targetIP, domain, path string, timeout float64) (mtProtoFrameSocket, error) {
-	// Both the fixed target-IP attempt and DNS fallback must use the same
-	// build-selected A/B profile. Production (zero-value) behavior is unchanged.
-	dial := func(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
-		return wsConnectWithCurvesContextDialProfile(context.Background(), ip, domain, path, timeout, nil, nil, webSocketClientHelloPoCProfile)
-	}
-	return mtProtoDirectWSConnectWithDial(targetIP, domain, path, timeout, dial)
+	// Both fixed target-IP and DNS-fallback attempts share the legacy direct
+	// WS path's build-selected profile; the zero value preserves production.
+	return mtProtoDirectWSConnectWithDial(targetIP, domain, path, timeout, wsConnectDirectWS)
 }
 
 // Keep the direct route's existing fallback decision independently testable.
