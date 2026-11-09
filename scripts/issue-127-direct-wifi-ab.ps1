@@ -1,12 +1,11 @@
-# Issue #127: fully scripted Wi-Fi Direct WS baseline/tcp_split device A/B.
-# Debug-only receiver backs up/restores the original Wi-Fi policy and runtime
-# preferences. No root, VPN, data reset, APK uninstall, UI taps or Docker.
+# Issue #127: bounded Direct WS Wi-Fi smoke. No CF/TLS ClientHello experiments.
+# Debug-only receiver backs up/restores Wi-Fi settings. Never restarts Telegram
+# or uninstalls/clears application data.
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 10)][int]$AttemptsPerProfile = 3,
-    [ValidateRange(10, 120)][int]$AttemptSeconds = 25,
+    [ValidateRange(1, 3)][int]$AttemptsPerProfile = 1,
+    [ValidateRange(20, 120)][int]$AttemptSeconds = 23,
     [string]$SigningRoot = "",
-    [string]$TelegramPackage = "org.telegram.messenger",
     [string]$OutputRoot = "",
     [switch]$RestoreOnly
 )
@@ -80,16 +79,12 @@ function Assert-WifiActive {
     }
 }
 
-$previousProfile = $env:TGWS_CF_CLIENTHELLO_POC
 $results = [System.Collections.Generic.List[object]]::new()
 $originalError = $null
 $restoreError = $null
 $backupMayExist = $false
-$experimentalApkInstalled = $false
-$standardRuntimeRestored = $false
-$standardRuntimeError = $null
-$reportPath = Join-Path $SessionDir "direct-wifi-ab.json"
-$csvPath = Join-Path $SessionDir "direct-wifi-ab.csv"
+$reportPath = Join-Path $SessionDir "direct-wifi-smoke.json"
+$csvPath = Join-Path $SessionDir "direct-wifi-smoke.csv"
 
 try {
     if (-not (Test-Installed $App)) {
@@ -103,21 +98,16 @@ try {
     }
 
     Assert-WifiActive
-    if (-not (Test-Installed $TelegramPackage)) {
-        throw "Telegram package not installed: $TelegramPackage"
-    }
     if (-not (Test-Path -LiteralPath (Join-Path $Root "scripts/issue-135-rebuild-device.ps1"))) {
         throw "Required signed-safe installer was not found"
     }
 
-    for ($profileIndex = 0; $profileIndex -lt 2; $profileIndex++) {
-        $profile = @("baseline", "tcp_split")[$profileIndex]
+    foreach ($profile in @("direct_reliability")) {
         Write-Host "=== Issue127: $profile / direct_ws / Wi-Fi ==="
         Assert-WifiActive
 
         # Preserve Telegram's data, Android app data and signing certificate.
         Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $App) | Out-Null
-        $env:TGWS_CF_CLIENTHELLO_POC = $profile
         & (Join-Path $Root "scripts/issue-135-rebuild-device.ps1") -SigningRoot $SigningRoot -SkipInstrumentedTests
         if ($LASTEXITCODE -ne 0) {
             throw "Signed debug APK installation/build failed for $profile"
@@ -125,7 +115,6 @@ try {
         if (-not (Test-Installed $App)) {
             throw "App disappeared after safe installer"
         }
-        $experimentalApkInstalled = $true
 
         # Open the app before asking its receiver to start a foreground service;
         # Android background-start limits can reject a receiver-only launch.
@@ -157,20 +146,12 @@ try {
             for ($i = 1; $i -le $AttemptsPerProfile; $i++) {
                 Assert-WifiActive
                 Write-Host "$profile trial $i/$AttemptsPerProfile"
-                Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $TelegramPackage) | Out-Null
-                Invoke-CheckedAdb -Arguments @(
-                    "shell", "monkey", "-p", $TelegramPackage,
-                    "-c", "android.intent.category.LAUNCHER", "1"
-                ) | Out-Null
-                # Telegram may not be configured to use 127.0.0.1:port.
-                # A valid synthetic MTProto init guarantees at least one
-                # genuine upstream Direct WS attempt per trial; it does not
-                # claim delivery of Telegram messages or media.
+                # Only the authenticated synthetic Direct probe runs. No
+                # Telegram force-stop or launch: prior testing triggered a
+                # large reconnect storm that obscured transport evidence.
                 Invoke-Issue127Action -Name "PROBE" | Out-Null
                 Start-Sleep -Seconds $AttemptSeconds
-                # Force-close only Telegram to flush session accounting.
-                Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $TelegramPackage) | Out-Null
-                Start-Sleep -Seconds 3
+                Start-Sleep -Seconds 2
             }
             $nativeEnd = (Invoke-Issue127Action -Name "STATUS") -join " "
         } finally {
@@ -196,9 +177,6 @@ try {
         $duplex = @($closed | Where-Object {
             $_ -match '\bup_bytes=[1-9][0-9]*\b' -and
             $_ -match '\bdown_bytes=[1-9][0-9]*\b'
-        })
-        $splitWrites = @($lines | Where-Object {
-            $_ -match 'WebSocket PoC: ClientHello tcp_split performed two writes'
         })
         $routeFailures = @($lines | Where-Object {
             $_ -match 'MTProto route failed' -and $_ -match 'selected_backend=direct_ws'
@@ -228,7 +206,6 @@ try {
             syntheticProbeAttempts = $AttemptsPerProfile
             directBridgeCloses = $closed.Count
             directDuplexSessions = $duplex.Count
-            splitWriteMessages = $splitWrites.Count
             classifiedErrorLogLines = $connectFailures.Count
             status = if ($duplex.Count -gt 0) {
                 "DIRECT_DUPLEX_OBSERVED"
@@ -244,18 +221,16 @@ try {
                 "DIRECT_ATTEMPT_UNCLASSIFIED"
             }
             telegramMessagesAndMedia = "NOT_VERIFIED"
-            tcpSegmentation = "NOT_VERIFIED"
             log = $log
         }
         $results.Add($result)
-        Write-Host "$profile => $($result.status); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count); split writes=$($splitWrites.Count)"
+        Write-Host "$profile => $($result.status); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count)"
     }
 } catch {
     $originalError = $_
-    Write-Warning "Issue127 A/B stopped: $($_.Exception.Message)"
+    Write-Warning "Issue127 Direct smoke stopped: $($_.Exception.Message)"
 } finally {
-    # Preserve the first failure; restore Wi-Fi settings even when baseline,
-    # split build or log capture fails halfway through the comparison.
+    # Preserve first failure and restore original Wi-Fi settings on exit.
     try {
         if ($backupMayExist) {
             Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $App) | Out-Null
@@ -266,51 +241,26 @@ try {
         $restoreError = $_
         Write-Warning "RESTORE FAILED. Debug app retains the original snapshot for -RestoreOnly: $_"
     }
-    # The experiment must not stay enabled in the installed binary after
-    # A/B. Rebuild and upgrade back to the ordinary, zero-profile debug APK.
-    # The original *release* APK is not recreated here.
-    if ($experimentalApkInstalled) {
-        try {
-            $env:TGWS_CF_CLIENTHELLO_POC = ""
-            & (Join-Path $Root "scripts/issue-135-rebuild-device.ps1") -SigningRoot $SigningRoot -SkipInstrumentedTests
-            if ($LASTEXITCODE -ne 0) {
-                throw "Ordinary debug runtime rebuild/installation failed"
-            }
-            $standardRuntimeRestored = $true
-            Write-Host "Default (non-PoC) native debug runtime reinstalled"
-        } catch {
-            $standardRuntimeError = $_
-            Write-Warning "Default native runtime restore failed. Experimental APK may remain installed: $_"
-        }
-    }
-    if ($null -eq $previousProfile) {
-        Remove-Item Env:TGWS_CF_CLIENTHELLO_POC -ErrorAction SilentlyContinue
-    } else {
-        $env:TGWS_CF_CLIENTHELLO_POC = $previousProfile
-    }
+    # No PoC remains. The newly installed ordinary signed debug APK stays
+    # installed (the original release APK is not restored).
     $report = [ordered]@{
         issue = 127
         commit = (git -C $Root rev-parse HEAD)
-        result = if ($restoreError -or $standardRuntimeError) { "RESTORE_FAILED" } elseif ($originalError) { "FAILED" } else { "INCONCLUSIVE" }
-        note = "Telegram launch is not proof of delivered messages/media; duplex counters are observational only."
+        result = if ($restoreError) { "RESTORE_FAILED" } elseif ($originalError) { "FAILED" } else { "INCONCLUSIVE" }
+        note = "Synthetic ingress only. Telegram message/media delivery remains NOT_VERIFIED; signed debug APK remains installed."
         results = @($results.ToArray())
         originalSettingsRestored = ($backupMayExist -and $null -eq $restoreError)
-        ordinaryDebugRuntimeRestored = $standardRuntimeRestored
-        ordinaryDebugRuntimeRestoreError = if ($standardRuntimeError) { $standardRuntimeError.Exception.Message } else { $null }
         error = if ($originalError) { $originalError.Exception.Message } else { $null }
         restoreError = if ($restoreError) { $restoreError.Exception.Message } else { $null }
     }
     $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding UTF8
     $results | Export-Csv -LiteralPath $csvPath -Delimiter ';' -NoTypeInformation -Encoding UTF8
-    Write-Host "A/B JSON: $reportPath"
-    Write-Host "A/B CSV: $csvPath"
-    $results | Format-Table profile, status, nativeInboundConnections, routeConnects, directRouteFailures, splitWriteMessages -AutoSize
+    Write-Host "Direct smoke JSON: $reportPath"
+    Write-Host "Direct smoke CSV: $csvPath"
+    $results | Format-Table profile, status, nativeInboundConnections, routeConnects, directRouteFailures -AutoSize
 }
 if ($restoreError) {
     throw "Could not restore original Wi-Fi settings. Inspect $reportPath; retry with -RestoreOnly."
-}
-if ($standardRuntimeError) {
-    throw "Could not reinstall ordinary native debug runtime. Inspect $reportPath."
 }
 if ($originalError) {
     throw $originalError
