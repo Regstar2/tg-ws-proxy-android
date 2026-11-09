@@ -24,14 +24,19 @@ type mtProtoRouteDial func(domain, path, logPrefix string) (mtProtoFrameSocket, 
 type mtProtoDirectWSDial func(targetIP, domain, path string, timeout float64) (mtProtoFrameSocket, error)
 
 type mtProtoDirectWSConnector struct {
-	resolveTarget mtProtoTargetResolver
-	dial          mtProtoDirectWSDial
+	resolveTarget     mtProtoTargetResolver
+	dial              mtProtoDirectWSDial // Legacy injection for existing tests only.
+	dialContext       func(context.Context, string, string, string, float64) (mtProtoFrameSocket, error)
+	enableHealth      bool
+	enableAlternates  bool
 }
 
 func newMtProtoDirectWSConnector() *mtProtoDirectWSConnector {
 	return &mtProtoDirectWSConnector{
-		resolveTarget: mtProtoTargetForDC,
-		dial:          defaultMtProtoDirectWSDial,
+		resolveTarget:    mtProtoTargetForDC,
+		dialContext:      defaultMtProtoDirectWSDialContext,
+		enableHealth:     true,
+		enableAlternates: true,
 	}
 }
 
@@ -46,16 +51,22 @@ func (c *mtProtoDirectWSConnector) Connect(
 	ctx context.Context,
 	request mtproxyfrontend.OutboundRequest,
 ) (net.Conn, mtproxyfrontend.OutboundResult) {
-	result := mtproxyfrontend.OutboundResult{
-		SelectedBackend: mtProtoDirectWSBackend,
+	result := mtproxyfrontend.OutboundResult{SelectedBackend: mtProtoDirectWSBackend}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		result.Reason, result.Err = "cancelled", err
+		return nil, result
 	}
 
-	var target string
-	var ok bool
+	resolveTarget := c.resolveTarget
+	if resolveTarget == nil {
+		resolveTarget = mtProtoTargetForDC
+	}
+	target, _, ok := resolveTarget(request.DCID)
 	if request.IsTestDC {
 		target, _, ok = mtProtoTestTargetForDC(request.DCID)
-	} else {
-		target, _, ok = c.resolveTarget(request.DCID)
 	}
 	if !ok || target == "" {
 		result.Reason = "direct_ws_target_unavailable"
@@ -71,8 +82,10 @@ func (c *mtProtoDirectWSConnector) Connect(
 		return nil, result
 	}
 
-	now := monoNow()
-	if directIPCoolingDown(target, now) && directIPCooldownFallbackAvailable(getRuntimeSettings()) {
+	// Preserve the preexisting route-chain cooldown decision. In strict
+	// Direct-only mode a new per-target circuit breaker below still applies.
+	if directIPCoolingDown(target, monoNow()) &&
+		directIPCooldownFallbackAvailable(getRuntimeSettings()) {
 		result.Reason = "direct_ip_cooldown"
 		result.Err = fmt.Errorf("direct WebSocket target %s is on IP cooldown", target)
 		return nil, result
@@ -82,25 +95,128 @@ func (c *mtProtoDirectWSConnector) Connect(
 	if request.IsTestDC {
 		path = "/apiws_test"
 	}
+	targets := directWSTargetCandidates(request.DCID, target,
+		c.enableAlternates && !request.IsTestDC)
+
+	// Bound the whole route, not just each dial. A missing TCP SYN/ACK must
+	// not leave a backlog of active MTProto requests on Android.
+	routeCtx, stopRoute := context.WithTimeout(ctx, 15*time.Second)
+	defer stopRoute()
 
 	var lastErr error
+	lastReason := "direct_ws_connect_failed"
 	timedOut := false
-	for _, domain := range domains {
-		prefix := fmt.Sprintf("[MTProto] DC%d%s direct_ws", request.DCID, mediaTag(request.IsMedia))
-		logMtProtoRouteAttempt(
-			ctx,
-			request,
-			routeDirectWS,
-			"target=%s domain=%s",
-			target,
-			domain,
-		)
+	generation := getRuntimeSettings().PolicyGen
+	for _, candidate := range targets {
+		if err := routeCtx.Err(); err != nil {
+			lastErr = err
+			break
+		}
 
-		ws, err := c.dial(target, domain, path, 10)
+		var release func()
+		if c.enableHealth {
+			var guardReason string
+			release, guardReason = beginDirectWSAttempt(
+				request.DCID, candidate, generation, time.Now())
+			if guardReason != "" {
+				lastReason = guardReason
+				lastErr = fmt.Errorf("direct WebSocket target unavailable: %s", guardReason)
+				continue
+			}
+		}
+
+		budget := 10 * time.Second
+		if len(targets) > 1 {
+			budget = 7 * time.Second
+		}
+		attemptCtx, stopAttempt := context.WithTimeout(routeCtx, budget)
+		stream, connErr, failureReason := c.connectDirectWSTarget(
+			attemptCtx, request, candidate, domains, path, budget.Seconds())
+		stopAttempt()
+		if release != nil {
+			release()
+		}
+
+		if connErr == nil {
+			if c.enableHealth {
+				markDirectWSSuccess(request.DCID, candidate, generation)
+			}
+			// Never clear another IP's cooldown when an alternative succeeds.
+			markDirectIPSuccess(candidate)
+			result.ActualBackend = mtProtoDirectWSBackend
+			result.Reason = "connected"
+			return stream, result
+		}
+		lastErr = connErr
+		if failureReason != "" {
+			if failureReason == directTCPFailureTimeout {
+				timedOut = true
+				markDirectIPTimeout(candidate, monoNow())
+			}
+			if c.enableHealth {
+				markDirectWSFailure(request.DCID, candidate, generation,
+					failureReason, time.Now())
+			}
+		}
+	}
+
+	if ctx.Err() != nil {
+		result.Reason, result.Err = "cancelled", ctx.Err()
+		return nil, result
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("direct WebSocket failed for dc %d", request.DCID)
+	}
+	if errors.Is(lastErr, context.Canceled) && routeCtx.Err() == nil {
+		result.Reason = "cancelled"
+	} else if timedOut {
+		result.Reason = "direct_ws_ip_timeout"
+	} else {
+		result.Reason = lastReason
+	}
+	result.Err = lastErr
+	return nil, result
+}
+
+// Each candidate is attempted with the same DC, SNI/Host and WS path.
+// Connector-only injection preserves existing unit tests and leaves the
+// Cloudflare, Worker and direct_tcp transports entirely untouched.
+func (c *mtProtoDirectWSConnector) connectDirectWSTarget(
+	ctx context.Context,
+	request mtproxyfrontend.OutboundRequest,
+	target string,
+	domains []string,
+	path string,
+	timeout float64,
+) (net.Conn, error, string) {
+	var lastErr error
+	var tcpFailure string
+	for _, domain := range domains {
+		if err := ctx.Err(); err != nil {
+			return nil, err, tcpFailure
+		}
+		prefix := fmt.Sprintf("[MTProto] DC%d%s direct_ws",
+			request.DCID, mediaTag(request.IsMedia))
+		logMtProtoRouteAttempt(ctx, request, routeDirectWS,
+			"target=%s domain=%s", target, domain)
+
+		var ws mtProtoFrameSocket
+		var err error
+		switch {
+		case c.dial != nil:
+			ws, err = c.dial(target, domain, path, timeout)
+		case c.dialContext != nil:
+			ws, err = c.dialContext(ctx, target, domain, path, timeout)
+		default:
+			ws, err = defaultMtProtoDirectWSDialContext(
+				ctx, target, domain, path, timeout)
+		}
 		if err != nil {
 			lastErr = err
-			if directWSErrorTimedOut(err) {
-				timedOut = true
+			if reason := directWSTCPFailureReason(err); reason != "" {
+				tcpFailure = reason
+			} else {
+				tcpFailure = ""
 			}
 			var wsErr *WsHandshakeError
 			if errors.As(err, &wsErr) && wsErr.IsRedirect() {
@@ -109,46 +225,24 @@ func (c *mtProtoDirectWSConnector) Connect(
 			logDomainConnectFailure(prefix, domain, target, err)
 			continue
 		}
-
+		if err := ctx.Err(); err != nil {
+			ws.Close()
+			return nil, err, tcpFailure
+		}
 		stream, err := mtProtoWebSocketConn(ws, request.RelayInit, domain)
 		if err != nil {
 			ws.Close()
 			lastErr = err
+			tcpFailure = ""
 			continue
 		}
 		stats.connectionsWs.Add(1)
-		markDirectIPSuccess(target)
-		result.ActualBackend = mtProtoDirectWSBackend
-		result.Reason = "connected"
-		return stream, result
-	}
-
-	result.Reason = "direct_ws_connect_failed"
-	if timedOut {
-		markDirectIPTimeout(target, now)
-		result.Reason = "direct_ws_ip_timeout"
+		return stream, nil, ""
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("direct WebSocket failed for dc %d", request.DCID)
+		lastErr = fmt.Errorf("direct WebSocket has no usable domains for dc %d", request.DCID)
 	}
-	result.Err = lastErr
-	return nil, result
-}
-
-func defaultMtProtoDirectWSDial(targetIP, domain, path string, timeout float64) (mtProtoFrameSocket, error) {
-	ws, err := wsConnect(targetIP, domain, path, timeout)
-	if err == nil {
-		return ws, nil
-	}
-	if !shouldTryDomainDial(err) {
-		return nil, err
-	}
-
-	resolvedWS, _, _, fallbackErr := wsConnectViaResolvedDomain(domain, path, timeout)
-	if fallbackErr == nil {
-		return resolvedWS, nil
-	}
-	return nil, fallbackErr
+	return nil, lastErr, tcpFailure
 }
 
 type mtProtoCFProxyConnector struct {
