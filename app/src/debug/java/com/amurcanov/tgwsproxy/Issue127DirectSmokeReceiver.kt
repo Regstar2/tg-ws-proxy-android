@@ -150,29 +150,7 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                         ?: error("MTProto native listener port unavailable")
                     val secretHex = MtProtoProxyConfigRepository(prefs)
                         .loadForDiagnostics().secret
-                    check(MtProtoProxyConfigValidator.isValidRawSecret(secretHex)) {
-                        "MTProto secret invalid for synthetic probe"
-                    }
-                    val secret = secretHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-                    val init = ByteArray(64).also { SecureRandom().nextBytes(it) }
-                    // A valid MTProto obfuscated2 intermediate transport header.
-                    // 64 bytes, encrypt positions 56..63 with AES-CTR using
-                    // SHA256(init[8..39] || local-secret) and IV init[40..55].
-                    init[0] = 0x42
-                    init[4] = 0x41
-                    for (index in 56..59) init[index] = 0xee.toByte()
-                    init[60] = 2 // Telegram DC2, little-endian signed DC
-                    init[61] = 0
-                    val keyMaterial = init.copyOfRange(8, 40) + secret
-                    val key = MessageDigest.getInstance("SHA-256").digest(keyMaterial)
-                    val cipher = Cipher.getInstance("AES/CTR/NoPadding")
-                    cipher.init(
-                        Cipher.ENCRYPT_MODE,
-                        SecretKeySpec(key, "AES"),
-                        IvParameterSpec(init.copyOfRange(40, 56)),
-                    )
-                    val encrypted = cipher.doFinal(init)
-                    System.arraycopy(encrypted, 56, init, 56, 8)
+                    val init = Issue127SyntheticMtProtoClient.buildInit(secretHex)
                     Socket().use { socket ->
                         socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
                         socket.getOutputStream().write(init)
@@ -251,5 +229,36 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
         const val ACTION_PROBE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_PROBE"
         const val ACTION_STOP = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_STOP"
         const val ACTION_RESTORE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_RESTORE"
+    }
+}
+
+/**
+ * Test-only authenticated obfuscated2 init: triggers a real MTProto DC2 route
+ * attempt without reading, recording or sending Telegram application messages.
+ * Mirrors the existing Go mtproxyfrontend/session_test.go handshake construction.
+ */
+internal object Issue127SyntheticMtProtoClient {
+    fun buildInit(secretHex: String): ByteArray {
+        require(MtProtoProxyConfigValidator.isValidRawSecret(secretHex)) {
+            "MTProto secret invalid for synthetic probe"
+        }
+        val secret = secretHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val init = ByteArray(64).also { SecureRandom().nextBytes(it) }
+        init[0] = 0x42 // avoid forbidden obfuscated2 prefixes
+        init[4] = 0x41
+        for (index in 56..59) init[index] = 0xee.toByte() // intermediate
+        init[60] = 2 // Telegram DC2 (signed little-endian)
+        init[61] = 0
+        val keyMaterial = init.copyOfRange(8, 40) + secret
+        val key = MessageDigest.getInstance("SHA-256").digest(keyMaterial)
+        val cipher = Cipher.getInstance("AES/CTR/NoPadding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            SecretKeySpec(key, "AES"),
+            IvParameterSpec(init.copyOfRange(40, 56)),
+        )
+        val encrypted = cipher.doFinal(init)
+        System.arraycopy(encrypted, 56, init, 56, 8)
+        return init
     }
 }
