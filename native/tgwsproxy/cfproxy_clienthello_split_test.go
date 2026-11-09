@@ -259,6 +259,57 @@ func TestCFClientHelloTCPSplitStrictTLSAndWebSocketUpgrade(t *testing.T) {
 	}
 }
 
+func TestCFClientHelloTCPSplitTLS12Compatibility(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "Upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12}
+	server.StartTLS()
+	defer server.Close()
+
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	raw, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	tlsClient := tls.Client(newCFClientHelloTCPWriteSplitter(raw), &tls.Config{
+		RootCAs:    roots,
+		ServerName: "127.0.0.1",
+		MinVersion:  tls.VersionTLS12,
+		MaxVersion:  tls.VersionTLS12,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tlsClient.HandshakeContext(ctx); err != nil {
+		t.Fatalf("TLS 1.2 split handshake: %v", err)
+	}
+	defer tlsClient.Close()
+	if tlsClient.ConnectionState().Version != tls.VersionTLS12 {
+		t.Fatalf("negotiated TLS version=%x", tlsClient.ConnectionState().Version)
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://127.0.0.1/apiws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	if err := req.Write(tlsClient); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(tlsClient), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("HTTP upgrade status=%d", response.StatusCode)
+	}
+}
+
 func TestCFClientHelloTCPSplitRejectsUntrustedServer(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
