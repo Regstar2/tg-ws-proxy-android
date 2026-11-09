@@ -14,7 +14,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Debug-only, shell-permission-protected A/B fixture for Issue #127.
+ * Debug-only, shell-permission-protected Direct WS fixture for Issue #127.
  *
  * Snapshots Wi-Fi routing and last runtime parameters before selecting
  * direct_ws-only. Mobile settings, Telegram data and CF domain pools are never
@@ -233,12 +233,26 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
             ?: error("MTProto native listener port unavailable")
         val secretHex = MtProtoProxyConfigRepository(prefs).loadForDiagnostics().secret
         val init = Issue127SyntheticMtProtoClient.buildInit(secretHex)
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
-            socket.getOutputStream().write(init)
-            socket.getOutputStream().flush()
-        }
-        return "synthetic_mtproto_dc2_init_sent;port=$port"
+        // The synthetic client must stay connected while the outbound Direct
+        // TCP/IP candidates run. Launch it independently of ordered broadcast
+        // completion, so the broadcast does not time out after 10 seconds.
+        Thread({
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
+                    socket.getOutputStream().write(init)
+                    socket.getOutputStream().flush()
+                    Thread.sleep(18000)
+                }
+                android.util.Log.i("TgWsProxy", "Issue127 Direct synthetic socket completed")
+            } catch (exception: Exception) {
+                android.util.Log.w(
+                    "TgWsProxy",
+                    "Issue127 Direct synthetic socket failed: " + exception.javaClass.simpleName,
+                )
+            }
+        }, "Issue127DirectProbeSocket").start()
+        return "synthetic_mtproto_dc2_probe_scheduled;port=$port"
     }
 
     companion object {
