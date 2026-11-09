@@ -146,14 +146,17 @@ try {
                 Start-Sleep -Seconds 3
             }
         } finally {
+            # Stop the proxy while logcat is still recording so the final
+            # MTProto bridge close counters are not lost to an early capture stop.
+            try {
+                Invoke-Issue127Action -Name "STOP" | Out-Null
+                Start-Sleep -Seconds 3
+            } catch {
+                Write-Warning "Proxy STOP broadcast failed: $_"
+            }
             if (-not $capture.HasExited) {
                 Stop-Process -Id $capture.Id -ErrorAction SilentlyContinue
                 [void]$capture.WaitForExit(5000)
-            }
-            try {
-                Invoke-Issue127Action -Name "STOP" | Out-Null
-            } catch {
-                Write-Warning "Proxy STOP broadcast failed: $_"
             }
             Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $App) | Out-Null
         }
