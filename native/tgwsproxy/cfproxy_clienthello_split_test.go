@@ -169,6 +169,30 @@ func TestCFClientHelloTCPSplitRetainsDeadlinesAndClose(t *testing.T) {
 	}
 }
 
+func TestCFClientHelloTCPSplitCancellationClosesUnderlyingConnection(t *testing.T) {
+	client, server := net.Pipe()
+	defer server.Close()
+	conn := newCFClientHelloTCPWriteSplitter(client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	wrote := make(chan error, 1)
+	go func() {
+		_, err := conn.Write(cfClientHelloTestRecord(t, "example.test"))
+		wrote <- err
+	}()
+	cancel()
+	select {
+	case err := <-wrote:
+		if err == nil {
+			t.Fatal("cancelled connection write unexpectedly succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not interrupt blocked TCP write")
+	}
+}
+
 func TestCFClientHelloTCPSplitStrictTLSAndWebSocketUpgrade(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/apiws" || r.Header.Get("Upgrade") != "websocket" {
