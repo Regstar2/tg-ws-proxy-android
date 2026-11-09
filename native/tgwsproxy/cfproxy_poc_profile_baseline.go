@@ -3,4 +3,4 @@
 package main
 
 // A/B control: strict certificate verification, unmodified TLS ClientHello.
-var cfProxyPoCProfile = cfClientHelloPoCProfile{verifyCertificates: true}
+var webSocketClientHelloPoCProfile = cfClientHelloPoCProfile{verifyCertificates: true}
