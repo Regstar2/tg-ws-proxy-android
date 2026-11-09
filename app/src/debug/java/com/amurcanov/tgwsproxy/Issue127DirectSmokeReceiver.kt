@@ -132,32 +132,28 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                 }
 
                 ACTION_PROBE -> {
-                    check(backup.getBoolean(SNAPSHOT_EXISTS, false)) {
-                        "Configure direct_ws-only before running synthetic probe"
+                    // BroadcastReceiver.onReceive runs on Android's main thread.
+                    // A real TCP dial must be dispatched off-main. goAsync holds
+                    // the ordered ADB broadcast result until the probe finishes.
+                    val pending = goAsync()
+                    try {
+                        Thread({
+                            try {
+                                val resultData = runDirectProbe(context, prefs, backup)
+                                pending.setResultCode(RESULT_OK)
+                                pending.setResultData(resultData)
+                            } catch (exception: Exception) {
+                                pending.setResultCode(RESULT_ERROR)
+                                pending.setResultData(exception.message ?: exception.javaClass.simpleName)
+                            } finally {
+                                pending.finish()
+                            }
+                        }, "Issue127DirectProbe").start()
+                    } catch (exception: Exception) {
+                        pending.setResultCode(RESULT_ERROR)
+                        pending.setResultData(exception.message ?: "probe_thread_start_failed")
+                        pending.finish()
                     }
-                    check(NetworkProfileProvider.current(context).type == NetworkProfileType.WIFI) {
-                        "Wi-Fi network changed before synthetic probe"
-                    }
-                    val status = NativeProxy.getMtProtoProxyStatus().orEmpty()
-                    check(status.contains("status=LISTENING_ROUTE_READY;")) {
-                        "MTProto frontend is not listening"
-                    }
-                    check(status.contains(";selected_backend=direct_ws;")) {
-                        "Synthetic probe requires selected_backend=direct_ws"
-                    }
-                    val port = status.split(';').firstOrNull { it.startsWith("port=") }
-                        ?.substringAfter('=')?.toIntOrNull()
-                        ?: error("MTProto native listener port unavailable")
-                    val secretHex = MtProtoProxyConfigRepository(prefs)
-                        .loadForDiagnostics().secret
-                    val init = Issue127SyntheticMtProtoClient.buildInit(secretHex)
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
-                        socket.getOutputStream().write(init)
-                        socket.getOutputStream().flush()
-                    }
-                    setResultCode(RESULT_OK)
-                    setResultData("synthetic_mtproto_dc2_init_sent;port=$port")
                 }
 
                 ACTION_STOP -> {
@@ -210,6 +206,39 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
             setResultCode(RESULT_ERROR)
             setResultData(e.message ?: e.javaClass.simpleName)
         }
+    }
+
+
+    // Invoked only from Issue127DirectProbe, never from the main/UI thread.
+    private fun runDirectProbe(
+        context: Context,
+        prefs: SharedPreferences,
+        backup: SharedPreferences,
+    ): String {
+        check(backup.getBoolean(SNAPSHOT_EXISTS, false)) {
+            "Configure direct_ws-only before running synthetic probe"
+        }
+        check(NetworkProfileProvider.current(context).type == NetworkProfileType.WIFI) {
+            "Wi-Fi network changed before synthetic probe"
+        }
+        val status = NativeProxy.getMtProtoProxyStatus().orEmpty()
+        check(status.contains("status=LISTENING_ROUTE_READY;")) {
+            "MTProto frontend is not listening"
+        }
+        check(status.contains(";selected_backend=direct_ws;")) {
+            "Synthetic probe requires selected_backend=direct_ws"
+        }
+        val port = status.split(';').firstOrNull { it.startsWith("port=") }
+            ?.substringAfter('=')?.toIntOrNull()
+            ?: error("MTProto native listener port unavailable")
+        val secretHex = MtProtoProxyConfigRepository(prefs).loadForDiagnostics().secret
+        val init = Issue127SyntheticMtProtoClient.buildInit(secretHex)
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
+            socket.getOutputStream().write(init)
+            socket.getOutputStream().flush()
+        }
+        return "synthetic_mtproto_dc2_init_sent;port=$port"
     }
 
     companion object {
