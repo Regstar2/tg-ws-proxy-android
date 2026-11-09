@@ -172,8 +172,6 @@ func defaultMtProtoDirectWSDialContext(
 	return nil, lastErr
 }
 
-// Compile-time type contract: the Direct dialer continues to return the same
-// WebSocket frame socket as the original implementation.
 
 func resetDirectWSHealthForTests() {
 	directWSHealth.Lock()

@@ -242,6 +242,7 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                     socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
                     socket.getOutputStream().write(init)
                     socket.getOutputStream().flush()
+                    android.util.Log.i("TgWsProxy", "Issue127 Direct synthetic init sent")
                     Thread.sleep(18000)
                 }
                 android.util.Log.i("TgWsProxy", "Issue127 Direct synthetic socket completed")

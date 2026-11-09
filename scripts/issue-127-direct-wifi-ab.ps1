@@ -184,6 +184,12 @@ try {
         $routeRejections = @($lines | Where-Object {
             $_ -match 'MTProto route rejected' -and $_ -match 'reason=handshake_failed'
         })
+        $syntheticSent = @($lines | Where-Object {
+            $_ -match 'Issue127 Direct synthetic init sent'
+        })
+        $syntheticFailed = @($lines | Where-Object {
+            $_ -match 'Issue127 Direct synthetic socket failed'
+        })
         $totalAfter = Get-Issue127NativeCounter -Broadcast $nativeEnd -Name "total"
         $acceptedInbounds = $totalAfter - $totalBefore
         $connectFailures = @($lines | Where-Object {
@@ -204,10 +210,16 @@ try {
             directRouteFailures = $routeFailures.Count
             localHandshakeRejections = $routeRejections.Count
             syntheticProbeAttempts = $AttemptsPerProfile
+            syntheticProbeSent = $syntheticSent.Count
+            syntheticProbeFailed = $syntheticFailed.Count
             directBridgeCloses = $closed.Count
             directDuplexSessions = $duplex.Count
             classifiedErrorLogLines = $connectFailures.Count
-            status = if ($duplex.Count -gt 0) {
+            status = if ($syntheticSent.Count -lt $AttemptsPerProfile -or $syntheticFailed.Count -gt 0) {
+                "SYNTHETIC_PROBE_FAILED"
+            } elseif ($acceptedInbounds -gt (10 * $AttemptsPerProfile)) {
+                "INGRESS_CONTAMINATED"
+            } elseif ($duplex.Count -gt 0) {
                 "DIRECT_DUPLEX_OBSERVED"
             } elseif ($routeConnects.Count -gt 0) {
                 "DIRECT_HANDSHAKE_OBSERVED"
@@ -224,7 +236,7 @@ try {
             log = $log
         }
         $results.Add($result)
-        Write-Host "$profile => $($result.status); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count)"
+        Write-Host "$profile => $($result.status); synthetic_sent=$($syntheticSent.Count); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count)"
     }
 } catch {
     $originalError = $_
