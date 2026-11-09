@@ -69,6 +69,26 @@ Device rerun 2026-11-09 (d108b6b): baseline APK built and installed; first synth
 
 **Do not rerun the device A/B yet.** The only missing evidence is the **existing private** `baseline.log`/`tcp_split.log` from the `20261109-193547` run. The new `scripts/issue-127-summarize-logs.ps1` performs an offline, non-network, no-ADB stage breakdown into TCP dial, TLS handshake, WS upgrade, error categories, and Direct route reasons. It emits `direct-stage-summary.json` containing only stage/count categories, not raw endpoints or credentials. An accompanying synthetic-log regression check is included in host CI. Full new analyzer/CI run: NOT_RUN. Do not merge or claim a useful ClientHello split until transport-stage evidence is obtained.
 
+### 2026-11-09: offline Direct Wi-Fi stage summary (private device evidence)
+
+The user executed `scripts/issue-127-summarize-logs.ps1` against the already captured physical A/B logs (`20261109-193547`) and supplied its anonymized `direct-stage-summary.json`. The summary contains:
+
+| Metric | Direct baseline | Direct tcp_split |
+| --- | ---: | ---: |
+| Direct route-truth attempts | 102 | 102 |
+| Direct route-failure sessions | 37 | 33 |
+| Failure reason `direct_ws_ip_timeout` | 37 | 33 |
+| TCP dial failure log lines | 88 | 81 |
+| Transport errors classified as timeout | 88 | 81 |
+| TLS handshake failures / WS upgrade failures | 0 / 0 | 0 / 0 |
+| Direct successful route connections / bridge closes | 0 / 0 | 0 / 0 |
+| Split two-write debug marker | 0 | 0 |
+| Rejected *local* MTProto handshakes | 33,866 | 33,951 |
+
+**Direct-only diagnosis:** recorded transport failures are TCP dial timeouts, upstream of TLS ClientHello/SNI and WebSocket. In the timed-out attempts, splitting TLS ClientHello cannot change the TCP connect phase; no success or split-write events were observed. The 88/81 counts are *log lines*, not independent, identically sampled successful connection rates; do not infer improvement from the smaller number in the split arm. No packet-capture evidence or confirmed segmentation. Exact TCP blocking/routing/endpoint cause is **unproven**. The 33k+ rejected local handshakes are a distinct anomaly; the summary does not identify their originating client or rejection code. These are not successful MTProto sessions.
+
+**Scope limitation:** Issue #127's primary hypothesis is about `cf_proxy_ws`. This run tested `direct_ws` only. Its findings support **NO-GO for applying ClientHello splitting as a remedy for the observed Direct TCP dial timeouts**, but the **overall CF Proxy PoC remains INCONCLUSIVE** pending separately controlled CF baseline/split tests with reachable TCP endpoints and measured TLS progression. Do not merge or close Issue #127 on this Direct-only evidence. No further Direct A/B rebuild on the same blocked TCP path is justified without changed test conditions or new connection diagnostics.
+
 ### Physical A/B test, still required
 
 1. Use one network on which `cf_proxy_ws` and/or `direct_ws` genuinely fails. If a route currently works reliably, label its result **INCONCLUSIVE**, not GO. Preserve network conditions; no DNS overrides, switching networks, changing route policies or changing active endpoint lists mid-series.
