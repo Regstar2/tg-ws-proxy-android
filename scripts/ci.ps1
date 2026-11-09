@@ -142,6 +142,37 @@ if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
     throw "Issue #127 safety, restore or real Direct-backend acceptance preflight failed"
 }
 
+# Issue #127 offline stage diagnostics must remain safe and parseable on
+# Windows PowerShell 5.1, without a phone, local settings or real secrets.
+$issue127Analyzer = Join-Path $PSScriptRoot 'issue-127-summarize-logs.ps1'
+$issue127AnalyzerTest = Join-Path $PSScriptRoot 'tests/issue-127-summarize-logs-test.ps1'
+foreach ($path in @($issue127Analyzer, $issue127AnalyzerTest)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Issue #127 offline diagnostics or regression test missing: $path"
+    }
+    $parseTokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $path, [ref]$parseTokens, [ref]$parseErrors
+    ) | Out-Null
+    if ($parseErrors) {
+        throw "Issue #127 offline diagnostic syntax error in $path : $($parseErrors -join '; ')"
+    }
+}
+$issue127AnalyzerSource = Get-Content -LiteralPath $issue127Analyzer -Raw
+if ($issue127AnalyzerSource -notmatch 'tls_handshake_failure' -or
+    $issue127AnalyzerSource -notmatch 'tcp_dial_failure' -or
+    $issue127AnalyzerSource -notmatch 'ws_upgrade_read_failure' -or
+    $issue127AnalyzerSource -notmatch 'routeFailureReasons' -or
+    $issue127AnalyzerSource -match '(?im)^\s*(?:adb\b|[^#\r\n]*Invoke-WebRequest\b|[^#\r\n]*curl\b)') {
+    throw "Issue #127 offline analysis must classify transport stages with no device/network calls"
+}
+Invoke-CheckedCommand -Label 'Issue #127 offline Direct stage regression under Windows PowerShell 5.1' `
+    -FilePath $windowsPowerShell.Source -Arguments @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $issue127AnalyzerTest
+    )
+& $issue127AnalyzerTest
+
 # The live route smoke script runs on persistent devices; CI checks its syntax
 # and enforces the bounded PID wait and actual-backend evidence without ADB.
 $routeSmokeScript = Join-Path $PSScriptRoot 'issue-135-route-switch-smoke.ps1'
