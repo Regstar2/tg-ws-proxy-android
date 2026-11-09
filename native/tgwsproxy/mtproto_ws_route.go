@@ -136,14 +136,7 @@ func (c *mtProtoDirectWSConnector) Connect(
 }
 
 func defaultMtProtoDirectWSDial(targetIP, domain, path string, timeout float64) (mtProtoFrameSocket, error) {
-	// Both fixed target-IP and DNS-fallback attempts share the legacy direct
-	// WS path's build-selected profile; the zero value preserves production.
-	return mtProtoDirectWSConnectWithDial(targetIP, domain, path, timeout, wsConnectDirectWS)
-}
-
-// Keep the direct route's existing fallback decision independently testable.
-func mtProtoDirectWSConnectWithDial(targetIP, domain, path string, timeout float64, dial func(string, string, string, float64) (*RawWebSocket, error)) (mtProtoFrameSocket, error) {
-	ws, err := dial(targetIP, domain, path, timeout)
+	ws, err := wsConnect(targetIP, domain, path, timeout)
 	if err == nil {
 		return ws, nil
 	}
@@ -151,7 +144,7 @@ func mtProtoDirectWSConnectWithDial(targetIP, domain, path string, timeout float
 		return nil, err
 	}
 
-	resolvedWS, _, _, fallbackErr := wsConnectViaResolvedDomainWithDial(domain, path, timeout, dial)
+	resolvedWS, _, _, fallbackErr := wsConnectViaResolvedDomain(domain, path, timeout)
 	if fallbackErr == nil {
 		return resolvedWS, nil
 	}
@@ -366,7 +359,7 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	dialer := compatibleWebSocketTLSDialer{ctx: ctx, cfPoCProfile: webSocketClientHelloPoCProfile}
+	dialer := compatibleWebSocketTLSDialer{ctx: ctx}
 	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil

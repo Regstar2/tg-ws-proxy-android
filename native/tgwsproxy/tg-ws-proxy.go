@@ -580,12 +580,6 @@ func runFallbackChain(ctx context.Context, client net.Conn, session *initSession
 }
 
 func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSocket, string, resolvedIPs, error) {
-	return wsConnectViaResolvedDomainWithDial(domain, path, timeout, wsConnect)
-}
-
-// wsConnectViaResolvedDomainWithDial keeps the same DNS/IP fallback while the
-// selected caller controls its TLS ClientHello profile on every attempt.
-func wsConnectViaResolvedDomainWithDial(domain, path string, timeout float64, connect func(string, string, string, float64) (*RawWebSocket, error)) (*RawWebSocket, string, resolvedIPs, error) {
 	resolved, err := resolvePreferredIPs(domain, timeout)
 	if err != nil {
 		return nil, "", resolved, &wsStageError{Stage: "tcp_dial", Err: err}
@@ -598,7 +592,7 @@ func wsConnectViaResolvedDomainWithDial(domain, path string, timeout float64, co
 
 	var lastErr error
 	for _, ip := range candidates {
-		ws, connErr := connect(ip, domain, path, timeout)
+		ws, connErr := wsConnect(ip, domain, path, timeout)
 		if connErr == nil {
 			return ws, ip, resolved, nil
 		}
@@ -719,16 +713,9 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 	return wsConnectWithCurves(ip, domain, path, timeout, nil)
 }
 
-// wsConnectDirectWS uses the explicit ClientHello PoC profile only for
-// direct_ws, including connections created by the legacy WebSocket pool.
-func wsConnectDirectWS(ip, domain, path string, timeout float64) (*RawWebSocket, error) {
-	return wsConnectWithCurvesContextDialProfile(context.Background(), ip, domain, path, timeout, nil, nil, webSocketClientHelloPoCProfile)
-}
-
 type compatibleWebSocketTLSDialer struct {
 	defaultAttempted bool
 	ctx              context.Context
-	cfPoCProfile     cfClientHelloPoCProfile
 	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
 }
 
@@ -740,7 +727,7 @@ func (d *compatibleWebSocketTLSDialer) connect(ip, domain, path string, timeout 
 			ctx = context.Background()
 		}
 		dial = func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
-			return wsConnectWithCurvesContextDialProfile(ctx, ip, domain, path, timeout, curves, nil, d.cfPoCProfile)
+			return wsConnectWithCurvesContext(ctx, ip, domain, path, timeout, curves)
 		}
 	}
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
@@ -780,10 +767,6 @@ func wsConnectWithCurvesContext(ctx context.Context, ip, domain, path string, ti
 }
 
 func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
-	return wsConnectWithCurvesContextDialProfile(ctx, ip, domain, path, timeout, curves, dialContext, cfClientHelloPoCProfile{})
-}
-
-func wsConnectWithCurvesContextDialProfile(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error), profile cfClientHelloPoCProfile) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -801,10 +784,6 @@ func wsConnectWithCurvesContextDialProfile(ctx context.Context, ip, domain, path
 	}
 
 	tlsCfg := webSocketTLSConfig(domain, curves)
-	if profile.verifyCertificates {
-		// The PoC control and split arm use identical standard TLS verification.
-		tlsCfg.InsecureSkipVerify = false
-	}
 
 	if dialContext == nil {
 		dialContext = dialer.DialContext
@@ -814,9 +793,6 @@ func wsConnectWithCurvesContextDialProfile(ctx context.Context, ip, domain, path
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
 	setSockOpts(rawConn)
-	if profile.tcpSplit {
-		rawConn = newCFClientHelloTCPWriteSplitter(rawConn)
-	}
 	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopCancel()
 
@@ -1559,12 +1535,12 @@ func (p *WsPool) rotate(key [2]int, targetIP string, domains []string) {
 
 func connectOneWS(targetIP string, domains []string) *RawWebSocket {
 	for _, domain := range domains {
-		ws, err := wsConnectDirectWS(targetIP, domain, "/apiws", 8)
+		ws, err := wsConnect(targetIP, domain, "/apiws", 8)
 		if err != nil {
 			if shouldTryDomainDial(err) {
 				logDebug.Printf("WS pool connect retry via DNS for %s after pinned endpoint %s",
 					domain, targetIP)
-				ws, usedIP, resolved, fallbackErr := wsConnectViaResolvedDomainWithDial(domain, "/apiws", 8, wsConnectDirectWS)
+				ws, usedIP, resolved, fallbackErr := wsConnectViaResolvedDomain(domain, "/apiws", 8)
 				if fallbackErr == nil {
 					logDebug.Printf("WS pool connect via DNS succeeded for %s -> %s (%s)",
 						domain, usedIP, resolved.String())
@@ -2769,12 +2745,12 @@ func handleClient(ctx context.Context, conn net.Conn) {
 
 			var connErr error
 			attemptTarget := target
-			ws, connErr = wsConnectDirectWS(target, domain, "/apiws", wsTimeout)
+			ws, connErr = wsConnect(target, domain, "/apiws", wsTimeout)
 			if connErr != nil && shouldTryDomainDial(connErr) {
 				logInfo.Printf("[%s] DC%d%s retry via DNS for %s after pinned endpoint %s",
 					label, dc, mTag, domain, target)
 				var resolved resolvedIPs
-				ws, attemptTarget, resolved, connErr = wsConnectViaResolvedDomainWithDial(domain, "/apiws", wsTimeout, wsConnectDirectWS)
+				ws, attemptTarget, resolved, connErr = wsConnectViaResolvedDomain(domain, "/apiws", wsTimeout)
 				if connErr == nil {
 					logInfo.Printf("[%s] DC%d%s domain-dial success for %s via %s (%s)",
 						label, dc, mTag, domain, attemptTarget, resolved.String())

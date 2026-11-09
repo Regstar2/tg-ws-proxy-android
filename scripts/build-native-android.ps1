@@ -45,21 +45,6 @@ function Resolve-AndroidNdkRoot {
 }
 
 $goExe = Resolve-GoExe
-
-# An explicit environment opt-in selects a reproducible A/B profile.
-# Empty means the unchanged shipping runtime, not the strict PoC control.
-$cfClientHelloPoC = [string]$env:TGWS_CF_CLIENTHELLO_POC
-$cfClientHelloTag = ""
-switch ($cfClientHelloPoC) {
-    ""          { }
-    "baseline"  { $cfClientHelloTag = "cfproxy_poc_baseline" }
-    "tcp_split" { $cfClientHelloTag = "cfproxy_poc_tcp_split" }
-    default     { throw "Invalid TGWS_CF_CLIENTHELLO_POC value. Use baseline or tcp_split." }
-}
-if ($cfClientHelloTag) {
-    Write-Host "CF Proxy ClientHello PoC profile: $cfClientHelloPoC (not for release)"
-}
-
 $ndkRoot = Resolve-AndroidNdkRoot
 $clang = Join-Path $ndkRoot "toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android$ApiLevel-clang.cmd"
 if (-not (Test-Path $clang)) {
@@ -85,12 +70,7 @@ try {
 
     Push-Location $sourceDir
     try {
-        $buildArgs = @("build")
-        if ($cfClientHelloTag) {
-            $buildArgs += "-tags=$cfClientHelloTag"
-        }
-        $buildArgs += @("-buildmode=c-shared", "-trimpath", "-o", $outLib, ".")
-        & $goExe @buildArgs
+        & $goExe build -buildmode=c-shared -trimpath -o $outLib .
     } finally {
         Pop-Location
     }

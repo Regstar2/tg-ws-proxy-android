@@ -41,12 +41,6 @@ jobs:
       - name: Native transport and race tests
         working-directory: native/tgwsproxy
         run: go test -race ./...
-      - name: Compile and test both CF ClientHello PoC profiles
-        working-directory: native/tgwsproxy
-        run: |
-          go test -tags cfproxy_poc_baseline -run '^(TestCFClientHello|TestDirectWSClientHello)' ./...
-          go test -tags cfproxy_poc_tcp_split -run '^(TestCFClientHello|TestDirectWSClientHello)' ./...
-
       - name: Deployed Worker handler tests
         run: node --test scripts/cloudflare-worker/*.test.mjs
 

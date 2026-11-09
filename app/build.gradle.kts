@@ -7,12 +7,6 @@ val releaseVersionCode = 63
 val releaseVersionName = "1.11.7"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
-val cfClientHelloPoC = System.getenv("TGWS_CF_CLIENTHELLO_POC").orEmpty()
-if (cfClientHelloPoC.isNotEmpty() && gradle.startParameter.taskNames.any {
-        it.contains("release", ignoreCase = true) || it.equals("build", ignoreCase = true)
-    }) {
-    error("CF ClientHello PoC is limited to explicit debug builds; unset TGWS_CF_CLIENTHELLO_POC for release.")
-}
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -25,8 +19,6 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
 
     inputs.file(script)
     inputs.files(goSources)
-    // Rebuild the native library when switching the explicit A/B profile.
-    inputs.property("cfClientHelloPoC", cfClientHelloPoC)
     outputs.file(output)
     workingDir = rootProject.projectDir
     commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
