@@ -73,6 +73,9 @@ $results = [System.Collections.Generic.List[object]]::new()
 $originalError = $null
 $restoreError = $null
 $backupMayExist = $false
+$experimentalApkInstalled = $false
+$standardRuntimeRestored = $false
+$standardRuntimeError = $null
 $reportPath = Join-Path $SessionDir "direct-wifi-ab.json"
 $csvPath = Join-Path $SessionDir "direct-wifi-ab.csv"
 
@@ -110,6 +113,7 @@ try {
         if (-not (Test-Installed $App)) {
             throw "App disappeared after safe installer"
         }
+        $experimentalApkInstalled = $true
 
         # Open the app before asking its receiver to start a foreground service;
         # Android background-start limits can reject a receiver-only launch.
@@ -205,6 +209,23 @@ try {
         $restoreError = $_
         Write-Warning "RESTORE FAILED. Debug app retains the original snapshot for -RestoreOnly: $_"
     }
+    # The experiment must not stay enabled in the installed binary after
+    # A/B. Rebuild and upgrade back to the ordinary, zero-profile debug APK.
+    # The original *release* APK is not recreated here.
+    if ($experimentalApkInstalled) {
+        try {
+            $env:TGWS_CF_CLIENTHELLO_POC = ""
+            & (Join-Path $Root "scripts/issue-135-rebuild-device.ps1") -SigningRoot $SigningRoot -SkipInstrumentedTests
+            if ($LASTEXITCODE -ne 0) {
+                throw "Ordinary debug runtime rebuild/installation failed"
+            }
+            $standardRuntimeRestored = $true
+            Write-Host "Default (non-PoC) native debug runtime reinstalled"
+        } catch {
+            $standardRuntimeError = $_
+            Write-Warning "Default native runtime restore failed. Experimental APK may remain installed: $_"
+        }
+    }
     if ($null -eq $previousProfile) {
         Remove-Item Env:TGWS_CF_CLIENTHELLO_POC -ErrorAction SilentlyContinue
     } else {
@@ -213,10 +234,12 @@ try {
     $report = [ordered]@{
         issue = 127
         commit = (git -C $Root rev-parse HEAD)
-        result = if ($originalError) { "FAILED" } elseif ($restoreError) { "RESTORE_FAILED" } else { "INCONCLUSIVE" }
+        result = if ($restoreError -or $standardRuntimeError) { "RESTORE_FAILED" } elseif ($originalError) { "FAILED" } else { "INCONCLUSIVE" }
         note = "Telegram launch is not proof of delivered messages/media; duplex counters are observational only."
         results = @($results.ToArray())
         originalSettingsRestored = ($backupMayExist -and $null -eq $restoreError)
+        ordinaryDebugRuntimeRestored = $standardRuntimeRestored
+        ordinaryDebugRuntimeRestoreError = if ($standardRuntimeError) { $standardRuntimeError.Exception.Message } else { $null }
         error = if ($originalError) { $originalError.Exception.Message } else { $null }
         restoreError = if ($restoreError) { $restoreError.Exception.Message } else { $null }
     }
@@ -228,6 +251,9 @@ try {
 }
 if ($restoreError) {
     throw "Could not restore original Wi-Fi settings. Inspect $reportPath; retry with -RestoreOnly."
+}
+if ($standardRuntimeError) {
+    throw "Could not reinstall ordinary native debug runtime. Inspect $reportPath."
 }
 if ($originalError) {
     throw $originalError
