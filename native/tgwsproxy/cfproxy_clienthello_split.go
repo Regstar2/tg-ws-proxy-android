@@ -48,6 +48,9 @@ func (conn *cfClientHelloTCPWriteSplitter) Write(data []byte) (int, error) {
 	if second != len(data)-split {
 		return first + second, io.ErrShortWrite
 	}
+	if logDebug != nil {
+		logDebug.Printf("CF Proxy PoC: ClientHello tcp_split performed two writes (TCP segments unverified)")
+	}
 	return first + second, nil
 }
 
