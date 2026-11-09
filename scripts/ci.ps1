@@ -123,7 +123,7 @@ $issue127Source = Get-Content -LiteralPath $issue127Script -Raw
 $issue127ReceiverSource = Get-Content -LiteralPath $issue127Receiver -Raw
 $issue127ManifestSource = Get-Content -LiteralPath $issue127Manifest -Raw
 if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
-    $issue127Source -notmatch 'ISSUE127_DIRECT_RESTORE' -or
+    $issue127Source -notmatch 'Invoke-Issue127Action -Name "RESTORE"' -or
     $issue127Source -notmatch 'actual_backend=direct_ws' -or
     $issue127Source -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)' -or
     $issue127ReceiverSource -notmatch 'route_policy_wifi_v2' -or
