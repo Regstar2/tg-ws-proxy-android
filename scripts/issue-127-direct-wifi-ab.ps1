@@ -54,6 +54,18 @@ function Invoke-Issue127Action {
     return $lines
 }
 
+function Get-Issue127NativeCounter {
+    param(
+        [Parameter(Mandatory = $true)][string]$Broadcast,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    $match = [regex]::Match($Broadcast, "(?:^|;)" + [regex]::Escape($Name) + "=([0-9]+)")
+    if (-not $match.Success) {
+        throw "Missing native counter $Name in ADB status broadcast"
+    }
+    return [long]$match.Groups[1].Value
+}
+
 function Test-Installed([string]$Package) {
     $paths = @(Invoke-CheckedAdb -Arguments @("shell", "pm", "path", $Package))
     return @($paths | Where-Object { $_ -match '^package:' }).Count -gt 0
@@ -124,11 +136,21 @@ try {
         Invoke-Issue127Action -Name "START" | Out-Null
         Start-Sleep -Seconds 4
 
+        # START is only an Android service request. Confirm that the native
+        # listener actually started, then snapshot its inbound-connection count.
+        $nativeStart = (Invoke-Issue127Action -Name "STATUS") -join " "
+        if ($nativeStart -notmatch 'status=LISTENING_ROUTE_READY;' -or
+            $nativeStart -notmatch 'selected_backend=direct_ws;') {
+            throw "Native Direct-only MTProto listener is not ready: $nativeStart"
+        }
+        $totalBefore = Get-Issue127NativeCounter -Broadcast $nativeStart -Name "total"
+        $nativeEnd = ""
+
         # Stream only current-phase logs. Do not clear system-wide logcat.
         $log = Join-Path $SessionDir "$profile.log"
         $stderr = Join-Path $SessionDir "$profile.stderr.log"
         $capture = Start-Process -FilePath $Adb -ArgumentList @(
-            "-s", $Serial, "logcat", "-v", "threadtime",
+            "-s", $Serial, "logcat", "-T", "1", "-v", "threadtime",
             "-s", "TgWsProxy:*", "AndroidRuntime:E"
         ) -RedirectStandardOutput $log -RedirectStandardError $stderr -PassThru -NoNewWindow
         try {
@@ -140,11 +162,17 @@ try {
                     "shell", "monkey", "-p", $TelegramPackage,
                     "-c", "android.intent.category.LAUNCHER", "1"
                 ) | Out-Null
+                # Telegram may not be configured to use 127.0.0.1:port.
+                # A valid synthetic MTProto init guarantees at least one
+                # genuine upstream Direct WS attempt per trial; it does not
+                # claim delivery of Telegram messages or media.
+                Invoke-Issue127Action -Name "PROBE" | Out-Null
                 Start-Sleep -Seconds $AttemptSeconds
                 # Force-close only Telegram to flush session accounting.
                 Invoke-CheckedAdb -Arguments @("shell", "am", "force-stop", $TelegramPackage) | Out-Null
                 Start-Sleep -Seconds 3
             }
+            $nativeEnd = (Invoke-Issue127Action -Name "STATUS") -join " "
         } finally {
             # Stop the proxy while logcat is still recording so the final
             # MTProto bridge close counters are not lost to an early capture stop.
@@ -172,6 +200,14 @@ try {
         $splitWrites = @($lines | Where-Object {
             $_ -match 'WebSocket PoC: ClientHello tcp_split performed two writes'
         })
+        $routeFailures = @($lines | Where-Object {
+            $_ -match 'MTProto route failed' -and $_ -match 'selected_backend=direct_ws'
+        })
+        $routeRejections = @($lines | Where-Object {
+            $_ -match 'MTProto route rejected' -and $_ -match 'reason=handshake_failed'
+        })
+        $totalAfter = Get-Issue127NativeCounter -Broadcast $nativeEnd -Name "total"
+        $acceptedInbounds = $totalAfter - $totalBefore
         $connectFailures = @($lines | Where-Object {
             $_ -match 'direct_ws_connect_failed|direct_ws_ip_timeout|tls_handshake|connection timed out'
         })
@@ -184,17 +220,35 @@ try {
             network = "wifi"
             attempts = $AttemptsPerProfile
             routeConnects = $routeConnects.Count
+            nativeInboundConnections = $acceptedInbounds
+            nativeInboundTotalBefore = $totalBefore
+            nativeInboundTotalAfter = $totalAfter
+            directRouteFailures = $routeFailures.Count
+            localHandshakeRejections = $routeRejections.Count
+            syntheticProbeAttempts = $AttemptsPerProfile
             directBridgeCloses = $closed.Count
             directDuplexSessions = $duplex.Count
             splitWriteMessages = $splitWrites.Count
             classifiedErrorLogLines = $connectFailures.Count
-            status = if ($duplex.Count -gt 0) { "DIRECT_DUPLEX_OBSERVED" } else { "INCONCLUSIVE" }
+            status = if ($duplex.Count -gt 0) {
+                "DIRECT_DUPLEX_OBSERVED"
+            } elseif ($routeConnects.Count -gt 0) {
+                "DIRECT_HANDSHAKE_OBSERVED"
+            } elseif ($routeFailures.Count -gt 0) {
+                "DIRECT_UPSTREAM_FAILED"
+            } elseif ($acceptedInbounds -lt $AttemptsPerProfile) {
+                "SYNTHETIC_INGRESS_NOT_OBSERVED"
+            } elseif ($routeRejections.Count -gt 0) {
+                "LOCAL_HANDSHAKE_REJECTED"
+            } else {
+                "DIRECT_ATTEMPT_UNCLASSIFIED"
+            }
             telegramMessagesAndMedia = "NOT_VERIFIED"
             tcpSegmentation = "NOT_VERIFIED"
             log = $log
         }
         $results.Add($result)
-        Write-Host "$profile => $($result.status); Direct duplex=$($duplex.Count); split writes=$($splitWrites.Count)"
+        Write-Host "$profile => $($result.status); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count); split writes=$($splitWrites.Count)"
     }
 } catch {
     $originalError = $_
@@ -250,7 +304,7 @@ try {
     $results | Export-Csv -LiteralPath $csvPath -Delimiter ';' -NoTypeInformation -Encoding UTF8
     Write-Host "A/B JSON: $reportPath"
     Write-Host "A/B CSV: $csvPath"
-    $results | Format-Table profile, status, routeConnects, directDuplexSessions, splitWriteMessages -AutoSize
+    $results | Format-Table profile, status, nativeInboundConnections, routeConnects, directRouteFailures, splitWriteMessages -AutoSize
 }
 if ($restoreError) {
     throw "Could not restore original Wi-Fi settings. Inspect $reportPath; retry with -RestoreOnly."
