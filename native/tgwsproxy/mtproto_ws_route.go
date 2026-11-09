@@ -82,21 +82,22 @@ func (c *mtProtoDirectWSConnector) Connect(
 		return nil, result
 	}
 
-	// Preserve the preexisting route-chain cooldown decision. In strict
-	// Direct-only mode a new per-target circuit breaker below still applies.
-	if directIPCoolingDown(target, monoNow()) &&
-		directIPCooldownFallbackAvailable(getRuntimeSettings()) {
-		result.Reason = "direct_ip_cooldown"
-		result.Err = fmt.Errorf("direct WebSocket target %s is on IP cooldown", target)
-		return nil, result
-	}
-
 	path := "/apiws"
 	if request.IsTestDC {
 		path = "/apiws_test"
 	}
 	targets := directWSTargetCandidates(request.DCID, target,
 		c.enableAlternates && !request.IsTestDC)
+	// Preserve the legacy fallback decision for a single cooled-down IP.
+	// With a second target, skip only the cooled-down primary; otherwise
+	// it would incorrectly suppress a healthy alternative.
+	legacyCooldown := directIPCoolingDown(target, monoNow()) &&
+		directIPCooldownFallbackAvailable(getRuntimeSettings())
+	if legacyCooldown && len(targets) == 1 {
+		result.Reason = "direct_ip_cooldown"
+		result.Err = fmt.Errorf("direct WebSocket target %s is on IP cooldown", target)
+		return nil, result
+	}
 
 	// Bound the whole route, not just each dial. A missing TCP SYN/ACK must
 	// not leave a backlog of active MTProto requests on Android.
@@ -111,6 +112,11 @@ func (c *mtProtoDirectWSConnector) Connect(
 		if err := routeCtx.Err(); err != nil {
 			lastErr = err
 			break
+		}
+		if legacyCooldown && candidate == target {
+			lastReason = "direct_ip_cooldown"
+			lastErr = fmt.Errorf("direct WebSocket target %s is on IP cooldown", target)
+			continue
 		}
 
 		var release func()
