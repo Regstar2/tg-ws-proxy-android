@@ -5,6 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import androidx.core.content.ContextCompat
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Debug-only, shell-permission-protected A/B fixture for Issue #127.
@@ -104,6 +111,77 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                     setResultData("start_requested_direct_ws")
                 }
 
+                ACTION_STATUS -> {
+                    val native = NativeProxy.getMtProtoProxyStatus().orEmpty()
+                    check(native.isNotBlank()) { "MTProto native status unavailable" }
+                    val fields = native.split(';').mapNotNull { item ->
+                        val index = item.indexOf('=')
+                        if (index < 1) null
+                        else item.substring(0, index) to item.substring(index + 1)
+                    }.toMap()
+                    // Never expose the MTProto secret or its fingerprint in ADB output.
+                    val safeFields = listOf(
+                        "status", "port", "selected_backend", "actual_backend",
+                        "route_reason", "active", "total", "fake_tls_accepted",
+                        "fake_tls_rejected", "bytes_up", "bytes_down",
+                    )
+                    setResultCode(RESULT_OK)
+                    setResultData(safeFields.joinToString(";") { name ->
+                        "$name=${fields[name].orEmpty()}"
+                    })
+                }
+
+                ACTION_PROBE -> {
+                    check(backup.getBoolean(SNAPSHOT_EXISTS, false)) {
+                        "Configure direct_ws-only before running synthetic probe"
+                    }
+                    check(NetworkProfileProvider.current(context).type == NetworkProfileType.WIFI) {
+                        "Wi-Fi network changed before synthetic probe"
+                    }
+                    val status = NativeProxy.getMtProtoProxyStatus().orEmpty()
+                    check(status.contains("status=LISTENING_ROUTE_READY;")) {
+                        "MTProto frontend is not listening"
+                    }
+                    check(status.contains(";selected_backend=direct_ws;")) {
+                        "Synthetic probe requires selected_backend=direct_ws"
+                    }
+                    val port = status.split(';').firstOrNull { it.startsWith("port=") }
+                        ?.substringAfter('=')?.toIntOrNull()
+                        ?: error("MTProto native listener port unavailable")
+                    val secretHex = MtProtoProxyConfigRepository(prefs)
+                        .loadForDiagnostics().secret
+                    check(MtProtoProxyConfigValidator.isValidRawSecret(secretHex)) {
+                        "MTProto secret invalid for synthetic probe"
+                    }
+                    val secret = secretHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                    val init = ByteArray(64).also { SecureRandom().nextBytes(it) }
+                    // A valid MTProto obfuscated2 intermediate transport header.
+                    // 64 bytes, encrypt positions 56..63 with AES-CTR using
+                    // SHA256(init[8..39] || local-secret) and IV init[40..55].
+                    init[0] = 0x42
+                    init[4] = 0x41
+                    for (index in 56..59) init[index] = 0xee.toByte()
+                    init[60] = 2 // Telegram DC2, little-endian signed DC
+                    init[61] = 0
+                    val keyMaterial = init.copyOfRange(8, 40) + secret
+                    val key = MessageDigest.getInstance("SHA-256").digest(keyMaterial)
+                    val cipher = Cipher.getInstance("AES/CTR/NoPadding")
+                    cipher.init(
+                        Cipher.ENCRYPT_MODE,
+                        SecretKeySpec(key, "AES"),
+                        IvParameterSpec(init.copyOfRange(40, 56)),
+                    )
+                    val encrypted = cipher.doFinal(init)
+                    System.arraycopy(encrypted, 56, init, 56, 8)
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress("127.0.0.1", port), 1500)
+                        socket.getOutputStream().write(init)
+                        socket.getOutputStream().flush()
+                    }
+                    setResultCode(RESULT_OK)
+                    setResultData("synthetic_mtproto_dc2_init_sent;port=$port")
+                }
+
                 ACTION_STOP -> {
                     context.startService(Intent(context, ProxyService::class.java).apply {
                         action = ProxyService.ACTION_STOP
@@ -169,6 +247,8 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
 
         const val ACTION_CONFIGURE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_CONFIGURE"
         const val ACTION_START = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_START"
+        const val ACTION_STATUS = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_STATUS"
+        const val ACTION_PROBE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_PROBE"
         const val ACTION_STOP = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_STOP"
         const val ACTION_RESTORE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_RESTORE"
     }
