@@ -84,6 +84,7 @@ func TestDirectWSCircuitConcurrentAttempts(t *testing.T) {
 	const n = 32
 	start := make(chan struct{})
 	releaseAll := make(chan struct{})
+	observed := make(chan bool, n)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	accepted := 0
@@ -102,18 +103,22 @@ func TestDirectWSCircuitConcurrentAttempts(t *testing.T) {
 				mu.Lock()
 				rejected++
 				mu.Unlock()
+				observed <- false
 				return
 			}
 			mu.Lock()
 			accepted++
 			mu.Unlock()
+			observed <- true
 			<-releaseAll
 			release()
 		}()
 	}
 	close(start)
-	// Keep accepted attempts in flight while all others begin.
-	time.Sleep(100 * time.Millisecond)
+	// Wait until every attempt has acquired or been rejected.
+	for i := 0; i < n; i++ {
+		<-observed
+	}
 	close(releaseAll)
 	wg.Wait()
 	if accepted > directWSMaxConcurrentDials || accepted == 0 || accepted+rejected != n {
