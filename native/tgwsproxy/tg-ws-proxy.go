@@ -716,6 +716,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 type compatibleWebSocketTLSDialer struct {
 	defaultAttempted bool
 	ctx              context.Context
+	cfPoCProfile     cfClientHelloPoCProfile
 	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
 }
 
@@ -727,7 +728,7 @@ func (d *compatibleWebSocketTLSDialer) connect(ip, domain, path string, timeout 
 			ctx = context.Background()
 		}
 		dial = func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error) {
-			return wsConnectWithCurvesContext(ctx, ip, domain, path, timeout, curves)
+			return wsConnectWithCurvesContextDialProfile(ctx, ip, domain, path, timeout, curves, nil, d.cfPoCProfile)
 		}
 	}
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
@@ -767,6 +768,10 @@ func wsConnectWithCurvesContext(ctx context.Context, ip, domain, path string, ti
 }
 
 func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
+	return wsConnectWithCurvesContextDialProfile(ctx, ip, domain, path, timeout, curves, dialContext, cfClientHelloPoCProfile{})
+}
+
+func wsConnectWithCurvesContextDialProfile(ctx context.Context, ip, domain, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error), profile cfClientHelloPoCProfile) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -784,6 +789,10 @@ func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string
 	}
 
 	tlsCfg := webSocketTLSConfig(domain, curves)
+	if profile.verifyCertificates {
+		// The PoC control and split arm use identical standard TLS verification.
+		tlsCfg.InsecureSkipVerify = false
+	}
 
 	if dialContext == nil {
 		dialContext = dialer.DialContext
@@ -793,6 +802,9 @@ func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
 	setSockOpts(rawConn)
+	if profile.tcpSplit {
+		rawConn = newCFClientHelloTCPWriteSplitter(rawConn)
+	}
 	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopCancel()
 
