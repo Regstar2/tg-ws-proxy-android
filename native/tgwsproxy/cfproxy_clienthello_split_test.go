@@ -177,9 +177,10 @@ func TestCFClientHelloTCPSplitCancellationClosesUnderlyingConnection(t *testing.
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
+	hello := cfClientHelloTestRecord(t, "example.test")
 	wrote := make(chan error, 1)
 	go func() {
-		_, err := conn.Write(cfClientHelloTestRecord(t, "example.test"))
+		_, err := conn.Write(hello)
 		wrote <- err
 	}()
 	cancel()
