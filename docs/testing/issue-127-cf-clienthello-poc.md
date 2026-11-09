@@ -62,6 +62,9 @@ This automation does **not** guarantee Telegram sends new messages, downloads me
 
 The user's first device attempt on 2026-11-09 successfully built and installed `baseline`, then stopped before any network tests because the initial script required Wi-Fi already configured as `direct_ws`-only. The second attempt (`ac735cc`, both profiles) built, installed and started a Direct-only MTProto frontend, but neither phase showed Direct route attempts or duplex. The uploaded private `direct-diagnostics.zip` confirms the listener was ready on `127.0.0.1:1445`, no route/handshake errors were emitted, and `tcp_split.log` replayed `baseline` history because logcat was not bounded to the current phase. This is `INCONCLUSIVE`, not a TLS/DPI result. The next run uses **synthetic authenticated local ingress** and native `total` counters to guarantee a legitimate route attempt and separate Telegram configuration issues from Direct TCP/TLS outcomes. New automated run: **NOT_RUN**. The script also checks the saved MTProto frontend before startup. The user's last configuration must point Telegram to the correct local proxy.
 
+
+Device rerun 2026-11-09 (d108b6b): baseline APK built and installed; first synthetic PROBE broadcast failed with NetworkOnMainThreadException because the debug receiver dialled a loopback socket on Android main thread. Wi-Fi preferences and ordinary debug runtime were restored. Implemented goAsync + dedicated probe thread + PendingResult.finish() for ADB result in experimental PR. New device test NOT_RUN; direct_ws network behavior remains INCONCLUSIVE.
+
 ### Physical A/B test, still required
 
 1. Use one network on which `cf_proxy_ws` and/or `direct_ws` genuinely fails. If a route currently works reliably, label its result **INCONCLUSIVE**, not GO. Preserve network conditions; no DNS overrides, switching networks, changing route policies or changing active endpoint lists mid-series.
