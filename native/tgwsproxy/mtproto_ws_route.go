@@ -364,7 +364,7 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	dialer := compatibleWebSocketTLSDialer{ctx: ctx, cfPoCProfile: cfProxyPoCProfile}
+	dialer := compatibleWebSocketTLSDialer{ctx: ctx, cfPoCProfile: webSocketClientHelloPoCProfile}
 	ws, err := dialer.connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
