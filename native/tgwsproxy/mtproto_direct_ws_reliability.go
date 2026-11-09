@@ -130,6 +130,12 @@ func defaultMtProtoDirectWSDialContext(
 		return ws, nil
 	}
 	if ctx.Err() != nil {
+		// Preserve the TCP stage in the originating DialContext error. Losing
+		// it would bypass cooldown precisely when a deadline expires.
+		var stageErr *wsStageError
+		if errors.As(err, &stageErr) && stageErr.Stage == "tcp_dial" {
+			return nil, err
+		}
 		return nil, ctx.Err()
 	}
 	if !shouldTryDomainDial(err) {
@@ -170,3 +176,9 @@ func defaultMtProtoDirectWSDialContext(
 // Compile-time type contract: the Direct dialer continues to return the same
 // WebSocket frame socket as the original implementation.
 var _ net.Conn = (*mtProtoWebSocketStream)(nil)
+
+func resetDirectWSHealthForTests() {
+	directWSHealth.Lock()
+	directWSHealth.entries = make(map[directWSHealthKey]directWSHealthEntry)
+	directWSHealth.Unlock()
+}
