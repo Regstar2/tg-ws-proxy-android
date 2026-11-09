@@ -133,6 +133,10 @@ if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
     $issue127ReceiverSource -notmatch 'snapshot_exists' -or
     $issue127ReceiverSource -notmatch 'ACTION_STATUS' -or
     $issue127ReceiverSource -notmatch 'ACTION_PROBE' -or
+    $issue127ReceiverSource -notmatch 'val pending = goAsync\(\)' -or
+    $issue127ReceiverSource -notmatch 'Thread\(\{' -or
+    $issue127ReceiverSource -notmatch 'pending\.finish\(\)' -or
+    $issue127ReceiverSource -notmatch 'private fun runDirectProbe\(' -or
     $issue127ManifestSource -notmatch 'Issue127DirectSmokeReceiver' -or
     $issue127ManifestSource -notmatch 'android:permission="android.permission.DUMP"') {
     throw "Issue #127 safety, restore or real Direct-backend acceptance preflight failed"
