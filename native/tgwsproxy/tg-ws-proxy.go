@@ -580,6 +580,12 @@ func runFallbackChain(ctx context.Context, client net.Conn, session *initSession
 }
 
 func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSocket, string, resolvedIPs, error) {
+	return wsConnectViaResolvedDomainWithDial(domain, path, timeout, wsConnect)
+}
+
+// wsConnectViaResolvedDomainWithDial keeps the same DNS/IP fallback while the
+// selected caller controls its TLS ClientHello profile on every attempt.
+func wsConnectViaResolvedDomainWithDial(domain, path string, timeout float64, connect func(string, string, string, float64) (*RawWebSocket, error)) (*RawWebSocket, string, resolvedIPs, error) {
 	resolved, err := resolvePreferredIPs(domain, timeout)
 	if err != nil {
 		return nil, "", resolved, &wsStageError{Stage: "tcp_dial", Err: err}
@@ -592,7 +598,7 @@ func wsConnectViaResolvedDomain(domain, path string, timeout float64) (*RawWebSo
 
 	var lastErr error
 	for _, ip := range candidates {
-		ws, connErr := wsConnect(ip, domain, path, timeout)
+		ws, connErr := connect(ip, domain, path, timeout)
 		if connErr == nil {
 			return ws, ip, resolved, nil
 		}
