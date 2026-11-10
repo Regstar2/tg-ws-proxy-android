@@ -41,7 +41,6 @@
     <string name="update_install_title">Установить обновление?</string>
     <string name="update_install_warning">Во время установки соединения прокси могут прерваться. Установку необходимо подтвердить в Android.</string>
     <string name="update_install_confirm_android">Подтвердите установку в Android. Версия обновится после завершения установки.</string>
-    <string name="update_install_later">Позже</string>
     <string name="update_later">Позже</string>
     <string name="update_installer_opened">Ожидание установки</string>
     <string name="update_installer_failed">Не удалось открыть системный установщик.</string>
