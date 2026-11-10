@@ -129,6 +129,9 @@ if ($issue127Source -notmatch 'issue-135-rebuild-device.ps1' -or
     $issue127Source -notmatch '"logcat", "-T", "1"' -or
     $issue127Source -notmatch 'nativeInboundConnections' -or
     $issue127Source -notmatch 'direct_reliability' -or
+    $issue127Source -notmatch 'diagnosticPort|smoke_port' -or
+    $issue127ReceiverSource -notmatch 'Issue127DiagnosticPort.select' -or
+    $issue127ReceiverSource -notmatch 'Synthetic probe refused to use non-isolated proxy listener' -or
     $issue127Source -match 'TGWS_CF_CLIENTHELLO_POC|tcp_split' -or
     $issue127Source -match '(?im)^\s*(?:adb\s+[^\r\n]*\s+uninstall\b|adb\s+[^\r\n]*\s+pm\s+clear\b|[^#\r\n]*gradlew[^\r\n]*connectedDebugAndroidTest)' -or
     $issue127ReceiverSource -notmatch 'route_policy_wifi_v2' -or

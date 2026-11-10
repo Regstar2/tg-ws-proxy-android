@@ -102,7 +102,10 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                     // Use a separate OS-allocated port so Telegram reconnects
                     // cannot contaminate the single synthetic Direct attempt.
                     val diagnosticPort = Issue127DiagnosticPort.select(
-                        forbidden = setOf(config.port, saved.port),
+                        forbidden = setOf(
+                            config.port, saved.port,
+                            DEFAULT_LOCAL_PROXY_PORT, LEGACY_DEFAULT_LOCAL_PROXY_PORT,
+                        ),
                     ) {
                         java.net.ServerSocket(0).use { it.localPort }
                     }

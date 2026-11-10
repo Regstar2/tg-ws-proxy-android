@@ -108,3 +108,34 @@ reinstalling the ordinary build.
 Do not merge or close Issue #127 while the mandatory tests remain
 missing. The goal is a measured Direct recovery without changing the
 previously functional Cloudflare route.
+
+
+## 2026-11-10 — Actual device acceptance and diagnostic isolation
+
+- **Focused native Direct tests: PASS** (`go test -count=1 -run
+  '^(TestMtProtoDirectWSConnector|TestDirectWS)' .`, 0.833 seconds).
+- **Signed Android build: PASS**, 71 Gradle tasks and test/lint/assemble
+  graph completed, original-signature debug APK upgraded without reset.
+  `libtgwsproxy.so` was built for arm64-v8a.
+- **Initial Wi-Fi Direct smoke:** `INGRESS_CONTAMINATED`;
+  synthetic init sent=1, native incoming connections=131,
+  Direct route failures=135, Direct connections=0. Report:
+  `artifacts/issue127/20261110-111122/direct-wifi-smoke.json`.
+  The test used the user's saved proxy port, so Telegram's own
+  automatic reconnections could enter the same native listener.
+  Do not interpret 135 log lines as 135 independent synthetic sessions.
+  Direct reachability and alternate IP effectiveness are still **unknown**.
+- Original Wi-Fi settings were restored by the script; the script
+  **stops the proxy service**, so users must manually start the
+  proxy again afterward if required. The signed debug APK remains
+  installed.
+- The next revision uses an OS-allocated **distinct diagnostic port**
+  (rejecting user-configured and known default local ports), verifies
+  it against the native listener status and requires the synthetic
+  client to use only that listener. The original per-network policy
+  and local-port preferences are backed up/restored. The script also
+  reports stage-specific TCP/TLS/WebSocket failure counts and route
+  failure reasons without exposing domain/IP names in the summary.
+- Device acceptance of this revised isolated fixture is **NOT_RUN**.
+  It is not a guarantee of real Telegram text/media delivery, nor
+  a fix for the reported Cloudflare Proxy "Connecting" symptom.
