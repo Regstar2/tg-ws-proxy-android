@@ -14,6 +14,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
 private const val MAX_UPDATE_BYTES = 100L * 1024L * 1024L
@@ -143,6 +144,15 @@ class AppUpdateInstaller(private val context: Context) {
         }
         if ((archive.applicationInfo?.minSdkVersion ?: Int.MAX_VALUE) > Build.VERSION.SDK_INT) {
             throw UpdateInstallException("APK requires newer Android")
+        }
+        ZipFile(file).use { zip ->
+            val abiNames = zip.entries().asSequence()
+                .filter { !it.isDirectory && it.name.startsWith("lib/") && it.name.endsWith(".so") }
+                .mapNotNull { it.name.split('/').getOrNull(1) }
+                .toSet()
+            if (abiNames != setOf("arm64-v8a")) {
+                throw UpdateInstallException("APK native libraries do not match arm64-v8a")
+            }
         }
         val installedSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             installed.signingInfo?.apkContentsSigners?.toList().orEmpty()
