@@ -21,7 +21,15 @@ try {
     ) | Set-Content -LiteralPath (Join-Path $dir 'tcp_split.log') -Encoding UTF8
 
     & $analyzer -RunDir $dir | Out-Null
-    $data = @(Get-Content -LiteralPath (Join-Path $dir 'direct-stage-summary.json') -Raw | ConvertFrom-Json)
+    # WinPS 5.1 emits a JSON array as ONE pipeline object, unlike
+    # PowerShell 7. Assign the decoded value first, then materialize
+    # the actual array contents. Do not wrap the JSON pipeline in @(...).
+    $raw = Get-Content -LiteralPath (Join-Path $dir 'direct-stage-summary.json') -Raw
+    if (-not $raw.TrimStart([char]0xFEFF, [char]' ', [char]10, [char]13, [char]9).StartsWith('[')) {
+        throw "Stage summary must have a JSON array as its root"
+    }
+    $parsed = ConvertFrom-Json -InputObject $raw
+    $data = @($parsed)
     if ($data.Count -ne 2) { throw "Expected two profiles, got $($data.Count)" }
     $baseline = @($data | Where-Object { $_.profile -eq 'baseline' })[0]
     $split = @($data | Where-Object { $_.profile -eq 'tcp_split' })[0]
