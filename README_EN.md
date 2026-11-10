@@ -48,7 +48,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 | Cloudflare Worker | Optional Telegram route; Consumer WARP provisioning uses a separately managed bootstrap Worker pool |
 | Worker Pool | Implemented but still slower than direct connectivity and not recommended as the primary route |
 | Feedback | Dedicated screen; GitHub Issue Forms without an embedded PAT |
-| Updates | Official GitHub Releases check with SemVer and official release-page navigation |
+| Updates | GitHub Releases check, optional startup prompt, signed APK download/validation and Android installer handoff (#139; device acceptance pending) |
 
 ## Features
 
