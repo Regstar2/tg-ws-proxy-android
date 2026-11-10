@@ -103,12 +103,15 @@ class AppUpdateInstaller(private val context: Context) {
             throw UpdateInstallException("APK signature validation failed")
         }
         val pm = context.packageManager
-        val archive = pm.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+        val signingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else PackageManager.GET_SIGNATURES
+        val archive = pm.getPackageArchiveInfo(file.absolutePath, signingFlags)
             ?: throw UpdateInstallException("Invalid APK metadata")
         if (archive.packageName != context.packageName) {
             throw UpdateInstallException("APK belongs to another package")
         }
-        val installed = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        val installed = pm.getPackageInfo(context.packageName, signingFlags)
         val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             installed.longVersionCode
         } else installed.versionCode.toLong()
