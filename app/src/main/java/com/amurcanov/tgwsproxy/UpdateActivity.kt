@@ -186,6 +186,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
         runningJob = scope.launch {
             state = UpdateState.Checking
             notesExpanded = false
+            var forwardedToDownload = false
             try {
                 val result = withContext(Dispatchers.IO) {
                     AppUpdateSelector.select(installed.name, client.fetchReleases())
@@ -198,6 +199,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                             // "Download and install" in the launch dialog.
                             runningJob = null
                             startDownload(result.release)
+                            forwardedToDownload = true
                         }
                     }
                     UpdateDecision.UpToDate -> state = UpdateState.Current
@@ -206,7 +208,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
             } catch (_: Exception) {
                 state = UpdateState.Failed(null, R.string.update_error_network)
             } finally {
-                if (state !is UpdateState.Downloading) runningJob = null
+                if (!forwardedToDownload) runningJob = null
             }
         }
     }
@@ -259,10 +261,15 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
         } else R.string.update_open_release
         is UpdateState.Downloading -> R.string.update_cancel_download
         is UpdateState.Verifying -> R.string.update_preparing
-        is UpdateState.Ready, is UpdateState.InstallerOpened -> R.string.update_install_now
+        is UpdateState.Ready -> R.string.update_install_now
+        is UpdateState.InstallerOpened -> R.string.update_check_now
         is UpdateState.PermissionRequired -> R.string.update_permission_action
         is UpdateState.Cancelled -> R.string.update_download_install
-        is UpdateState.Failed -> if (sourceRelease != null) R.string.update_retry else R.string.update_check_now
+        is UpdateState.Failed -> when {
+            sourceRelease == null -> R.string.update_check_now
+            AppUpdateAssetSelector.select(sourceRelease) == null -> R.string.update_open_release
+            else -> R.string.update_retry
+        }
         UpdateState.Checking -> R.string.update_status_checking
     }
     val buttonEnabled = state !is UpdateState.Checking && state !is UpdateState.Verifying
@@ -456,7 +463,10 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                         }
                         is UpdateState.Cancelled -> startDownload(current.release)
                         is UpdateState.Failed -> {
-                            if (current.release != null) startDownload(current.release) else checkUpdates()
+                            if (current.release == null) checkUpdates()
+                            else if (AppUpdateAssetSelector.select(current.release) == null) {
+                                openOfficialRelease(context, current.release.tagName)
+                            } else startDownload(current.release)
                         }
                         else -> Unit
                     }
