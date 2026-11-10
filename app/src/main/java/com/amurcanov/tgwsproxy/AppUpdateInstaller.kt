@@ -29,6 +29,11 @@ class AppUpdateInstaller(private val context: Context) {
     private val pendingFile: File get() = File(directory, "release.apk.part")
     private val verifiedFile: File get() = File(directory, "release.apk")
 
+    init {
+        // Never reuse APKs left from an earlier process or release.
+        discard()
+    }
+
     suspend fun download(
         release: GitHubReleaseInfo,
         onProgress: suspend (Long, Long) -> Unit,
@@ -40,8 +45,19 @@ class AppUpdateInstaller(private val context: Context) {
         verifiedFile.delete()
         try {
             val officialChecksum = selection.checksum?.let { asset ->
-                val raw = downloadText(asset.downloadUrl)
-                AppUpdateAssetSelector.parseChecksum(raw, selection.apk.name)
+                val rawBytes = downloadBytes(asset.downloadUrl)
+                asset.digest?.let { metadata ->
+                    val expected = metadata.takeIf {
+                        it.matches(Regex("^sha256:[0-9a-fA-F]{64}$"))
+                    }?.substringAfter(':')?.lowercase()
+                        ?: throw UpdateInstallException("Invalid checksum asset digest")
+                    if (sha256(rawBytes) != expected) {
+                        throw UpdateInstallException("Checksum asset digest mismatch")
+                    }
+                }
+                AppUpdateAssetSelector.parseChecksum(
+                    String(rawBytes, Charsets.US_ASCII), selection.apk.name,
+                )
                     ?: throw UpdateInstallException("Invalid release checksum")
             }
             val expectedHash = selection.metadataSha256 ?: officialChecksum
@@ -56,6 +72,10 @@ class AppUpdateInstaller(private val context: Context) {
                     throw UpdateInstallException("APK download HTTP " + response.responseCode)
                 }
                 val length = response.contentLengthLong
+                val mime = response.contentType?.substringBefore(';')?.trim()?.lowercase()
+                if (mime !in setOf("application/octet-stream", "application/vnd.android.package-archive")) {
+                    throw UpdateInstallException("Unexpected APK MIME type")
+                }
                 if (length > MAX_UPDATE_BYTES || (length >= 0 && length != selection.apk.size)) {
                     throw UpdateInstallException("Unexpected APK content length")
                 }
@@ -153,7 +173,7 @@ class AppUpdateInstaller(private val context: Context) {
         verifiedFile.delete()
     }
 
-    private fun downloadText(url: String): String {
+    private fun downloadBytes(url: String): ByteArray {
         val connection = openVerifiedConnection(url)
         try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK ||
@@ -168,7 +188,7 @@ class AppUpdateInstaller(private val context: Context) {
                     total += count
                 }
                 if (total > MAX_CHECKSUM_BYTES) throw UpdateInstallException("Checksum too large")
-                return String(bytes, 0, total, Charsets.US_ASCII)
+                return bytes.copyOf(total)
             }
         } finally {
             connection.disconnect()
