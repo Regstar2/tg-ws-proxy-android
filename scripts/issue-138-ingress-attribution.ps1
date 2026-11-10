@@ -99,6 +99,6 @@ Write-AdbSnapshot -Label 'logcat' -AdbArgs @('logcat', '-d', '-t', '10000', '-v'
 ) | Set-Content -LiteralPath (Join-Path $runDir 'README.txt') -Encoding UTF8
 
 $zip = Join-Path $artifactRoot "ingress-$timestamp.zip"
-Compress-Archive -LiteralPath (Join-Path $runDir '*') -DestinationPath $zip -Force
+Compress-Archive -Path (Join-Path $runDir '*') -DestinationPath $zip -Force
 Write-Host "Evidence ZIP: $zip"
 Write-Host "Review process PIDs and socket samples alongside the logcat timestamps."
