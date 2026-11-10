@@ -56,4 +56,5 @@
     <string name="update_prompt_title">%1$s available</string>
     <string name="update_prompt_subtitle">New TgWsProxy version · %1$.1f MB</string>
     <string name="update_disable_reminders">Disable reminders</string>
+    <string name="update_retry">Retry download</string>
 </resources>
