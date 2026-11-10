@@ -125,6 +125,24 @@ if ($smokeSource -notmatch 'Start-Sleep -Milliseconds 500' -or
     throw "Issue #135 route smoke requires a bounded PID wait, backend evidence and safe app handling"
 }
 
+# Issue #138: validate the read-only ingress attribution capture without ADB.
+$issue138Capture = Join-Path $PSScriptRoot 'issue-138-ingress-attribution.ps1'
+if (-not (Test-Path -LiteralPath $issue138Capture)) {
+    throw "Issue #138 ingress evidence capture script is missing"
+}
+$issue138Tokens = $null
+$issue138Errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $issue138Capture, [ref]$issue138Tokens, [ref]$issue138Errors
+) | Out-Null
+if ($issue138Errors) {
+    throw "Issue #138 ingress evidence capture script has invalid PowerShell syntax: $($issue138Errors -join '; ')"
+}
+$issue138Source = Get-Content -LiteralPath $issue138Capture -Raw
+if ($issue138Source -match '(?im)^\s*[^#\r\n]*\badb\b[^\r\n]*\b(?:uninstall|pm\s+clear|logcat\s+-c)\b') {
+    throw "Issue #138 device evidence capture must not remove app data or clear logcat"
+}
+
 # Guard against an AGP instrumentation cleanup removing the production app.
 $routeInstallSource = Get-Content -LiteralPath $routeInstallScript -Raw
 if ($routeInstallSource -match '(?m)^[^#\r\n]*:app:connectedDebugAndroidTest') {
