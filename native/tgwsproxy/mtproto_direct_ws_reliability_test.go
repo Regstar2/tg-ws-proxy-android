@@ -242,3 +242,102 @@ func TestDirectWSAlternativeAvailableWhenLegacyPrimaryCooling(t *testing.T) {
 		t.Fatalf("expected alternate target after primary cooldown: %s", target)
 	}
 }
+
+func TestDirectWSDualStackScopeAndTLSHost(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		domain string
+		want   string
+	}{
+		{"149.154.167.51", "kws2.web.telegram.org", "2001:67c:4e8:f002::a"},
+		{"149.154.167.51", "kws2-1.web.telegram.org", "2001:67c:4e8:f002::a"},
+		{"149.154.167.91", "kws4.web.telegram.org", "2001:67c:4e8:f004::a"},
+		{"149.154.167.41", "kws2.web.telegram.org", ""},
+		{"149.154.167.40", "kws2.web.telegram.org", ""}, // Test DC.
+		{"149.154.167.220", "kws2.web.telegram.org", ""}, // Existing legacy alternate.
+		{"149.154.167.51", "invalid.example", ""},
+	} {
+		if got := directWSKnownIPv6(tc.target, tc.domain); got != tc.want {
+			t.Fatalf("target=%s domain=%s IPv6=%s want=%s", tc.target, tc.domain, got, tc.want)
+		}
+	}
+}
+
+func TestDirectWSDualStackDNSFirstThenIPv6ThenPinned(t *testing.T) {
+	sock := &fakeMtProtoFrameSocket{}
+	var attempts []string
+	lookups := 0
+	resolver := func(context.Context, string, float64) (resolvedIPs, error) {
+		lookups++
+		return resolvedIPs{
+			IPv6: []string{"2001:db8::10"},
+			IPv4: []string{"192.0.2.12"},
+		}, nil
+	}
+	dial := func(_ context.Context, ip, domain, path string, timeout float64) (mtProtoFrameSocket, error) {
+		if domain != "kws2.web.telegram.org" || path != "/apiws" || timeout <= 0 || timeout > 3 {
+			t.Fatalf("Direct WS dial changed Host/path/budget: %s %s %.2f", domain, path, timeout)
+		}
+		attempts = append(attempts, ip)
+		if ip == "149.154.167.51" {
+			return sock, nil
+		}
+		return nil, &wsStageError{Stage: "tcp_dial", Err: timeoutErr{}}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	got, err := dialDirectWSDualStack(ctx, "149.154.167.51",
+		"2001:67c:4e8:f002::a", "kws2.web.telegram.org", "/apiws", 7,
+		resolver, dial)
+	if err != nil || got != sock || lookups != 1 {
+		t.Fatalf("dial result err=%v socket=%v lookups=%d", err, got, lookups)
+	}
+	want := []string{"2001:db8::10", "2001:67c:4e8:f002::a", "192.0.2.12", "149.154.167.51"}
+	if !reflect.DeepEqual(attempts, want) {
+		t.Fatalf("attempts=%v, want %v", attempts, want)
+	}
+}
+
+func TestDirectWSDualStackDNSUnavailableStillTriesIPv6(t *testing.T) {
+	sock := &fakeMtProtoFrameSocket{}
+	var attempts []string
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	got, err := dialDirectWSDualStack(ctx, "149.154.167.51",
+		"2001:67c:4e8:f002::a", "kws2.web.telegram.org", "/apiws", 7,
+		func(context.Context, string, float64) (resolvedIPs, error) {
+			return resolvedIPs{}, errors.New("DNS blocked")
+		},
+		func(_ context.Context, ip, _, _ string, _ float64) (mtProtoFrameSocket, error) {
+			attempts = append(attempts, ip)
+			if ip == "2001:67c:4e8:f002::a" {
+				return sock, nil
+			}
+			return nil, &wsStageError{Stage: "tcp_dial", Err: timeoutErr{}}
+		})
+	if err != nil || got != sock {
+		t.Fatalf("DNS failure must not suppress IPv6: %v", err)
+	}
+	if !reflect.DeepEqual(attempts, []string{"2001:67c:4e8:f002::a"}) {
+		t.Fatalf("DNS failure candidates=%v", attempts)
+	}
+}
+
+func TestDirectWSDualStackHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts := 0
+	_, err := dialDirectWSDualStack(ctx, "149.154.167.51",
+		"2001:67c:4e8:f002::a", "kws2.web.telegram.org", "/apiws", 7,
+		func(context.Context, string, float64) (resolvedIPs, error) {
+			return resolvedIPs{}, nil
+		},
+		func(ctx context.Context, _, _, _ string, _ float64) (mtProtoFrameSocket, error) {
+			attempts++
+			cancel()
+			return nil, ctx.Err()
+		})
+	if !errors.Is(err, context.Canceled) || attempts != 1 {
+		t.Fatalf("cancel result=%v attempts=%d", err, attempts)
+	}
+}
