@@ -93,6 +93,7 @@ foreach ($profile in @('baseline', 'tcp_split')) {
     }
 }
 $output = Join-Path $RunDir 'direct-stage-summary.json'
-$report.ToArray() | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $output -Encoding UTF8
+ConvertTo-Json -InputObject ($report.ToArray()) -Depth 6 |
+    Set-Content -LiteralPath $output -Encoding UTF8
 Get-Content -LiteralPath $output
 Write-Host "Non-sensitive stage summary: $output"
