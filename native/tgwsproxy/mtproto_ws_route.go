@@ -60,13 +60,19 @@ func (c *mtProtoDirectWSConnector) Connect(
 		return nil, result
 	}
 
-	resolveTarget := c.resolveTarget
-	if resolveTarget == nil {
-		resolveTarget = mtProtoTargetForDC
-	}
-	target, _, ok := resolveTarget(request.DCID)
+	// A test DC must never be resolved through the production DC mapping.
+	// Keep the paths mutually exclusive so a resolver cannot run (or fail)
+	// before the test endpoint and /apiws_test are selected.
+	var target string
+	var ok bool
 	if request.IsTestDC {
 		target, _, ok = mtProtoTestTargetForDC(request.DCID)
+	} else {
+		resolveTarget := c.resolveTarget
+		if resolveTarget == nil {
+			resolveTarget = mtProtoTargetForDC
+		}
+		target, _, ok = resolveTarget(request.DCID)
 	}
 	if !ok || target == "" {
 		result.Reason = "direct_ws_target_unavailable"
