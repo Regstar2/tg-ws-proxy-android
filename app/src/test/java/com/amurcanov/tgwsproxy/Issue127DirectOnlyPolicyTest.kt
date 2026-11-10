@@ -25,5 +25,22 @@ class Issue127DirectOnlyPolicyTest {
         assertTrue(RouteKind.WORKER_WS in policy.inactiveRoutes)
         assertTrue(RouteKind.AWG_WARP in policy.inactiveRoutes)
         assertTrue(RouteKind.TCP_FALLBACK in policy.inactiveRoutes)
+    } 
+    @Test
+    fun diagnosticPortNeverReusesTelegramPort() {
+        val candidates = listOf(1443, 9000, 80, 54732).iterator()
+        val port = Issue127DiagnosticPort.select(setOf(1443, 9000)) { candidates.next() }
+        assertEquals(54732, port)
     }
+
+    @Test
+    fun diagnosticPortRejectsExhaustedAllocator() {
+        try {
+            Issue127DiagnosticPort.select(setOf(1443)) { 1443 }
+            throw AssertionError("Expected exhausted port allocation to fail")
+        } catch (expected: IllegalStateException) {
+            assertTrue(expected.message.orEmpty().contains("distinct"))
+        }
+    }
+
 }

@@ -122,7 +122,11 @@ try {
         Start-Sleep -Seconds 2
         $backupMayExist = $true
         Invoke-Issue127Action -Name "CONFIGURE" | Out-Null
-        Invoke-Issue127Action -Name "START" | Out-Null
+        $startResult = (Invoke-Issue127Action -Name "START") -join " "
+        $startPort = Get-Issue127NativeCounter -Broadcast $startResult -Name "smoke_port"
+        if ($startPort -lt 1024 -or $startPort -gt 65535) {
+            throw "Diagnostic listener chose invalid isolated port: $startPort"
+        }
         Start-Sleep -Seconds 4
 
         # START is only an Android service request. Confirm that the native
@@ -132,6 +136,12 @@ try {
             $nativeStart -notmatch 'selected_backend=direct_ws;') {
             throw "Native Direct-only MTProto listener is not ready: $nativeStart"
         }
+        $nativePort = Get-Issue127NativeCounter -Broadcast $nativeStart -Name "port"
+        $smokePort = Get-Issue127NativeCounter -Broadcast $nativeStart -Name "smoke_port"
+        if ($nativePort -ne $startPort -or $smokePort -ne $startPort) {
+            throw "Direct synthetic listener is not on isolated port (start=$startPort actual=$nativePort status=$smokePort)"
+        }
+        Write-Host "Issue127 isolated diagnostic listener port: $smokePort"
         $totalBefore = Get-Issue127NativeCounter -Broadcast $nativeStart -Name "total"
         $nativeEnd = ""
 
@@ -191,6 +201,23 @@ try {
             $_ -match 'Issue127 Direct synthetic socket failed'
         })
         $totalAfter = Get-Issue127NativeCounter -Broadcast $nativeEnd -Name "total"
+        $tcpDialFailures = @($lines | Where-Object {
+            $_ -match 'direct_ws TCP dial failure'
+        })
+        $tlsFailures = @($lines | Where-Object {
+            $_ -match 'direct_ws TLS handshake failure'
+        })
+        $wsUpgradeFailures = @($lines | Where-Object {
+            $_ -match 'direct_ws websocket upgrade .*failure'
+        })
+        $reasonCounts = [ordered]@{}
+        foreach ($failedLine in $routeFailures) {
+            if ($failedLine -match '\breason=([a-z0-9_]+)') {
+                $reason = $Matches[1]
+                if (-not $reasonCounts.Contains($reason)) { $reasonCounts[$reason] = 0 }
+                $reasonCounts[$reason]++
+            }
+        }
         $acceptedInbounds = $totalAfter - $totalBefore
         $connectFailures = @($lines | Where-Object {
             $_ -match 'direct_ws_connect_failed|direct_ws_ip_timeout|tls_handshake|connection timed out'
@@ -202,7 +229,12 @@ try {
             profile = $profile
             route = "direct_ws"
             network = "wifi"
+            diagnosticPort = $smokePort
             attempts = $AttemptsPerProfile
+            tcpDialFailureLogLines = $tcpDialFailures.Count
+            tlsHandshakeFailureLogLines = $tlsFailures.Count
+            websocketUpgradeFailureLogLines = $wsUpgradeFailures.Count
+            routeFailureReasons = $reasonCounts
             routeConnects = $routeConnects.Count
             nativeInboundConnections = $acceptedInbounds
             nativeInboundTotalBefore = $totalBefore
@@ -217,7 +249,7 @@ try {
             classifiedErrorLogLines = $connectFailures.Count
             status = if ($syntheticSent.Count -lt $AttemptsPerProfile -or $syntheticFailed.Count -gt 0) {
                 "SYNTHETIC_PROBE_FAILED"
-            } elseif ($acceptedInbounds -gt (10 * $AttemptsPerProfile)) {
+            } elseif ($acceptedInbounds -gt $AttemptsPerProfile) {
                 "INGRESS_CONTAMINATED"
             } elseif ($duplex.Count -gt 0) {
                 "DIRECT_DUPLEX_OBSERVED"
@@ -236,7 +268,7 @@ try {
             log = $log
         }
         $results.Add($result)
-        Write-Host "$profile => $($result.status); synthetic_sent=$($syntheticSent.Count); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count)"
+        Write-Host "$profile => $($result.status); diagnostic_port=$smokePort; synthetic_sent=$($syntheticSent.Count); inbounds=$acceptedInbounds; Direct connects=$($routeConnects.Count); route failures=$($routeFailures.Count); tcp=$($tcpDialFailures.Count); tls=$($tlsFailures.Count); ws_upgrade=$($wsUpgradeFailures.Count)"
     }
 } catch {
     $originalError = $_

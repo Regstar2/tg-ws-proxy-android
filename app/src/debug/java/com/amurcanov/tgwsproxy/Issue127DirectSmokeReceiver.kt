@@ -98,17 +98,28 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                         "Runtime policy is not direct_ws-only"
                     }
                     check(config.ips.isNotBlank()) { "Runtime config is empty" }
+                    // The user's configured port is also used by Telegram.
+                    // Use a separate OS-allocated port so Telegram reconnects
+                    // cannot contaminate the single synthetic Direct attempt.
+                    val diagnosticPort = Issue127DiagnosticPort.select(
+                        forbidden = setOf(config.port, saved.port),
+                    ) {
+                        java.net.ServerSocket(0).use { it.localPort }
+                    }
+                    check(backup.edit().putInt(DIAGNOSTIC_PORT, diagnosticPort).commit()) {
+                        "Could not persist diagnostic listener port"
+                    }
                     ContextCompat.startForegroundService(
                         context,
                         Intent(context, ProxyService::class.java).apply {
                             action = ProxyService.ACTION_START
-                            putExtra(ProxyService.EXTRA_PORT, config.port)
+                            putExtra(ProxyService.EXTRA_PORT, diagnosticPort)
                             putExtra(ProxyService.EXTRA_IPS, config.ips)
                             putExtra(ProxyService.EXTRA_POOL_SIZE, config.poolSize)
                         },
                     )
                     setResultCode(RESULT_OK)
-                    setResultData("start_requested_direct_ws")
+                    setResultData("start_requested_direct_ws;smoke_port=$diagnosticPort")
                 }
 
                 ACTION_STATUS -> {
@@ -126,9 +137,12 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
                         "fake_tls_rejected", "bytes_up", "bytes_down",
                     )
                     setResultCode(RESULT_OK)
-                    setResultData(safeFields.joinToString(";") { name ->
-                        "$name=${fields[name].orEmpty()}"
-                    })
+                    val diagnosticPort = backup.getInt(DIAGNOSTIC_PORT, 0)
+                    setResultData(
+                        safeFields.joinToString(";") { name ->
+                            "$name=${fields[name].orEmpty()}"
+                        } + ";smoke_port=$diagnosticPort",
+                    )
                 }
 
                 ACTION_PROBE -> {
@@ -231,6 +245,10 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
         val port = status.split(';').firstOrNull { it.startsWith("port=") }
             ?.substringAfter('=')?.toIntOrNull()
             ?: error("MTProto native listener port unavailable")
+        val diagnosticPort = backup.getInt(DIAGNOSTIC_PORT, 0)
+        check(diagnosticPort in 1024..65535 && port == diagnosticPort) {
+            "Synthetic probe refused to use non-isolated proxy listener"
+        }
         val secretHex = MtProtoProxyConfigRepository(prefs).loadForDiagnostics().secret
         val init = Issue127SyntheticMtProtoClient.buildInit(secretHex)
         // The synthetic client must stay connected while the outbound Direct
@@ -259,6 +277,7 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
     companion object {
         private const val BACKUP_NAME = "issue127_direct_smoke_backup"
         private const val SNAPSHOT_EXISTS = "snapshot_exists"
+        private const val DIAGNOSTIC_PORT = "diagnostic_port"
         private const val RESULT_OK = 101
         private const val RESULT_ERROR = 102
         private val STRING_KEYS = listOf(
@@ -273,6 +292,20 @@ class Issue127DirectSmokeReceiver : BroadcastReceiver() {
         const val ACTION_PROBE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_PROBE"
         const val ACTION_STOP = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_STOP"
         const val ACTION_RESTORE = "io.github.regstar2.tgwsproxy.action.ISSUE127_DIRECT_RESTORE"
+    }
+}
+
+/**
+ * Debug-only port allocation. Never bind the synthetic route to the user's
+ * Telegram proxy port. The native status check still detects any bind race.
+ */
+internal object Issue127DiagnosticPort {
+    fun select(forbidden: Set<Int>, allocate: () -> Int): Int {
+        repeat(16) {
+            val port = allocate()
+            if (port in 1024..65535 && port !in forbidden) return port
+        }
+        error("Could not reserve distinct Direct WS diagnostic port")
     }
 }
 
