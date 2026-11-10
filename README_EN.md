@@ -223,7 +223,7 @@ Detailed design: [docs/architecture/architecture.md](docs/architecture/architect
 - Cloudflare Worker URLs, proxy secrets, keystores, and signing variables must not be published in issues, logs, or commits.
 - Release signing uses local environment variables; the keystore is excluded from Git.
 - Feedback does not automatically attach runtime logs, proxy credentials, Telegram data, IP addresses, or secrets.
-- Update checks use the official GitHub Releases API; the application does not install APKs itself.
+- The Updates screen checks official GitHub Releases and can download an ARM64 APK into the app-private cache. It checks SHA-256, APK signing identity, package name and version code before offering Android's standard installer. Installation always requires user confirmation. Startup update reminders can be disabled, or postponed for 24 hours with Later. Signed-device acceptance for #139 is still pending.
 - A masking domain changes the Fake TLS handshake shape but does not turn the application into a VPN.
 
 Review every diagnostic report manually before publishing it.
