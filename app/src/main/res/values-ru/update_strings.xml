@@ -57,4 +57,5 @@
     <string name="update_prompt_title">Доступна %1$s</string>
     <string name="update_prompt_subtitle">Новая версия TgWsProxy · %1$.1f МБ</string>
     <string name="update_disable_reminders">Отключить уведомления</string>
+    <string name="update_retry">Повторить загрузку</string>
 </resources>
