@@ -182,6 +182,8 @@ func readClientInit(
 		prefix[1] == 0x03 && prefix[2] <= 0x04 &&
 		recordLen >= 40 && recordLen <= 16384
 	if !isClientHelloRecord {
+		// Classify only the public record shape, never persist the incoming bytes.
+		ingressClass := classifyUnexpectedFakeTLSIngress(prefix)
 		// A Telegram DD/obfuscated client can retain an older proxy link.
 		// Only the configured secret can authenticate this alternate ingress.
 		_ = conn.SetReadDeadline(time.Now().Add(1200 * time.Millisecond))
@@ -195,7 +197,7 @@ func readClientInit(
 			}
 		}
 		_ = writeFakeTLSRedirect(conn, fakeTLSDomain)
-		return nil, conn, ErrFakeTLSExpected
+		return nil, conn, fmt.Errorf("%w: ingress_class=%s", ErrFakeTLSExpected, ingressClass)
 	}
 
 	body := make([]byte, recordLen)
@@ -229,6 +231,20 @@ func readClientInit(
 		return nil, stream, fmt.Errorf("%w: %v", ErrHandshakeRead, readErr)
 	}
 	return handshake, stream, nil
+}
+
+// The shape helps distinguish a stale obfuscated proxy link from an HTTP
+// probe or a malformed TLS record without logging handshake bytes or secrets.
+func classifyUnexpectedFakeTLSIngress(prefix []byte) string {
+	if isHTTPTransport(prefix) {
+		return "plain_http"
+	}
+	if len(prefix) >= 2 && (prefix[0] == tlsRecordHandshake ||
+		prefix[0] == tlsRecordCCS || prefix[0] == tlsRecordAppData) &&
+		prefix[1] == 0x03 {
+		return "malformed_tls_record"
+	}
+	return "unrecognized_binary"
 }
 
 // A raw client is accepted in Fake TLS mode only if its header decrypts to
