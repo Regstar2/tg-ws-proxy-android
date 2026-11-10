@@ -1,8 +1,7 @@
 package com.amurcanov.tgwsproxy
 
-import android.content.Context
 import android.content.Intent
-import android.os.Build
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -53,7 +52,15 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
             release = null
         },
         title = { Text(stringResource(R.string.update_prompt_title, available.tagName)) },
-        text = { Text(stringResource(R.string.update_prompt_subtitle, size / 1048576.0)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.update_prompt_subtitle, size / 1048576.0))
+                TextButton(onClick = {
+                    preferences.enabled = false
+                    release = null
+                }) { Text(stringResource(R.string.update_disable_reminders)) }
+            }
+        },
         confirmButton = {
             Button(onClick = {
                 release = null
@@ -71,5 +78,4 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
         },
         icon = null,
     )
-    // "Disable reminders" is displayed beneath the standard dialog actions.
 }
