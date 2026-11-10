@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -352,15 +353,21 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                                 onClick = { notesExpanded = !notesExpanded },
                             ) {
                                 Text(stringResource(R.string.update_release_notes_title), modifier = Modifier.weight(1f))
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = null)
+                                Icon(
+                                    if (notesExpanded) Icons.Default.KeyboardArrowDown
+                                    else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                )
                             }
                             if (notesExpanded) {
                                 val notes = remember(current.release.notes) {
                                     ReleaseNotesTextFormatter.toPlainText(current.release.notes)
                                 }
+                                val displayedNotes = if (notes.isBlank()) {
+                                    stringResource(R.string.update_release_notes_empty)
+                                } else notes
                                 Text(
-                                    notes.ifBlank { stringResource(R.string.update_release_notes_empty) },
+                                    displayedNotes,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
