@@ -65,6 +65,7 @@ type RuntimeStatus struct {
 	FakeTLSProbe              int64
 	FakeTLSPassthrough        int64
 	FakeTLSLastError          string
+	HandshakeRejected         int64
 	ForceTestDC               bool
 	OutboundStatus            string
 	SelectedBackend           string
@@ -120,6 +121,7 @@ type Runtime struct {
 	fakeTLSRedirected         atomic.Int64
 	fakeTLSProbe              atomic.Int64
 	fakeTLSPassthrough        atomic.Int64
+	handshakeRejections       [6]atomic.Int64
 }
 
 func NewRuntime(logger Logger, connectors ...OutboundConnector) *Runtime {
@@ -212,6 +214,9 @@ func (r *Runtime) Start(config Config) StartResult {
 	r.fakeTLSRedirected.Store(0)
 	r.fakeTLSProbe.Store(0)
 	r.fakeTLSPassthrough.Store(0)
+	for i := range r.handshakeRejections {
+		r.handshakeRejections[i].Store(0)
+	}
 	r.outboundStatus = OutboundUnsupported
 	r.selectedBackend = ""
 	if r.connector != nil {
@@ -304,6 +309,7 @@ func (r *Runtime) Status() RuntimeStatus {
 		FakeTLSProbe:              r.fakeTLSProbe.Load(),
 		FakeTLSPassthrough:        r.fakeTLSPassthrough.Load(),
 		FakeTLSLastError:          r.fakeTLSLastError,
+		HandshakeRejected:         r.handshakeRejectionCount(),
 		ForceTestDC:               r.forceTestDC,
 		OutboundStatus:            r.outboundStatus,
 		SelectedBackend:           selectedBackend,
@@ -322,7 +328,7 @@ func (r *Runtime) Status() RuntimeStatus {
 func (r *Runtime) StatusString() string {
 	status := r.Status()
 	return fmt.Sprintf(
-		"status=%s;host=%s;port=%d;outbound=%s;selected_backend=%s;actual_backend=%s;fallback_used=%t;route_reason=%s;active=%d;total=%d;bytes_up=%d;bytes_down=%d;connect_ms=%d;last_error=%s;secret_fingerprint=%s;fake_tls=%t;masking_passthrough=%t;fake_tls_accepted=%d;fake_tls_rejected=%d;fake_tls_redirected=%d;fake_tls_probe=%d;fake_tls_passthrough=%d;fake_tls_last_error=%s;force_test_dc=%t",
+		"status=%s;host=%s;port=%d;outbound=%s;selected_backend=%s;actual_backend=%s;fallback_used=%t;route_reason=%s;active=%d;total=%d;bytes_up=%d;bytes_down=%d;connect_ms=%d;last_error=%s;secret_fingerprint=%s;fake_tls=%t;masking_passthrough=%t;fake_tls_accepted=%d;fake_tls_rejected=%d;fake_tls_redirected=%d;fake_tls_probe=%d;fake_tls_passthrough=%d;fake_tls_last_error=%s;force_test_dc=%t;handshake_rejected=%d",
 		status.Status,
 		status.Host,
 		status.Port,
@@ -347,6 +353,7 @@ func (r *Runtime) StatusString() string {
 		status.FakeTLSPassthrough,
 		sanitizeStatusField(status.FakeTLSLastError),
 		status.ForceTestDC,
+		status.HandshakeRejected,
 	)
 }
 
@@ -486,12 +493,9 @@ func (r *Runtime) handleConnection(ctx context.Context, conn net.Conn, config Co
 				r.noteFakeTLSError(err)
 			}
 		}
-		r.updateRouteTruthFor(ctx,OutboundResult{
-			SelectedBackend: r.connector.Capability().SelectedBackend,
-			Reason:          "handshake_failed",
-			Err:             err,
-		})
-		r.log("MTProto route rejected remote=%s reason=handshake_failed error=%v", remote, err)
+		// No outbound route was attempted. Keep the previous successful backend
+		// and its last_error separate from unauthenticated local ingress.
+		r.logHandshakeRejection(remote, err)
 		return
 	}
 	if config.FakeTLSDomain != "" {
@@ -609,6 +613,42 @@ func (r *Runtime) updateRouteTruthFor(ctx context.Context, result OutboundResult
 	r.fallbackUsed = result.FallbackUsed
 	r.routeReason = result.Reason
 	r.lastError = ""
+}
+
+// Each category has an independent logarithmic sample budget. Totals remain
+// available through native status even when a malformed client reconnects rapidly.
+func (r *Runtime) logHandshakeRejection(remote net.Addr, err error) {
+	category, index := handshakeRejectionCategory(err)
+	count := r.handshakeRejections[index].Add(1)
+	if count <= 2 || count&(count-1) == 0 {
+		r.log("MTProto route rejected remote=%s reason=handshake_failed error=%v reject_class=%s class_count=%d",
+			remote, err, category, count)
+	}
+}
+
+func (r *Runtime) handshakeRejectionCount() int64 {
+	var total int64
+	for i := range r.handshakeRejections {
+		total += r.handshakeRejections[i].Load()
+	}
+	return total
+}
+
+func handshakeRejectionCategory(err error) (string, int) {
+	switch {
+	case errors.Is(err, ErrFakeTLSExpected):
+		return "unexpected_client_hello", 0
+	case errors.Is(err, ErrFakeTLSVerification):
+		return "invalid_fake_tls", 1
+	case errors.Is(err, ErrHandshakeRead):
+		return "handshake_read_failed", 2
+	case errors.Is(err, ErrUnsupportedTransport):
+		return "unsupported_transport", 3
+	case errors.Is(err, ErrInvalidDC):
+		return "invalid_dc", 4
+	default:
+		return "other_handshake_failure", 5
+	}
 }
 
 func (r *Runtime) noteFakeTLSAccepted() {
