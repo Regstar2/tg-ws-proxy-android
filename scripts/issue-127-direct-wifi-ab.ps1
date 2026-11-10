@@ -7,7 +7,8 @@ param(
     [ValidateRange(20, 120)][int]$AttemptSeconds = 23,
     [string]$SigningRoot = "",
     [string]$OutputRoot = "",
-    [switch]$RestoreOnly
+    [switch]$RestoreOnly,
+    [switch]$RequireDirectConnect
 )
 
 Set-StrictMode -Version Latest
@@ -290,7 +291,9 @@ try {
     $report = [ordered]@{
         issue = 127
         commit = (git -C $Root rev-parse HEAD)
-        result = if ($restoreError) { "RESTORE_FAILED" } elseif ($originalError) { "FAILED" } else { "INCONCLUSIVE" }
+        result = if ($restoreError) { "RESTORE_FAILED" } elseif ($originalError) { "FAILED" } elseif (
+            @($results | Where-Object { $_.status -in @("DIRECT_DUPLEX_OBSERVED", "DIRECT_HANDSHAKE_OBSERVED") }).Count -eq 1
+        ) { "DIRECT_HANDSHAKE_OBSERVED" } else { "INCONCLUSIVE" }
         note = "Synthetic ingress only. Telegram message/media delivery remains NOT_VERIFIED; signed debug APK remains installed."
         results = @($results.ToArray())
         originalSettingsRestored = ($backupMayExist -and $null -eq $restoreError)
@@ -308,4 +311,16 @@ if ($restoreError) {
 }
 if ($originalError) {
     throw $originalError
+}
+
+if ($RequireDirectConnect) {
+    $connected = @($results | Where-Object {
+        $_.status -in @("DIRECT_DUPLEX_OBSERVED", "DIRECT_HANDSHAKE_OBSERVED") -and
+        $_.routeConnects -ge 1 -and
+        $_.nativeInboundConnections -eq $AttemptsPerProfile
+    })
+    if ($connected.Count -ne 1) {
+        throw "Issue #127 ONE-SHOT NO-GO: isolated Direct WebSocket route did not connect. Inspect $reportPath. Do not repeat this experiment."
+    }
+    Write-Host "Issue #127 ONE-SHOT DIRECT_WS_CONNECTED; Telegram message/media remains NOT_VERIFIED."
 }
