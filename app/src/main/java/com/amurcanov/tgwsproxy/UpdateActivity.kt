@@ -81,6 +81,26 @@ private fun UpdateDecision.asScreenState(): UpdateState = when (this) {
     UpdateDecision.UnsupportedCurrentVersion -> UpdateState.Unsupported
 }
 
+/**
+ * Permission decisions are separate from installation. Returning from Android
+ * settings never triggers another settings launch without a user action.
+ */
+internal enum class UpdateInstallPermissionAction {
+    OPEN_SETTINGS,
+    OPEN_INSTALLER,
+    WAIT_FOR_USER,
+}
+
+internal object UpdateInstallPermissionPolicy {
+    fun onInstallConfirmed(granted: Boolean): UpdateInstallPermissionAction =
+        if (granted) UpdateInstallPermissionAction.OPEN_INSTALLER
+        else UpdateInstallPermissionAction.OPEN_SETTINGS
+
+    fun onSettingsReturned(granted: Boolean): UpdateInstallPermissionAction =
+        if (granted) UpdateInstallPermissionAction.OPEN_INSTALLER
+        else UpdateInstallPermissionAction.WAIT_FOR_USER
+}
+
 private sealed interface UpdateState {
     data object Checking : UpdateState
     data object Current : UpdateState
@@ -229,19 +249,9 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
         }
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) {
-        val previous = state
-        if (previous is UpdateState.PermissionRequired &&
-            appContext.packageManager.canRequestPackageInstalls()
-        ) {
-            state = UpdateState.Ready(previous.release, previous.file)
-            askInstall = true
-        }
-    }
-
-    fun openInstaller(release: GitHubReleaseInfo, file: File) {
+    fun startSystemInstaller(release: GitHubReleaseInfo, file: File) {
+        // Settings can be revoked at any time. Do not invoke the installer if
+        // the source permission is still missing.
         if (!appContext.packageManager.canRequestPackageInstalls()) {
             state = UpdateState.PermissionRequired(release, file)
             return
@@ -251,6 +261,46 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
             state = UpdateState.InstallerOpened(release)
         } catch (_: Exception) {
             state = UpdateState.Failed(release, R.string.update_installer_failed)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val previous = state as? UpdateState.PermissionRequired
+        if (previous != null) {
+            when (UpdateInstallPermissionPolicy.onSettingsReturned(
+                appContext.packageManager.canRequestPackageInstalls(),
+            )) {
+                UpdateInstallPermissionAction.OPEN_INSTALLER ->
+                    startSystemInstaller(previous.release, previous.file)
+                UpdateInstallPermissionAction.WAIT_FOR_USER -> Unit
+                UpdateInstallPermissionAction.OPEN_SETTINGS -> Unit
+            }
+        }
+    }
+
+    fun openInstaller(release: GitHubReleaseInfo, file: File) {
+        when (UpdateInstallPermissionPolicy.onInstallConfirmed(
+            appContext.packageManager.canRequestPackageInstalls(),
+        )) {
+            UpdateInstallPermissionAction.OPEN_INSTALLER -> startSystemInstaller(release, file)
+            UpdateInstallPermissionAction.OPEN_SETTINGS -> {
+                // Reuse the verified APK. Ask for permission only after explicit
+                // installation confirmation, never on launch or during download.
+                state = UpdateState.PermissionRequired(release, file)
+                try {
+                    permissionLauncher.launch(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + context.packageName),
+                        ),
+                    )
+                } catch (_: Exception) {
+                    state = UpdateState.Failed(release, R.string.update_permission_settings_unavailable)
+                }
+            }
+            UpdateInstallPermissionAction.WAIT_FOR_USER -> Unit
         }
     }
 
@@ -475,14 +525,8 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                         is UpdateState.Downloading -> runningJob?.cancel()
                         is UpdateState.Ready -> askInstall = true
                         is UpdateState.InstallerOpened -> checkUpdates(force = true)
-                        is UpdateState.PermissionRequired -> {
-                            permissionLauncher.launch(
-                                Intent(
-                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                    Uri.parse("package:" + context.packageName),
-                                )
-                            )
-                        }
+                        is UpdateState.PermissionRequired ->
+                            openInstaller(current.release, current.file)
                         is UpdateState.Cancelled -> startDownload(current.release)
                         is UpdateState.Failed -> {
                             if (current.release == null) checkUpdates(force = true)
