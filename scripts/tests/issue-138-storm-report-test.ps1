@@ -50,6 +50,36 @@ Assert-Equal 'Do not count one-way as duplex' 0 $negativeReport.DuplexSessions
 Assert-Equal 'No-route failure classified' 1 $negativeReport.NoRouteErrors
 Assert-Equal 'Crash and ANR markers' 2 $negativeReport.CrashOrAnrMarkers
 
+# End-to-end empty-file regression: reading an empty logcat capture must
+# return an empty array, not $null, under Windows PowerShell 5.1.
+$fixture = [System.IO.Path]::GetTempFileName()
+try {
+    $emptyCapture = Read-Issue138CaptureLines -Path $fixture
+    Assert-Equal 'Empty capture remains non-null' $false ($null -eq $emptyCapture)
+    Assert-Equal 'Empty capture has zero lines' 0 @($emptyCapture).Count
+    $quietReport = Get-Issue138StormReport -Phase 'Baseline' -Lines $emptyCapture -DurationSeconds 5
+    Assert-Equal 'Empty on-disk log parses with no rejections' 0 $quietReport.RejectedLogLines
+
+    $missingCapture = Read-Issue138CaptureLines -Path "$fixture.missing"
+    Assert-Equal 'Missing capture remains non-null' $false ($null -eq $missingCapture)
+    Assert-Equal 'Missing capture has zero lines' 0 @($missingCapture).Count
+    $missingReport = Get-Issue138StormReport -Phase 'Baseline' -Lines $missingCapture -DurationSeconds 5
+    Assert-Equal 'Missing on-disk log parses with no rejections' 0 $missingReport.RejectedLogLines
+
+    'one log line' | Set-Content -LiteralPath $fixture
+    $oneCapture = Read-Issue138CaptureLines -Path $fixture
+    Assert-Equal 'Single line remains an array' 1 @($oneCapture).Count
+    Assert-Equal 'Single line content retained' 'one log line' $oneCapture[0]
+
+    @('first', 'second') | Set-Content -LiteralPath $fixture
+    $manyCapture = Read-Issue138CaptureLines -Path $fixture
+    Assert-Equal 'Multiple log lines retained' 2 @($manyCapture).Count
+    Assert-Equal 'Multiple log order preserved' 'second' $manyCapture[1]
+}
+finally {
+    Remove-Item -LiteralPath $fixture -Force -ErrorAction SilentlyContinue
+}
+
 $empty = Get-Issue138StormReport -Phase 'Baseline' -Lines @() -DurationSeconds 5
 Assert-Equal 'Empty capture has zero rejections' 0 $empty.RejectedLogLines
 Assert-Equal 'Empty capture has zero route sessions' 0 $empty.MtProtoConnections
