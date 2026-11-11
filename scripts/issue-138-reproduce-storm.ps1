@@ -206,6 +206,12 @@ try {
         $report | ConvertTo-Json -Depth 4 |
             Set-Content -LiteralPath (Join-Path $runDir "$phase-result.json") -Encoding UTF8
         $report | Format-List | Out-String | Write-Host
+        if ($report.HighRejectionLogVolume) {
+            Write-Warning "High handshake rejection log volume observed in $phase; inspect both phase logs."
+            if ($phase -eq 'Inject') {
+                throw 'FAIL: invalid connection pressure still produces an excessive handshake rejection log stream.'
+            }
+        }
         if ($processId -ne $afterPid -or $report.CrashOrAnrMarkers -gt 0) {
             throw "Listener PID changed or an app crash marker was captured during $phase."
         }
@@ -221,7 +227,12 @@ catch {
 }
 finally {
     if ($forwardPort -gt 0) {
-        & $adbPath -s $Serial forward --remove "tcp:$forwardPort" 2>$null | Out-Null
+        try {
+            & $adbPath -s $Serial forward --remove "tcp:$forwardPort" 2>$null | Out-Null
+        }
+        catch {
+            Write-Warning "Unable to remove temporary ADB forward tcp:$forwardPort"
+        }
     }
     @(
         "mode=$Mode"
