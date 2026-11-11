@@ -89,6 +89,9 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
             release = null
         },
         onDownload = {
+            // A re-created MainActivity must not show the same popup over an
+            // in-progress or pending system installation.
+            preferences.remindLater()
             release = null
             val activity = context.findUpdateHostActivity()
             if (activity != null) {
