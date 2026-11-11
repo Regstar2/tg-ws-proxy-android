@@ -58,4 +58,10 @@
     <string name="update_prompt_subtitle">Новая версия TgWsProxy · %1$.1f МБ</string>
     <string name="update_disable_reminders">Отключить уведомления</string>
     <string name="update_retry">Повторить загрузку</string>
+    <string name="update_quick_channel">Обновления приложения</string>
+    <string name="update_quick_started">Обновление загружается в фоне</string>
+    <string name="update_quick_downloading">Загрузка проверяемого обновления…</string>
+    <string name="update_quick_ready">Обновление проверено. Нажмите для установки.</string>
+    <string name="update_quick_failed">Не удалось обновить. Нажмите для подробностей.</string>
+    <string name="update_quick_already_running">Обновление уже загружается. Дождитесь завершения.</string>
 </resources>
