@@ -15,24 +15,101 @@ class ProxyQuickSettingsTileTest {
             poolSize = 4,
         )
 
-    @Test
-    fun runningStateOnlyWhenServiceAndFrontendAreRunning() {
-        assertTrue(ProxyTileStateMapper.isActive(ProxyServiceStatus.RUNNING, true))
-        assertFalse(ProxyTileStateMapper.isActive(ProxyServiceStatus.RUNNING, false))
-        assertFalse(ProxyTileStateMapper.isActive(ProxyServiceStatus.ERROR, true))
-        assertFalse(ProxyTileStateMapper.isActive(ProxyServiceStatus.STARTING, true))
-        assertTrue(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STARTING))
-        assertTrue(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.RECONNECTING))
-        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STOPPED))
+    private fun assertTileState(
+        status: ProxyServiceStatus,
+        running: Boolean,
+        action: ProxyTileClickAction,
+        active: Boolean,
+        transitioning: Boolean,
+        preparingStart: Boolean = false,
+    ) {
+        val state = ProxyTileStateMapper.resolve(status, running, preparingStart)
+        assertEquals(action, state.clickAction)
+        assertEquals(active, state.active)
+        assertEquals(transitioning, state.transitioning)
     }
 
     @Test
-    fun configurationPreparationShowsTransitionWithoutClaimingProxyIsRunning() {
-        assertTrue(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STOPPED, preparingStart = true))
-        assertFalse(ProxyTileStateMapper.isActive(ProxyServiceStatus.STOPPED, running = false))
-        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.STOPPED, preparingStart = false))
-        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.ERROR, preparingStart = true))
-        assertFalse(ProxyTileStateMapper.isTransitioning(ProxyServiceStatus.RUNNING, preparingStart = true))
+    fun confirmedRunningAndStoppedStatesChooseMatchingClickActions() {
+        assertTileState(
+            ProxyServiceStatus.RUNNING, true,
+            ProxyTileClickAction.STOP, active = true, transitioning = false,
+        )
+        assertTileState(
+            ProxyServiceStatus.STOPPED, false,
+            ProxyTileClickAction.START, active = false, transitioning = false,
+        )
+        assertTileState(
+            ProxyServiceStatus.ERROR, false,
+            ProxyTileClickAction.START, active = false, transitioning = false,
+        )
+    }
+
+    @Test
+    fun mismatchedRunningAndStatusNeverDispatchStopFromInactiveTile() {
+        listOf(
+            ProxyServiceStatus.STOPPED,
+            ProxyServiceStatus.STARTING,
+            ProxyServiceStatus.RECONNECTING,
+            ProxyServiceStatus.ERROR,
+        ).forEach { status ->
+            assertTileState(
+                status, true,
+                ProxyTileClickAction.NONE, active = false, transitioning = true,
+            )
+        }
+        assertTileState(
+            ProxyServiceStatus.RUNNING, false,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+        )
+    }
+
+    @Test
+    fun pendingStartAndReconnectAreNotClickableOrActive() {
+        assertTileState(
+            ProxyServiceStatus.STOPPED, false,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+            preparingStart = true,
+        )
+        assertTileState(
+            ProxyServiceStatus.STARTING, false,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+        )
+        assertTileState(
+            ProxyServiceStatus.RECONNECTING, true,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+        )
+        assertTileState(
+            ProxyServiceStatus.RECONNECTING, false,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+        )
+    }
+
+    @Test
+    fun delayedStatusEventsDoNotInvertTileActionDuringStartOrStop() {
+        val states = listOf(
+            Triple(ProxyServiceStatus.STOPPED, false, ProxyTileClickAction.START),
+            Triple(ProxyServiceStatus.STARTING, false, ProxyTileClickAction.NONE),
+            Triple(ProxyServiceStatus.STARTING, true, ProxyTileClickAction.NONE),
+            Triple(ProxyServiceStatus.RUNNING, true, ProxyTileClickAction.STOP),
+            Triple(ProxyServiceStatus.RUNNING, false, ProxyTileClickAction.NONE),
+            Triple(ProxyServiceStatus.STOPPED, false, ProxyTileClickAction.START),
+        )
+        states.forEach { (status, running, expectedAction) ->
+            assertEquals(expectedAction, ProxyTileStateMapper.resolve(status, running).clickAction)
+        }
+    }
+
+    @Test
+    fun reopeningQuickSettingsRecomputesStateInsteadOfReusingOldColor() {
+        val initiallyActive = ProxyTileStateMapper.resolve(ProxyServiceStatus.RUNNING, true)
+        assertTrue(initiallyActive.active)
+        val stoppedWhileShadeClosed = ProxyTileStateMapper.resolve(ProxyServiceStatus.STOPPED, false)
+        assertFalse(stoppedWhileShadeClosed.active)
+        assertEquals(ProxyTileClickAction.START, stoppedWhileShadeClosed.clickAction)
+        val restartedWhileShadeClosed = ProxyTileStateMapper.resolve(ProxyServiceStatus.RUNNING, true)
+        assertTrue(restartedWhileShadeClosed.active)
+        assertEquals(ProxyTileClickAction.STOP, restartedWhileShadeClosed.clickAction)
     }
 
     @Test
