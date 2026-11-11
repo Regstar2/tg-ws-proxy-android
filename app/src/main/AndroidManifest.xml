@@ -49,6 +49,10 @@
             android:theme="@android:style/Theme.NoTitleBar" />
 
         <receiver
+            android:name="com.amurcanov.tgwsproxy.AppUpdateQuickCancelReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name="com.amurcanov.tgwsproxy.BootCompletedReceiver"
             android:enabled="true"
             android:exported="false">
