@@ -15,8 +15,6 @@ import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +23,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.lang.ref.WeakReference
+
+internal enum class QuickUpdateDestination {
+    WAIT_FOR_FOREGROUND,
+    OPEN_SYSTEM_INSTALLER,
+    OPEN_UPDATES_FOR_PERMISSION,
+}
+
+internal object QuickUpdateDeliveryPolicy {
+    fun destination(isForeground: Boolean, canInstall: Boolean): QuickUpdateDestination = when {
+        !isForeground -> QuickUpdateDestination.WAIT_FOR_FOREGROUND
+        canInstall -> QuickUpdateDestination.OPEN_SYSTEM_INSTALLER
+        else -> QuickUpdateDestination.OPEN_UPDATES_FOR_PERMISSION
+    }
+}
 
 internal data class AppUpdateQuickHandoff(
     val release: GitHubReleaseInfo,
@@ -130,28 +142,34 @@ internal object AppUpdateQuickFlow {
 
     private fun dispatchOrNotify(app: Application) {
         val active = foreground?.get()
-        val isResumed = active != null && !active.isFinishing && !active.isDestroyed &&
-            (active as? LifecycleOwner)?.lifecycle?.currentState
-                ?.isAtLeast(Lifecycle.State.RESUMED) == true
+        // The reference is present only for a resumed activity: it is set
+        // by an explicit UI tap or onActivityResumed and cleared on pause.
+        val isResumed = active != null && !active.isFinishing && !active.isDestroyed
 
         if (isResumed && active != null) {
             when (val result = state) {
                 is State.Verified -> {
                     state = State.HandedOff
                     dismissNotification(app)
-                    if (app.packageManager.canRequestPackageInstalls()) {
-                        try {
-                            active.startActivity(AppUpdateInstallerStore.get(app).installIntent(result.file))
-                        } catch (error: Exception) {
-                            Log.w(TAG, "Quick installer failed: ${error.javaClass.simpleName}")
-                            openUpdates(active, AppUpdateQuickHandoff(
-                                result.release, errorMessage = R.string.update_installer_failed,
-                            ))
+                    when (QuickUpdateDeliveryPolicy.destination(
+                        isForeground = true,
+                        canInstall = app.packageManager.canRequestPackageInstalls(),
+                    )) {
+                        QuickUpdateDestination.OPEN_SYSTEM_INSTALLER -> {
+                            try {
+                                active.startActivity(AppUpdateInstallerStore.get(app).installIntent(result.file))
+                            } catch (error: Exception) {
+                                Log.w(TAG, "Quick installer failed: ${error.javaClass.simpleName}")
+                                openUpdates(active, AppUpdateQuickHandoff(
+                                    result.release, errorMessage = R.string.update_installer_failed,
+                                ))
+                            }
                         }
-                    } else {
-                        openUpdates(active, AppUpdateQuickHandoff(
-                            result.release, verifiedFile = result.file,
-                        ))
+                        QuickUpdateDestination.OPEN_UPDATES_FOR_PERMISSION ->
+                            openUpdates(active, AppUpdateQuickHandoff(
+                                result.release, verifiedFile = result.file,
+                            ))
+                        QuickUpdateDestination.WAIT_FOR_FOREGROUND -> Unit
                     }
                 }
                 is State.Failed -> {
