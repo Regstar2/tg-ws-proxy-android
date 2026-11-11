@@ -1,7 +1,6 @@
 package com.amurcanov.tgwsproxy
 
 import android.content.Context
-import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,8 +72,6 @@ internal object AppUpdateCheckRepository {
                             }
                         },
                     )
-                    val version = SemanticVersion.parse(release.tagName) ?: return@runCatching null
-                    if (AppUpdateAssetSelector.select(release) == null) return@runCatching null
                     val decision = AppUpdateSelector.select(installedVersion, listOf(release))
                     decision as? UpdateDecision.Available
                 }
@@ -99,7 +96,11 @@ internal object AppUpdateCheckRepository {
             is UpdateDecision.Available -> {
                 val release = decision.release
                 val items = JSONArray()
-                release.assets.take(8).forEach { asset ->
+                val matching = AppUpdateAssetSelector.select(release)
+                val selectedAssets = if (matching != null) {
+                    listOfNotNull(matching.apk, matching.checksum)
+                } else release.assets.take(8)
+                selectedAssets.forEach { asset ->
                     items.put(
                         JSONObject()
                             .put("name", asset.name)
