@@ -59,9 +59,15 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
             Log.w("TgWsProxyUpdate", "Startup release check failed: ${error.javaClass.simpleName}")
             null
         }
+        val canPrompt = preferences.shouldShow()
+        Log.i(
+            "TgWsProxyUpdate",
+            "Startup update state=${if (candidate != null) "candidate" else "no-newer-release"}; " +
+                "reminders=${preferences.enabled}; eligibleToPrompt=$canPrompt",
+        )
         if (candidate != null &&
             AppUpdateAssetSelector.select(candidate) != null &&
-            preferences.shouldShow()
+            canPrompt
         ) release = candidate
     }
 
