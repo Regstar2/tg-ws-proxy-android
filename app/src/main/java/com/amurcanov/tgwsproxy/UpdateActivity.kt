@@ -118,18 +118,26 @@ private sealed interface UpdateState {
 class UpdateActivity : ComponentActivity() {
     companion object {
         const val EXTRA_START_DOWNLOAD = "start_verified_update"
+        const val EXTRA_QUICK_HANDOFF = "quick_verified_update_handoff"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val startDownload = intent.getBooleanExtra(EXTRA_START_DOWNLOAD, false)
-        setContent { UpdateActivityContent(onBack = { finish() }, autoDownload = startDownload) }
+        val quickHandoff = intent.getBooleanExtra(EXTRA_QUICK_HANDOFF, false)
+        setContent {
+            UpdateActivityContent(
+                onBack = { finish() },
+                autoDownload = startDownload,
+                quickHandoff = quickHandoff,
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun UpdateActivityContent(onBack: () -> Unit, autoDownload: Boolean) {
+private fun UpdateActivityContent(onBack: () -> Unit, autoDownload: Boolean, quickHandoff: Boolean) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE) }
     val themeMode = prefs.getString("theme_mode", "System")
@@ -158,24 +166,31 @@ private fun UpdateActivityContent(onBack: () -> Unit, autoDownload: Boolean) {
                     )
                 },
             ) { padding ->
-                UpdateScreen(Modifier.fillMaxSize().padding(padding), autoDownload)
+                UpdateScreen(Modifier.fillMaxSize().padding(padding), autoDownload, quickHandoff)
             }
         }
     }
 }
 
 @Composable
-private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
+private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff: Boolean) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
-    val installer = remember { AppUpdateInstaller(appContext) }
+    val installer = remember { AppUpdateInstallerStore.get(appContext) }
+    val handoff = remember { if (quickHandoff) AppUpdateQuickFlow.takeHandoff() else null }
     val preferences = remember { AppUpdatePreferences(appContext) }
     val installed = remember { readInstalledVersion(appContext) }
     var state by remember {
         mutableStateOf<UpdateState>(
-            AppUpdateCheckRepository.cached(appContext, installed.name, installed.code)
-                ?.asScreenState() ?: UpdateState.Checking,
+            when {
+                handoff?.verifiedFile != null ->
+                    UpdateState.PermissionRequired(handoff.release, handoff.verifiedFile)
+                handoff?.errorMessage != null ->
+                    UpdateState.Failed(handoff.release, handoff.errorMessage)
+                else -> AppUpdateCheckRepository.cached(appContext, installed.name, installed.code)
+                    ?.asScreenState() ?: UpdateState.Checking
+            },
         )
     }
     var notesExpanded by rememberSaveable { mutableStateOf(false) }
@@ -185,6 +200,10 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
 
     fun startDownload(release: GitHubReleaseInfo) {
         if (runningJob?.isActive == true) return
+        if (AppUpdateQuickFlow.isDownloading) {
+            state = UpdateState.Failed(release, R.string.update_quick_already_running)
+            return
+        }
         if (AppUpdateAssetSelector.select(release) == null) {
             state = UpdateState.Failed(release, R.string.update_asset_unavailable)
             return
@@ -304,7 +323,15 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
         }
     }
 
-    LaunchedEffect(Unit) { checkUpdates(autoDownload) }
+    LaunchedEffect(Unit) {
+        if (handoff?.verifiedFile != null) {
+            // The quick path downloaded and verified this same file. Do not
+            // download again or ask for a redundant in-app confirmation.
+            openInstaller(handoff.release, handoff.verifiedFile)
+        } else if (handoff == null) {
+            checkUpdates(autoDownload)
+        }
+    }
     DisposableEffect(Unit) {
         onDispose { runningJob?.cancel() }
     }
