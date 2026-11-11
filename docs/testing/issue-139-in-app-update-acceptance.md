@@ -50,6 +50,13 @@
 10. Test old com.amurcanov.tgwsproxy installs separately: this app has a different applicationId and cannot be updated in place.
 11. On Android 9 / BlackView BV5900 repeat if device available (#128).
 
+## Device evidence — 2026-11-11 (partial)
+
+- **Source tested:** `12f87dbdd6a97ffd029fcdc6f0965de12e45ef0d`, signed **debug** APK built from current PR source with temporary `versionCode=62` / `versionName=1.11.6-debug`, existing release keystore (`TGWS_SIGNED_WORKER_SMOKE=1`); temporary Gradle edits restored. Windows `:app:assembleDebug`: **BUILD SUCCESSFUL in 1m 26s** (36 tasks: 15 executed, 21 up-to-date). The APK was rejected for regular downgrade over installed code 63; subsequent downgrade/install was performed separately, but no complete successful install log was recorded in chat.
+- **Quick update smoke:** user explicitly confirmed the in-app update flow as working ("да норм"). Afterward the connected Android device returned `versionCode=63 minSdk=26 targetSdk=35` and `versionName=1.11.7` from `adb shell dumpsys package io.github.regstar2.tgwsproxy`. **PASS for observed final installed version and user acceptance of the main path.**
+- **Not demonstrated:** both endpoints as release-build APKs (source was signed debug), automatic permission handoff on fresh permission, user denial/no settings loop, background notification/cancel, corrupt APK and network failures, prior user settings/worker/AWG/WARP preservation, and Android 9 smoke. No screenshots or sanitized device logs were provided for these cases.
+- **CI:** required tests, lint and native transport checks must be observed for the **latest PR HEAD**. Prior Windows Debug compilation does not substitute for full `scripts/ci.ps1` or release build acceptance. Do not mark Issue #139 done or merge PR #144 based solely on this partial device smoke.
+
 ## Environment-specific constraints
 
 - No automatic background install, root or Accessibility.
