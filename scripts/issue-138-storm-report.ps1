@@ -63,6 +63,11 @@ function Get-Issue138StormReport {
         ConnectionFailures = $ConnectionFailures
         RejectedLogLines = $rejectedLogLines
         FakeTlsExpectedLogLines = $fakeTlsExpectedLines
+        HighRejectionLogVolume = (
+            ($rejectedLogLines / [double]$DurationSeconds -ge 100) -or
+            ($Phase -eq 'Inject' -and $AttemptedConnections -ge 50 -and
+                $rejectedLogLines -ge [Math]::Ceiling($AttemptedConnections * 0.25))
+        )
         LastSampledClassCount = $lastSampledClassCount
         LargestSampledClassCount = $largestSampledClassCount
         RejectionLogRatePerSecond = [Math]::Round(
