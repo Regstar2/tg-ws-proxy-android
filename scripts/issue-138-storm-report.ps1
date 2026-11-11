@@ -1,3 +1,16 @@
+# Read-Host-style pipeline assignments unwrap arrays, and PowerShell 5.1 turns
+# an if-expression with no output into $null. Return an array as one object.
+function Read-Issue138CaptureLines {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $lines = [string[]]@()
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $lines = [string[]]@(Get-Content -LiteralPath $Path)
+    }
+    return ,$lines
+}
+
 # Pure log parser shared by the device reproducer and offline regression tests.
 function Get-Issue138StormReport {
     [CmdletBinding()]
