@@ -9,6 +9,7 @@ import com.android.apksig.ApkVerifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -26,6 +27,7 @@ class UpdateInstallException(message: String) : IOException(message)
 
 /** Never pass an APK to Android until its hash, signature and identity pass validation. */
 class AppUpdateInstaller(private val context: Context) {
+    private val downloadMutex = Mutex()
     private val directory: File get() = File(context.cacheDir, "verified-updates")
     private val pendingFile: File get() = File(directory, "release.apk.part")
     private val verifiedFile: File get() = File(directory, "release.apk")
@@ -39,6 +41,12 @@ class AppUpdateInstaller(private val context: Context) {
         release: GitHubReleaseInfo,
         onProgress: suspend (Long, Long) -> Unit,
     ): File = withContext(Dispatchers.IO) {
+        // The startup popup and Updates screen share this installer. A second
+        // request must not delete an APK that is still being verified.
+        if (!downloadMutex.tryLock()) {
+            throw UpdateInstallException("Update download is already in progress")
+        }
+        try {
         val selection = AppUpdateAssetSelector.select(release)
             ?: throw UpdateInstallException("No verifiable official APK for this release")
         directory.mkdirs()
@@ -111,6 +119,9 @@ class AppUpdateInstaller(private val context: Context) {
             pendingFile.delete()
             verifiedFile.delete()
             throw error
+        }
+        } finally {
+            downloadMutex.unlock()
         }
     }
 
@@ -245,4 +256,18 @@ class AppUpdateInstaller(private val context: Context) {
             "github-releases.githubusercontent.com",
         )
     }
+}
+
+/**
+ * Owns one installer for this process. The constructor clears files left from
+ * an older process, so recreating it during a same-process UI handoff would
+ * otherwise delete an APK the startup flow has already verified.
+ */
+internal object AppUpdateInstallerStore {
+    @Volatile private var instance: AppUpdateInstaller? = null
+
+    fun get(context: Context): AppUpdateInstaller =
+        instance ?: synchronized(this) {
+            instance ?: AppUpdateInstaller(context.applicationContext).also { instance = it }
+        }
 }
