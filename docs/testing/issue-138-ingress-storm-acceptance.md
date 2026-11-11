@@ -56,6 +56,67 @@ The full Windows CI also builds Android APK and runs its current JVM/lint
 checks. Go race availability depends on the chosen OS/toolchain; report it
 separately rather than treating an unrun check as green.
 
+## Fully automated Android reproduction (no Telegram changes)
+
+The PowerShell runner now exercises the **real running Android local
+listener** through a temporary ADB TCP forward, independently of Telegram.
+It first records an untouched **Baseline** (to detect spontaneous reconnects)
+and then deliberately sends 64-byte unauthenticated binary handshakes in
+**Inject**. All injected connections are known to originate from this test
+harness, not from Telegram.
+
+Preconditions: one authorized ADB device, TgWsProxy already installed and
+running, MTProto listener in Fake TLS mode, and the actual configured
+listener port. The runner neither installs APKs nor starts/reconfigures the
+proxy. It never reads the MTProto secret.
+
+Run a bounded default smoke (both phases, 35 seconds each, up to 40 attempts/s):
+
+```powershell
+Set-Location -LiteralPath "<local-clone-of-tg-ws-proxy-android>"
+.\scripts\issue-138-reproduce-storm.ps1 -Mode Both -DurationSeconds 35 -RatePerSecond 40 -Port 1443
+```
+
+To reproduce **the historical 11,801 failures in roughly 34 seconds**
+more closely, invoke the higher-pressure mode deliberately (only on your
+own test device and while prepared for temporary local proxy slowdown):
+
+```powershell
+.\scripts\issue-138-reproduce-storm.ps1 -Mode Both -DurationSeconds 34 -RatePerSecond 350 -Port 1443
+```
+
+Rate is a **target/upper limit**, not a guaranteed observed result.
+The runner measures attempted connections, received HTTP 301 redirects,
+failure count and actual injection rate. Ten consecutive failures stop
+injection rather than endlessly hammering a missing listener.
+
+Artifacts: `artifacts/issue138/repro-YYYYMMDD-HHMMSS.zip`. Every phase
+contains isolated streaming logcat (current app PID only, without clearing
+Android logs), PID/socket snapshots, available CPU snapshots and JSON
+analysis. The script removes its own temporary ADB forward even on failure.
+The parser recognizes both the historical per-connection log format and
+the new sampled `class_count` format; the rate of log entries must
+not be mistaken for the actual TCP connection rate after sampling.
+
+CI runs the **offline** parser regression fixture with the reported
+11,801 entries/34 s, sampled exponential counters, good AWG bidirectional
+bridge and crash/ANR negative examples. CI does **not** run the ADB
+reproducer on a remote/public runner.
+
+Interpretation:
+- A high **Baseline** rejection rate suggests an external app or local
+  configuration is still reconnecting, but does not identify that app.
+- Successful **Inject** redirects prove malformed local connections can
+  cause the observed rejection class and that the listener remains up;
+  they cannot establish the source of the original 2026-11-05 storm.
+- Actual backend and duplex are proven only by logs with
+  `actual_backend=awg_warp` and both `up_bytes`/`down_bytes` positive.
+  If no legitimate Telegram session occurs during the test, that gate is
+  **NOT VERIFIED**, not PASS.
+- CI/native Go tests continue to check correctly authenticated DD/EE
+  handshake behavior. The injected script deliberately does not simulate
+  a real authenticated Telegram connection or a full AWG network route.
+
 ## Read-only Xiaomi evidence capture
 
 Use the **actual MTProto port** from the app settings, not a guessed value.
