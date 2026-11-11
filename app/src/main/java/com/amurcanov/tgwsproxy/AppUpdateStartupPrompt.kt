@@ -65,15 +65,44 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
     val available = release ?: return
     val size = AppUpdateAssetSelector.select(available)?.apk?.size ?: return
 
-    AlertDialog(
-        onDismissRequest = {
+    UpdateAvailableDialog(
+        tagName = available.tagName,
+        apkSize = size,
+        onDismiss = {
             preferences.remindLater()
             release = null
         },
-        title = { Text(stringResource(R.string.update_prompt_title, available.tagName)) },
-        text = {
-            Text(stringResource(R.string.update_prompt_subtitle, size / 1048576.0))
+        onLater = {
+            preferences.remindLater()
+            release = null
         },
+        onDownload = {
+            release = null
+            context.startActivity(
+                Intent(context, UpdateActivity::class.java)
+                    .putExtra(UpdateActivity.EXTRA_START_DOWNLOAD, true),
+            )
+        },
+        onDisableReminders = {
+            preferences.enabled = false
+            release = null
+        },
+    )
+}
+
+@Composable
+internal fun UpdateAvailableDialog(
+    tagName: String,
+    apkSize: Long,
+    onDismiss: () -> Unit,
+    onLater: () -> Unit,
+    onDownload: () -> Unit,
+    onDisableReminders: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.update_prompt_title, tagName)) },
+        text = { Text(stringResource(R.string.update_prompt_subtitle, apkSize / 1048576.0)) },
         confirmButton = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -84,25 +113,17 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = {
-                        preferences.remindLater()
-                        release = null
-                    }) { Text(stringResource(R.string.update_later)) }
+                    TextButton(onClick = onLater) {
+                        Text(stringResource(R.string.update_later))
+                    }
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = {
-                        release = null
-                        context.startActivity(
-                            Intent(context, UpdateActivity::class.java)
-                                .putExtra(UpdateActivity.EXTRA_START_DOWNLOAD, true),
-                        )
-                    }) { Text(stringResource(R.string.update_download_install)) }
+                    Button(onClick = onDownload) {
+                        Text(stringResource(R.string.update_download_install))
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    onClick = {
-                        preferences.enabled = false
-                        release = null
-                    },
+                    onClick = onDisableReminders,
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
