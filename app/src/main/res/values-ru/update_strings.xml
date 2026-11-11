@@ -46,7 +46,8 @@
     <string name="update_installer_failed">Не удалось открыть системный установщик.</string>
     <string name="update_permission_needed">Требуется разрешение</string>
     <string name="update_permission_action">Открыть настройки</string>
-    <string name="update_permission_explanation">Разрешите установку из этого источника в настройках Android и вернитесь в приложение.</string>
+    <string name="update_permission_explanation">Разрешите установку приложений из TgWsProxy в настройках Android и вернитесь в приложение. Если отказались, настройки можно открыть повторно.</string>
+    <string name="update_permission_settings_unavailable">Не удалось открыть настройку установки из этого источника. Проверьте разрешение в системных настройках и повторите попытку.</string>
     <string name="update_asset_unavailable">Автоматическая установка недоступна: официальный APK или контрольная сумма отсутствуют. Откройте страницу релиза.</string>
     <string name="update_download_failed">Не удалось безопасно скачать или проверить APK. Повторите попытку или откройте страницу релиза.</string>
     <string name="update_size_abi">%1$.1f МБ · arm64-v8a</string>
