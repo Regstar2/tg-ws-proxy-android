@@ -1,6 +1,6 @@
 # Issue #139 — In-app APK update acceptance
 
-**Stage:** implementation in PR #144; no physical-device result yet.
+**Stage:** PR #144; core update verified on a physical Xiaomi and CI passed at tested HEAD. Extended device acceptance remains partially unverified.
 
 ## Startup detection regression (PR #144)
 
@@ -20,11 +20,11 @@
 - [ ] If permission is denied, the app remains on the permission screen and does not relaunch Settings in a loop. Manual retry is available.
 - [ ] If the user backgrounds the app before verification completes, the app must **not attempt a background activity launch**; a notification (when authorized) lets the user return, then install. If Android has disabled notifications, manually returning to the app resumes the pending installation while the process remains alive.
 - [ ] If the network, APK hash, signer, or system installer fails, the Updates screen shows the failure and still allows a safe retry without disrupting proxy settings.
-- [ ] Run `AppUpdateQuickDeliveryPolicyTest` and `AppUpdateInstallPermissionPolicyTest`; run a real-device smoke for the full lifecycle and notification behaviors. A process-scoped download is best-effort while backgrounded; it does not persist across process death and cannot claim durable WorkManager delivery.
+- [x] Run `AppUpdateQuickDeliveryPolicyTest` and `AppUpdateInstallPermissionPolicyTest` as part of Android JVM unit tests (local Gradle success and GitHub Windows CI success at the tested HEAD). **The on-device notification, denied-permission and complete lifecycle scenarios remain unchecked.** A process-scoped download is best-effort while backgrounded; it does not persist across process death and cannot claim durable WorkManager delivery.
 
 ## Source and build gates
 
-- [ ] Windows CI: scripts/ci.ps1 (Go, Android unit tests, lint, assembleDebug).
+- [x] Windows CI: `scripts/ci.ps1` (Go, Android unit tests, lint, assembleDebug) — GitHub Actions run [#43076343661](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43076343661), on `498b516fb32421bca2936e6f8e56f22ba93a8b12`.
 - [ ] GitHub Releases metadata correctly selects a signed ARM64 APK only (stable/prerelease policy, exact official asset URL).
 - [ ] Verify SHA-256 from release asset digest, paired .sha256, and reject disagreement.
 - [ ] Verify full APK cryptographic signature with apksig, installed signer identity, exact applicationId, increasing versionCode, Android minSdk and device architecture.
@@ -50,12 +50,20 @@
 10. Test old com.amurcanov.tgwsproxy installs separately: this app has a different applicationId and cannot be updated in place.
 11. On Android 9 / BlackView BV5900 repeat if device available (#128).
 
+## Automated test evidence — 2026-11-11
+
+- GitHub Actions [CI run #43076343661](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43076343661) on source commit `498b516fb32421bca2936e6f8e56f22ba93a8b12`: **SUCCESS** for Worker transport regression (Go race tests and Node.js Worker handler tests) and Windows CI (`scripts/ci.ps1`). The issue-100-specific signed-APK job was correctly **SKIPPED**, as it targets another PR.
+- Local Windows Android run at the same source commit: `./gradlew.bat --offline --build-cache :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest` — **BUILD SUCCESSFUL in 1m 6s**. The AndroidTest APK was compiled and packaged, **not installed/executed as instrumentation**.
+- On-device core flow: user reported successful signed-debug `1.11.6-debug` / code 62 to official stable `v1.11.7` / code 63 update on Xiaomi; afterward `adb shell dumpsys package io.github.regstar2.tgwsproxy` showed `versionCode=63`, `versionName=1.11.7`. The user later stated that the app was working and requested documentation/merge; this is user acceptance feedback, **not evidence that each distinct negative-path scenario below was exercised**.
+- A local Windows Defender alert (`Trojan:Win64/Resmus.HM!MTB`) prevented execution of a generated `mtproxyfrontend.test.exe` in a previous full local CI attempt; the same repository's native tests passed in GitHub Actions. The specific Defender detection has not been investigated or established as false positive. Do not disable security tools to reproduce it.
+- **Still not directly evidenced:** two independently release-**built** signed APKs used for update acceptance; saving and verifying actual user route/Worker/AWG/WARP preferences across upgrade; fresh permission denial/grant; process background/notification cancellation; corrupt metadata/APK and network failure UI; direct instrumentation execution on device; Android 9 edge-case (#128). The exact security-related release gates in Issue #139 remain in force; do not mark these PASS by inference.
+
 ## Device evidence — 2026-11-11 (partial)
 
 - **Source tested:** `12f87dbdd6a97ffd029fcdc6f0965de12e45ef0d`, signed **debug** APK built from current PR source with temporary `versionCode=62` / `versionName=1.11.6-debug`, existing release keystore (`TGWS_SIGNED_WORKER_SMOKE=1`); temporary Gradle edits restored. Windows `:app:assembleDebug`: **BUILD SUCCESSFUL in 1m 26s** (36 tasks: 15 executed, 21 up-to-date). The APK was rejected for regular downgrade over installed code 63; subsequent downgrade/install was performed separately, but no complete successful install log was recorded in chat.
 - **Quick update smoke:** user explicitly confirmed the in-app update flow as working ("да норм"). Afterward the connected Android device returned `versionCode=63 minSdk=26 targetSdk=35` and `versionName=1.11.7` from `adb shell dumpsys package io.github.regstar2.tgwsproxy`. **PASS for observed final installed version and user acceptance of the main path.**
 - **Not demonstrated:** both endpoints as release-build APKs (source was signed debug), automatic permission handoff on fresh permission, user denial/no settings loop, background notification/cancel, corrupt APK and network failures, prior user settings/worker/AWG/WARP preservation, and Android 9 smoke. No screenshots or sanitized device logs were provided for these cases.
-- **CI:** required tests, lint and native transport checks must be observed for the **latest PR HEAD**. Prior Windows Debug compilation does not substitute for full `scripts/ci.ps1` or release build acceptance. Do not mark Issue #139 done or merge PR #144 based solely on this partial device smoke.
+- **CI:** full project CI passed on the then-current source HEAD `498b516fb32421bca2936e6f8e56f22ba93a8b12`; if further commits are added, re-run CI for the new HEAD. Passing tests do not replace unverified mandatory device/release-build acceptance.
 
 ## Environment-specific constraints
 
