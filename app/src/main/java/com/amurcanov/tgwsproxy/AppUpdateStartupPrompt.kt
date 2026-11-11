@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.CancellationException
 
 /** Async startup check. This dialog never blocks app/proxy initialization. */
 @Composable
@@ -52,6 +53,8 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
             (AppUpdateCheckRepository.check(
                 appContext, installedVersion, installedCode,
             ) as? UpdateDecision.Available)?.release
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             Log.w("TgWsProxyUpdate", "Startup release check failed: ${error.javaClass.simpleName}")
             null
