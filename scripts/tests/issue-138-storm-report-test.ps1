@@ -20,6 +20,7 @@ $oldReport = Get-Issue138StormReport -Phase 'Baseline' -Lines $oldFormat -Durati
 Assert-Equal 'Old-format storm count' 11801 $oldReport.RejectedLogLines
 Assert-Equal 'Old-format ClientHello count' 11801 $oldReport.FakeTlsExpectedLogLines
 Assert-Equal 'Old-format rate' 347.09 $oldReport.RejectionLogRatePerSecond
+Assert-Equal 'Old-format log storm detected' $true $oldReport.HighRejectionLogVolume
 Assert-Equal 'No fabricated successful backend' 0 $oldReport.AwgDuplexSessions
 
 $sampled = @(1, 2, 4, 8, 16, 32, 64 | ForEach-Object {
@@ -29,6 +30,7 @@ $sampled += '11-11 12:06:28 I TgWsProxy: MTProto route connected actual_backend=
 $sampled += '11-11 12:06:31 I TgWsProxy: MTProto bridge closed actual_backend=awg_warp up_bytes=1024 down_bytes=2048 error=none'
 $report = Get-Issue138StormReport -Phase 'Inject' -Lines $sampled -DurationSeconds 10 -AttemptedConnections 64 -RedirectResponses 64
 Assert-Equal 'Sampled logging lines' 7 $report.RejectedLogLines
+Assert-Equal 'Sampled logging is bounded' $false $report.HighRejectionLogVolume
 Assert-Equal 'Last sampled cumulative count' 64 $report.LastSampledClassCount
 Assert-Equal 'Largest sampled cumulative count' 64 $report.LargestSampledClassCount
 Assert-Equal 'Redirect count' 64 $report.RedirectResponses
