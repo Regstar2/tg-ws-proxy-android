@@ -46,7 +46,8 @@
     <string name="update_installer_failed">Unable to open Android installer.</string>
     <string name="update_permission_needed">Permission required</string>
     <string name="update_permission_action">Open settings</string>
-    <string name="update_permission_explanation">Allow installation from this source in Android settings, then return to the app.</string>
+    <string name="update_permission_explanation">Allow TgWsProxy to install apps from this source in Android settings. Return to the app to continue. If permission is denied, you can open settings again.</string>
+    <string name="update_permission_settings_unavailable">Could not open the Android install-source settings. Check this permission in system settings, then retry.</string>
     <string name="update_asset_unavailable">Automatic install is unavailable: the official APK or checksum is missing. Open the release page.</string>
     <string name="update_download_failed">Could not safely download or verify the APK. Try again or open the release page.</string>
     <string name="update_size_abi">%1$.1f MB · arm64-v8a</string>
