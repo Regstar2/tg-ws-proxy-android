@@ -104,6 +104,19 @@ class ProxyQuickSettingsTileTest {
     }
 
     @Test
+    fun tapDecisionRefusesOutdatedSystemUiState() {
+        val running = ProxyTileStateMapper.resolve(ProxyServiceStatus.RUNNING, true)
+        val stopped = ProxyTileStateMapper.resolve(ProxyServiceStatus.STOPPED, false)
+        val inconsistent = ProxyTileStateMapper.resolve(ProxyServiceStatus.STOPPED, true)
+        assertEquals(ProxyTileClickAction.STOP, ProxyTileStateMapper.actionForTap(running, true))
+        assertEquals(ProxyTileClickAction.START, ProxyTileStateMapper.actionForTap(stopped, false))
+        assertEquals(ProxyTileClickAction.NONE, ProxyTileStateMapper.actionForTap(running, false))
+        assertEquals(ProxyTileClickAction.NONE, ProxyTileStateMapper.actionForTap(stopped, true))
+        assertEquals(ProxyTileClickAction.NONE, ProxyTileStateMapper.actionForTap(running, null))
+        assertEquals(ProxyTileClickAction.NONE, ProxyTileStateMapper.actionForTap(inconsistent, false))
+    }
+
+    @Test
     fun delayedStatusEventsDoNotInvertTileActionDuringStartOrStop() {
         val states = listOf(
             Triple(ProxyServiceStatus.STOPPED, false, ProxyTileClickAction.START),
