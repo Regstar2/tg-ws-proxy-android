@@ -57,6 +57,14 @@ internal object ProxyTileStateMapper {
         }
         return ProxyTileState(active && !transitioning, transitioning, action)
     }
+
+    fun actionForTap(state: ProxyTileState, publishedActive: Boolean?): ProxyTileClickAction {
+        return if (publishedActive != null && publishedActive == state.active) {
+            state.clickAction
+        } else {
+            ProxyTileClickAction.NONE
+        }
+    }
 }
 
 internal object ProxyTileCommandGate {
@@ -93,7 +101,13 @@ class ProxyQuickSettingsTileService : TileService() {
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
         val running = ProxyService.isRunning.value
         val state = ProxyTileStateMapper.resolve(status, running, preparingStart, stopping)
-        if (state.clickAction == ProxyTileClickAction.NONE || qsTile?.state != androidTileState(state)) {
+        val publishedActive = when (qsTile?.state) {
+            Tile.STATE_ACTIVE -> true
+            Tile.STATE_INACTIVE -> false
+            else -> null
+        }
+        val action = ProxyTileStateMapper.actionForTap(state, publishedActive)
+        if (action == ProxyTileClickAction.NONE) {
             Log.i(TAG, "TILE_CLICK_IGNORED running=$running status=${status.name} tile_state=${qsTile?.state} action=${state.clickAction.name}")
             refreshTile()
             showFeedback(R.string.quick_tile_transitioning)
@@ -104,8 +118,8 @@ class ProxyQuickSettingsTileService : TileService() {
             return
         }
 
-        Log.i(TAG, "TILE_TAP running=$running status=${status.name} action=${state.clickAction.name}")
-        if (state.clickAction == ProxyTileClickAction.STOP) {
+        Log.i(TAG, "TILE_TAP running=$running status=${status.name} action=${action.name}")
+        if (action == ProxyTileClickAction.STOP) {
             val latestStatus = ProxyRuntimeState.uiMetrics.value.serviceStatus
             val latestRunning = ProxyService.isRunning.value
             if (ProxyTileStateMapper.resolve(latestStatus, latestRunning).clickAction !=
