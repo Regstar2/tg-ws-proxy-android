@@ -79,8 +79,13 @@ function Invoke-InvalidFakeTlsConnection {
         $stream = $client.GetStream()
         $stream.Write($payload, 0, $payload.Length)
         $buffer = New-Object byte[] 256
-        $read = $stream.Read($buffer, 0, $buffer.Length)
-        if ($read -le 0) { return $false }
+        $read = 0
+        while ($read -lt 12) {
+            $received = $stream.Read($buffer, $read, $buffer.Length - $read)
+            if ($received -le 0) { break }
+            $read += $received
+        }
+        if ($read -lt 12) { return $false }
         $response = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
         return $response.StartsWith('HTTP/1.1 301')
     }
@@ -128,7 +133,7 @@ try {
         $failures = 0
         $failureSamples = New-Object 'System.Collections.Generic.List[string]'
         $capture = Start-Process -FilePath $adbPath -ArgumentList @(
-            '-s', $Serial, 'logcat', "--pid=$processId", '-v', 'threadtime',
+            '-s', $Serial, 'logcat', '--pid=' + $processId, '-T', '1', '-v', 'threadtime',
             'TgWsProxy:V', 'AndroidRuntime:E', '*:S'
         ) -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru -NoNewWindow
         try {
