@@ -40,10 +40,11 @@ internal object ProxyTileStateMapper {
         status: ProxyServiceStatus,
         running: Boolean,
         preparingStart: Boolean = false,
+        stopping: Boolean = false,
     ): ProxyTileState {
         val active = running && status == ProxyServiceStatus.RUNNING
         val inconsistent = running != (status == ProxyServiceStatus.RUNNING)
-        val transitioning = preparingStart ||
+        val transitioning = preparingStart || stopping ||
             status == ProxyServiceStatus.STARTING ||
             status == ProxyServiceStatus.RECONNECTING ||
             inconsistent
@@ -68,6 +69,7 @@ class ProxyQuickSettingsTileService : TileService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var listeningJob: Job? = null
     private var preparingStart = false
+    private var stopping = false
     private var lastLoggedTileState: String? = null
 
     override fun onStartListening() {
@@ -90,9 +92,9 @@ class ProxyQuickSettingsTileService : TileService() {
         super.onClick()
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
         val running = ProxyService.isRunning.value
-        val state = ProxyTileStateMapper.resolve(status, running, preparingStart)
+        val state = ProxyTileStateMapper.resolve(status, running, preparingStart, stopping)
         if (state.clickAction == ProxyTileClickAction.NONE || qsTile?.state != androidTileState(state)) {
-            Log.i(TAG, "TILE_CLICK_IGNORED running=$running status=${status.name} action=${state.clickAction.name}")
+            Log.i(TAG, "TILE_CLICK_IGNORED running=$running status=${status.name} tile_state=${qsTile?.state} action=${state.clickAction.name}")
             refreshTile()
             showFeedback(R.string.quick_tile_transitioning)
             return
@@ -104,12 +106,25 @@ class ProxyQuickSettingsTileService : TileService() {
 
         Log.i(TAG, "TILE_TAP running=$running status=${status.name} action=${state.clickAction.name}")
         if (state.clickAction == ProxyTileClickAction.STOP) {
+            val latestStatus = ProxyRuntimeState.uiMetrics.value.serviceStatus
+            val latestRunning = ProxyService.isRunning.value
+            if (ProxyTileStateMapper.resolve(latestStatus, latestRunning).clickAction !=
+                ProxyTileClickAction.STOP
+            ) {
+                Log.i(TAG, "TILE_STOP_SUPERSEDED running=$latestRunning status=${latestStatus.name}")
+                ProxyTileCommandGate.release()
+                refreshTile()
+                return
+            }
+            stopping = true
+            refreshTile()
             try {
                 startService(Intent(this, ProxyService::class.java).apply {
                     action = ProxyService.ACTION_STOP
                 })
                 Log.i(TAG, "TILE_STOP_REQUESTED")
             } catch (error: RuntimeException) {
+                stopping = false
                 ProxyTileCommandGate.release()
                 Log.e(TAG, "TILE_COMMAND_REJECTED error=${error.javaClass.simpleName}")
                 showFeedback(R.string.quick_tile_error)
@@ -203,7 +218,12 @@ class ProxyQuickSettingsTileService : TileService() {
         val tile = qsTile ?: return
         val status = ProxyRuntimeState.uiMetrics.value.serviceStatus
         val running = ProxyService.isRunning.value
-        val state = ProxyTileStateMapper.resolve(status, running, preparingStart)
+        if (stopping && !running &&
+            (status == ProxyServiceStatus.STOPPED || status == ProxyServiceStatus.ERROR)
+        ) {
+            stopping = false
+        }
+        val state = ProxyTileStateMapper.resolve(status, running, preparingStart, stopping)
         val decision = if (state.clickAction == ProxyTileClickAction.START &&
             status == ProxyServiceStatus.STOPPED
         ) {
@@ -252,6 +272,8 @@ class ProxyQuickSettingsTileService : TileService() {
                     context,
                     ComponentName(context, ProxyQuickSettingsTileService::class.java),
                 )
+            }.onFailure { error ->
+                Log.w(TAG, "TILE_REFRESH_REQUEST_FAILED exception=${error.javaClass.simpleName}")
             }
         }
     }
