@@ -7,6 +7,9 @@
         name="log_exports"
         path="logs-export/" />
     <cache-path
+        name="verified_update_apk"
+        path="verified-updates/" />
+    <cache-path
         name="diagnostic_reports"
         path="diagnostic-reports/" />
 </paths>

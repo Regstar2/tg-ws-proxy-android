@@ -150,6 +150,7 @@ dependencies {
     implementation("androidx.compose.material:material")
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.android.tools.build:apksig:8.5.2")
     implementation("androidx.compose.material:material-icons-extended")
 
     testImplementation("junit:junit:4.13.2")
