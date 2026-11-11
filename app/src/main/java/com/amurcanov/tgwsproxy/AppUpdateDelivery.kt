@@ -179,6 +179,15 @@ object AppUpdateSelector {
                     return@mapNotNull null
                 }
                 if (version <= current) return@mapNotNull null
+                // A locally signed -debug build of the same release usually
+                // has the same versionCode as its published stable APK.
+                // It must not be offered an impossible same-version upgrade.
+                if (current.prerelease == listOf("debug") &&
+                    version.prerelease.isEmpty() &&
+                    version.major == current.major &&
+                    version.minor == current.minor &&
+                    version.patch == current.patch
+                ) return@mapNotNull null
                 release to version
             }
             .maxWithOrNull(compareBy<Pair<GitHubReleaseInfo, SemanticVersion>> { it.second })
