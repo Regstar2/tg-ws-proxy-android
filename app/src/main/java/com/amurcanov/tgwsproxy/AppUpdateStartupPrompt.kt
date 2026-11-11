@@ -1,6 +1,8 @@
 package com.amurcanov.tgwsproxy
 
 import android.content.Intent
+import android.os.Build
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,8 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /** Async startup check. This dialog never blocks app/proxy initialization. */
 @Composable
@@ -37,16 +37,24 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
     var release by remember { mutableStateOf<GitHubReleaseInfo?>(null) }
 
     LaunchedEffect(enabledForLaunch) {
-        if (!enabledForLaunch || !preferences.shouldShow()) return@LaunchedEffect
-        val candidate = withContext(Dispatchers.IO) {
-            runCatching {
-                val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
-                val installedVersion = info.versionName ?: return@runCatching null
-                val decision = AppUpdateSelector.select(
-                    installedVersion, GitHubReleasesClient().fetchReleases(),
-                )
-                (decision as? UpdateDecision.Available)?.release
-            }.getOrNull()
+        if (!enabledForLaunch) return@LaunchedEffect
+        // The release check also refreshes the shared cache when prompts are
+        // disabled; the preference controls the dialog, not manual updates.
+        val candidate = try {
+            val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            val installedVersion = info.versionName.orEmpty()
+            val installedCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            (AppUpdateCheckRepository.check(
+                appContext, installedVersion, installedCode,
+            ) as? UpdateDecision.Available)?.release
+        } catch (error: Exception) {
+            Log.w("TgWsProxyUpdate", "Startup release check failed: ${error.javaClass.simpleName}")
+            null
         }
         if (candidate != null &&
             AppUpdateAssetSelector.select(candidate) != null &&
