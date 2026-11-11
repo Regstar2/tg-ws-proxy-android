@@ -190,11 +190,7 @@ try {
         Save-AdbEvidence -Name "$phase-sockets-after" -CommandArgs @('shell', 'ss', '-tnpe')
         Save-AdbEvidence -Name "$phase-cpu-after" -CommandArgs @('shell', 'top', '-b', '-n', '1', '-p', $processId)
         $afterPid = Get-ProxyPid
-        $logLines = if (Test-Path -LiteralPath $stdoutFile) {
-            @(Get-Content -LiteralPath $stdoutFile)
-        } else {
-            @()
-        }
+        $logLines = Read-Issue138CaptureLines -Path $stdoutFile
         $report = Get-Issue138StormReport -Phase $phase -Lines $logLines -DurationSeconds $DurationSeconds -AttemptedConnections $attempted -RedirectResponses $redirects -ConnectionFailures $failures
         $report | Add-Member -NotePropertyName 'ListenerPidBefore' -NotePropertyValue $processId
         $report | Add-Member -NotePropertyName 'ListenerPidAfter' -NotePropertyValue $afterPid
