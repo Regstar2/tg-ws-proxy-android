@@ -77,8 +77,9 @@ internal object AppUpdateQuickFlow {
 
     val isDownloading: Boolean get() = state is State.Downloading
 
-    fun takeHandoff(): AppUpdateQuickHandoff? =
-        pendingHandoff.also { pendingHandoff = null }
+    // Retain the handoff only within this process so an Android configuration
+    // change while system Settings is open cannot lose the verified APK.
+    fun peekHandoff(): AppUpdateQuickHandoff? = pendingHandoff
 
     /**
      * Called only after the user explicitly selects "Download and install".
