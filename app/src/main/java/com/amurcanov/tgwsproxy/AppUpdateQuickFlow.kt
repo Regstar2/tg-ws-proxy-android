@@ -7,6 +7,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -17,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -54,6 +57,8 @@ internal object AppUpdateQuickFlow {
     private const val CHANNEL = "tgwsproxy_update_downloads"
     private const val NOTIFICATION_ID = 139
     private const val NOTIFICATION_REQUEST = 139
+    private const val CANCEL_REQUEST = 140
+    internal const val ACTION_CANCEL_QUICK_UPDATE = "io.github.regstar2.tgwsproxy.CANCEL_QUICK_UPDATE"
 
     private sealed interface State {
         data object Idle : State
@@ -65,6 +70,7 @@ internal object AppUpdateQuickFlow {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var state: State = State.Idle
+    private var downloadJob: Job? = null
     private var foreground: WeakReference<Activity>? = null
     private var subscribedApplication: Application? = null
     private var pendingHandoff: AppUpdateQuickHandoff? = null
@@ -91,7 +97,7 @@ internal object AppUpdateQuickFlow {
         Toast.makeText(app, R.string.update_quick_started, Toast.LENGTH_SHORT).show()
         showNotification(app, R.string.update_quick_downloading, 0, 100)
 
-        scope.launch {
+        downloadJob = scope.launch {
             var lastProgress = 0L
             try {
                 val file = AppUpdateInstallerStore.get(app).download(release) { received, total ->
@@ -114,9 +120,17 @@ internal object AppUpdateQuickFlow {
                 Log.w(TAG, "Quick update failed: ${error.javaClass.simpleName}")
                 state = State.Failed(release, R.string.update_download_failed)
                 dispatchOrNotify(app)
+            } finally {
+                downloadJob = null
             }
         }
         return true
+    }
+
+    fun cancel(context: Context) {
+        if (state !is State.Downloading) return
+        downloadJob?.cancel()
+        dismissNotification(context.applicationContext as Application)
     }
 
     private fun observeActivityLifecycle(app: Application) {
@@ -245,7 +259,22 @@ internal object AppUpdateQuickFlow {
                 .setAutoCancel(!isDownloading)
                 .setOngoing(isDownloading)
                 .setContentIntent(pending)
-                .apply { if (isDownloading) setProgress(maximum, progress, false) }
+                .apply {
+                    if (isDownloading) {
+                        setProgress(maximum, progress, false)
+                        val cancelIntent = Intent(app, AppUpdateQuickCancelReceiver::class.java)
+                            .setAction(ACTION_CANCEL_QUICK_UPDATE)
+                        val cancelPending = PendingIntent.getBroadcast(
+                            app, CANCEL_REQUEST, cancelIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        )
+                        addAction(
+                            R.drawable.ic_quick_settings_tile,
+                            app.getString(R.string.update_cancel_download),
+                            cancelPending,
+                        )
+                    }
+                }
                 .build()
             manager.notify(NOTIFICATION_ID, notification)
         } catch (error: Exception) {
@@ -256,6 +285,15 @@ internal object AppUpdateQuickFlow {
     private fun dismissNotification(app: Application) {
         runCatching {
             app.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        }
+    }
+}
+
+/** Explicit internal action from the progress notification; no exported receiver. */
+internal class AppUpdateQuickCancelReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == AppUpdateQuickFlow.ACTION_CANCEL_QUICK_UPDATE) {
+            AppUpdateQuickFlow.cancel(context)
         }
     }
 }
