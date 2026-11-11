@@ -48,7 +48,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 | Cloudflare Worker | Optional Telegram route; Consumer WARP provisioning uses a separately managed bootstrap Worker pool |
 | Worker Pool | Implemented but still slower than direct connectivity and not recommended as the primary route |
 | Feedback | Dedicated screen; GitHub Issue Forms without an embedded PAT |
-| Updates | GitHub Releases check, optional startup prompt, signed APK download/validation and Android installer handoff (#139; device acceptance pending) |
+| Updates | GitHub Releases check, optional startup prompt, verified APK download and Android installer handoff. The main path was tested on Xiaomi; extended #139 acceptance remains open |
 
 ## Features
 
@@ -117,6 +117,16 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
 Android may require uninstalling the existing application when switching between debug and release signatures. Note that uninstalling may remove local application settings.
+
+## In-app updates
+
+Checking for a newer release is asynchronous and does not block the local proxy. When a compatible version exists, TgWsProxy may offer an optional startup prompt. **Later** postpones the prompt by 24 hours. Reminders can be disabled or re-enabled through **Settings → Updates**, which also provides manual refresh, release information and a GitHub release link.
+
+Tapping **Download and install** in the startup prompt downloads the official ARM64 APK without navigating to the Updates screen. Before installation, TgWsProxy verifies SHA-256, the APK signing certificate, package identity and an increased `versionCode`. If install-from-this-source permission is already granted, the **Android system installer** opens directly after verification and requires the user's confirmation. Otherwise the app opens Updates, then the Android **Install unknown apps** permission page scoped to TgWsProxy. Granting access continues with the **same verified APK**, without downloading again.
+
+A progress/cancel notification is shown when notifications are permitted. Installation does not launch an activity while the app is in the background: return to TgWsProxy to continue. If Android kills the app process, an interrupted download does not automatically resume. On error, the [official release page](https://github.com/Regstar2/tg-ws-proxy-android/releases) remains available; unverified APKs are never installed. Installing an update may interrupt running proxy connections and is never silent.
+
+In-place updates require a matching `applicationId` and compatible signing identity. Legacy `com.amurcanov.tgwsproxy` installations are separate packages; their settings are not migrated automatically. See the [acceptance checklist and limitations](docs/testing/issue-139-in-app-update-acceptance.md).
 
 ## Usage
 
@@ -223,7 +233,7 @@ Detailed design: [docs/architecture/architecture.md](docs/architecture/architect
 - Cloudflare Worker URLs, proxy secrets, keystores, and signing variables must not be published in issues, logs, or commits.
 - Release signing uses local environment variables; the keystore is excluded from Git.
 - Feedback does not automatically attach runtime logs, proxy credentials, Telegram data, IP addresses, or secrets.
-- The Updates screen checks official GitHub Releases and can download an ARM64 APK into the app-private cache. It checks SHA-256, APK signing identity, package name and version code before offering Android's standard installer. Installation always requires user confirmation. Startup update reminders can be disabled, or postponed for 24 hours with Later. Signed-device acceptance for #139 is still pending.
+- In-app updates download only official ARM64 release APKs and verify SHA-256, APK signer, package identity and version code before invoking Android's installer. The main upgrade to `1.11.7 (63)` was confirmed on Xiaomi; remaining cases and constraints are recorded in the [#139 acceptance checklist](docs/testing/issue-139-in-app-update-acceptance.md).
 - A masking domain changes the Fake TLS handshake shape but does not turn the application into a VPN.
 
 Review every diagnostic report manually before publishing it.
