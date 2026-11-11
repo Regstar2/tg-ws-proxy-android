@@ -130,7 +130,7 @@ internal object AppUpdateQuickFlow {
     fun cancel(context: Context) {
         if (state !is State.Downloading) return
         downloadJob?.cancel()
-        dismissNotification(context.applicationContext as Application)
+        dismissNotification(context.applicationContext)
     }
 
     private fun observeActivityLifecycle(app: Application) {
@@ -155,52 +155,56 @@ internal object AppUpdateQuickFlow {
     }
 
     private fun dispatchOrNotify(app: Application) {
-        val active = foreground?.get()
-        // The reference is present only for a resumed activity: it is set
-        // by an explicit UI tap or onActivityResumed and cleared on pause.
-        val isResumed = active != null && !active.isFinishing && !active.isDestroyed
+        val activity = foreground?.get()
+        // Resumed activities are recorded on explicit UI taps and lifecycle
+        // callbacks, and removed before they can be used from the background.
+        val isForeground = activity != null && !activity.isFinishing && !activity.isDestroyed
 
-        if (isResumed && active != null) {
-            when (val result = state) {
-                is State.Verified -> {
+        when (val result = state) {
+            is State.Verified -> when (QuickUpdateDeliveryPolicy.destination(
+                isForeground = isForeground,
+                canInstall = app.packageManager.canRequestPackageInstalls(),
+            )) {
+                QuickUpdateDestination.WAIT_FOR_FOREGROUND ->
+                    showNotification(app, R.string.update_quick_ready)
+
+                QuickUpdateDestination.OPEN_SYSTEM_INSTALLER -> {
+                    val host = activity ?: return
                     state = State.HandedOff
                     dismissNotification(app)
-                    when (QuickUpdateDeliveryPolicy.destination(
-                        isForeground = true,
-                        canInstall = app.packageManager.canRequestPackageInstalls(),
-                    )) {
-                        QuickUpdateDestination.OPEN_SYSTEM_INSTALLER -> {
-                            try {
-                                active.startActivity(AppUpdateInstallerStore.get(app).installIntent(result.file))
-                            } catch (error: Exception) {
-                                Log.w(TAG, "Quick installer failed: ${error.javaClass.simpleName}")
-                                openUpdates(active, AppUpdateQuickHandoff(
-                                    result.release, errorMessage = R.string.update_installer_failed,
-                                ))
-                            }
-                        }
-                        QuickUpdateDestination.OPEN_UPDATES_FOR_PERMISSION ->
-                            openUpdates(active, AppUpdateQuickHandoff(
-                                result.release, verifiedFile = result.file,
-                            ))
-                        QuickUpdateDestination.WAIT_FOR_FOREGROUND -> Unit
+                    try {
+                        host.startActivity(AppUpdateInstallerStore.get(app).installIntent(result.file))
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Quick installer failed: ${error.javaClass.simpleName}")
+                        openUpdates(host, AppUpdateQuickHandoff(
+                            result.release, errorMessage = R.string.update_installer_failed,
+                        ))
                     }
                 }
-                is State.Failed -> {
+
+                QuickUpdateDestination.OPEN_UPDATES_FOR_PERMISSION -> {
+                    val host = activity ?: return
                     state = State.HandedOff
                     dismissNotification(app)
-                    openUpdates(active, AppUpdateQuickHandoff(
-                        result.release, errorMessage = result.message,
+                    openUpdates(host, AppUpdateQuickHandoff(
+                        result.release, verifiedFile = result.file,
                     ))
                 }
-                else -> Unit
             }
-        } else {
-            when (state) {
-                is State.Verified -> showNotification(app, R.string.update_quick_ready)
-                is State.Failed -> showNotification(app, R.string.update_quick_failed)
-                else -> Unit
+
+            is State.Failed -> {
+                if (isForeground && activity != null) {
+                    state = State.HandedOff
+                    dismissNotification(app)
+                    openUpdates(activity, AppUpdateQuickHandoff(
+                        result.release, errorMessage = result.message,
+                    ))
+                } else {
+                    showNotification(app, R.string.update_quick_failed)
+                }
             }
+
+            else -> Unit
         }
     }
 
@@ -282,7 +286,7 @@ internal object AppUpdateQuickFlow {
         }
     }
 
-    private fun dismissNotification(app: Application) {
+    private fun dismissNotification(app: Context) {
         runCatching {
             app.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         }
