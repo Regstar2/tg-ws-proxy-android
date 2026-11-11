@@ -1,6 +1,7 @@
 package com.amurcanov.tgwsproxy
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -27,12 +28,24 @@ internal object AppUpdateCheckRepository {
     ): UpdateDecision = mutex.withLock {
         if (!force) {
             cached(context, installedVersion, installedCode)?.let { return@withLock it }
+            if (recentFailure(context, installedVersion, installedCode)) {
+                throw UpdateCheckException(
+                    UpdateFailureKind.NETWORK, "Recent GitHub check failure; retry manually",
+                )
+            }
         }
-        val result = withContext(Dispatchers.IO) {
-            AppUpdateSelector.select(installedVersion, client.fetchReleases())
+        try {
+            val result = withContext(Dispatchers.IO) {
+                AppUpdateSelector.select(installedVersion, client.fetchReleases())
+            }
+            save(context, installedVersion, installedCode, result)
+            result
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            saveFailure(context, installedVersion, installedCode)
+            throw error
         }
-        save(context, installedVersion, installedCode, result)
-        result
     }
 
     fun cached(context: Context, installedVersion: String, installedCode: Long): UpdateDecision? {
@@ -78,6 +91,31 @@ internal object AppUpdateCheckRepository {
                 else -> null
             }
         }.getOrNull()
+    }
+
+    private fun recentFailure(context: Context, version: String, code: Long): Boolean =
+        runCatching {
+            val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(ENTRY, null) ?: return@runCatching false
+            val data = JSONObject(raw)
+            data.optString("state") == "failure" &&
+                data.optString("installed") == version &&
+                data.optLong("installedCode", -1L) == code &&
+                AppUpdateCheckPolicy.isFresh(
+                    data.optLong("checkedAt", -1L),
+                    System.currentTimeMillis(),
+                    AppUpdateCheckPolicy.ERROR_BACKOFF_MS,
+                )
+        }.getOrDefault(false)
+
+    private fun saveFailure(context: Context, version: String, code: Long) {
+        val data = JSONObject()
+            .put("installed", version)
+            .put("installedCode", code)
+            .put("checkedAt", System.currentTimeMillis())
+            .put("state", "failure")
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(ENTRY, data.toString()).apply()
     }
 
     private fun save(
@@ -129,7 +167,12 @@ internal object AppUpdateCheckRepository {
 
 internal object AppUpdateCheckPolicy {
     const val CACHE_TTL_MS = 6L * 60L * 60L * 1000L
+    const val ERROR_BACKOFF_MS = 5L * 60L * 1000L
 
-    fun isFresh(checkedAt: Long, now: Long): Boolean =
-        checkedAt >= 0 && now >= checkedAt && now - checkedAt < CACHE_TTL_MS
+    fun isFresh(
+        checkedAt: Long,
+        now: Long,
+        maxAge: Long = CACHE_TTL_MS,
+    ): Boolean =
+        checkedAt >= 0 && now >= checkedAt && now - checkedAt < maxAge
 }
