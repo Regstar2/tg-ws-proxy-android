@@ -178,7 +178,8 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
     val installer = remember { AppUpdateInstallerStore.get(appContext) }
-    val handoff = remember { if (quickHandoff) AppUpdateQuickFlow.takeHandoff() else null }
+    val handoff = remember { if (quickHandoff) AppUpdateQuickFlow.peekHandoff() else null }
+    var quickHandoffLaunched by rememberSaveable { mutableStateOf(false) }
     val preferences = remember { AppUpdatePreferences(appContext) }
     val installed = remember { readInstalledVersion(appContext) }
     var state by remember {
@@ -325,9 +326,12 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
 
     LaunchedEffect(Unit) {
         if (handoff?.verifiedFile != null) {
-            // The quick path downloaded and verified this same file. Do not
-            // download again or ask for a redundant in-app confirmation.
-            openInstaller(handoff.release, handoff.verifiedFile)
+            // Avoid reopening Android Settings on activity re-creation.
+            // The ActivityResult launcher still handles the user's return.
+            if (!quickHandoffLaunched) {
+                quickHandoffLaunched = true
+                openInstaller(handoff.release, handoff.verifiedFile)
+            }
         } else if (handoff == null) {
             checkUpdates(autoDownload)
         }
