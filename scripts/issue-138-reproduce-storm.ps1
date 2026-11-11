@@ -133,7 +133,7 @@ try {
         $failures = 0
         $failureSamples = New-Object 'System.Collections.Generic.List[string]'
         $capture = Start-Process -FilePath $adbPath -ArgumentList @(
-            '-s', $Serial, 'logcat', '--pid=' + $processId, '-T', '1', '-v', 'threadtime',
+            '-s', $Serial, 'logcat', "--pid=$processId", '-T', '1', '-v', 'threadtime',
             'TgWsProxy:V', 'AndroidRuntime:E', '*:S'
         ) -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru -NoNewWindow
         try {
