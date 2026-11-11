@@ -2,6 +2,15 @@
 
 **Stage:** implementation in PR #144; no physical-device result yet.
 
+## Startup detection regression (PR #144)
+
+- [ ] Startup makes an asynchronous GitHub release check; when successful, the result is reused on the Updates screen and across process restarts for up to 6 hours.
+- [ ] A failure is not silently labelled up-to-date. Network failures are retried after 5 minutes (manual “Check for updates” always forces a request).
+- [ ] Installing the release-signed `1.11.7-debug` build with versionCode 63 does **not** prompt for stable `v1.11.7` (also versionCode 63). A genuinely newer `v1.11.8` must still be offered.
+- [ ] Startup dialog appears only for a newer compatible release and with notifications enabled and not snoozed. “Later” snoozes for 24 hours; “Disable reminders” remains in the dialog below the two primary actions.
+- [ ] Run `AppUpdatePopupIssue139Test` on a safe test installation to verify the dialog and callbacks even before a new public GitHub release exists.
+- [ ] Verify manual refresh bypasses the cached result without starting a duplicate request or touching the running proxy.
+
 ## Source and build gates
 
 - [ ] Windows CI: scripts/ci.ps1 (Go, Android unit tests, lint, assembleDebug).
