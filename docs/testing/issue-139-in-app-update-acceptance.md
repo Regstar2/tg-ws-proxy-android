@@ -11,6 +11,17 @@
 - [ ] Run `AppUpdatePopupIssue139Test` on a safe test installation to verify the dialog and callbacks even before a new public GitHub release exists.
 - [ ] Verify manual refresh bypasses the cached result without starting a duplicate request or touching the running proxy.
 
+## Quick-install path from startup popup (PR #144)
+
+- [ ] On a release-signed build below the official release version, launch the app with update reminders enabled. Tap **Download and install** on the startup popup and confirm that the **Updates screen does not appear** during a successful download.
+- [ ] The download runs independently from the popup and shows progress in an Android notification when notifications are permitted. Cancel via the notification and verify no installer launches or unverified APK remains. A second tap while downloading must not start another request.
+- [ ] With **Install from TgWsProxy** already granted and the app visible, the **Android system package installer** opens directly after SHA-256, signer and version checks, without a second in-app confirmation. Android still asks the user to confirm installation.
+- [ ] With install-source permission missing, the flow opens Updates **only after verification**, automatically opens Android's setting for TgWsProxy, and after the user grants permission and returns opens the **same already verified APK** in the system installer. No re-download.
+- [ ] If permission is denied, the app remains on the permission screen and does not relaunch Settings in a loop. Manual retry is available.
+- [ ] If the user backgrounds the app before verification completes, the app must **not attempt a background activity launch**; a notification (when authorized) lets the user return, then install. If Android has disabled notifications, manually returning to the app resumes the pending installation while the process remains alive.
+- [ ] If the network, APK hash, signer, or system installer fails, the Updates screen shows the failure and still allows a safe retry without disrupting proxy settings.
+- [ ] Run `AppUpdateQuickDeliveryPolicyTest` and `AppUpdateInstallPermissionPolicyTest`; run a real-device smoke for the full lifecycle and notification behaviors. A process-scoped download is best-effort while backgrounded; it does not persist across process death and cannot claim durable WorkManager delivery.
+
 ## Source and build gates
 
 - [ ] Windows CI: scripts/ci.ps1 (Go, Android unit tests, lint, assembleDebug).
