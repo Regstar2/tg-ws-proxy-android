@@ -75,6 +75,12 @@ import java.io.File
 
 private data class InstalledVersion(val name: String, val code: Long)
 
+private fun UpdateDecision.asScreenState(): UpdateState = when (this) {
+    is UpdateDecision.Available -> UpdateState.Available(release)
+    UpdateDecision.UpToDate -> UpdateState.Current
+    UpdateDecision.UnsupportedCurrentVersion -> UpdateState.Unsupported
+}
+
 private sealed interface UpdateState {
     data object Checking : UpdateState
     data object Current : UpdateState
@@ -143,11 +149,15 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
-    val client = remember { GitHubReleasesClient() }
     val installer = remember { AppUpdateInstaller(appContext) }
     val preferences = remember { AppUpdatePreferences(appContext) }
     val installed = remember { readInstalledVersion(appContext) }
-    var state by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
+    var state by remember {
+        mutableStateOf<UpdateState>(
+            AppUpdateCheckRepository.cached(appContext, installed.name, installed.code)
+                ?.asScreenState() ?: UpdateState.Checking,
+        )
+    }
     var notesExpanded by rememberSaveable { mutableStateOf(false) }
     var reminders by remember { mutableStateOf(preferences.enabled) }
     var runningJob by remember { mutableStateOf<Job?>(null) }
@@ -182,29 +192,34 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
         }
     }
 
-    fun checkUpdates(shouldStartDownload: Boolean = false) {
+    fun checkUpdates(
+        shouldStartDownload: Boolean = false,
+        force: Boolean = false,
+    ) {
         if (runningJob?.isActive == true) return
+        val cached = if (force) null else {
+            AppUpdateCheckRepository.cached(appContext, installed.name, installed.code)
+        }
+        if (cached != null) {
+            state = cached.asScreenState()
+            if (shouldStartDownload && cached is UpdateDecision.Available) {
+                startDownload(cached.release)
+            }
+            return
+        }
         runningJob = scope.launch {
             state = UpdateState.Checking
             notesExpanded = false
             var forwardedToDownload = false
             try {
-                val result = withContext(Dispatchers.IO) {
-                    AppUpdateSelector.select(installed.name, client.fetchReleases())
-                }
-                when (result) {
-                    is UpdateDecision.Available -> {
-                        state = UpdateState.Available(result.release)
-                        if (shouldStartDownload) {
-                            // Release is selected first; the user already explicitly tapped
-                            // "Download and install" in the launch dialog.
-                            runningJob = null
-                            startDownload(result.release)
-                            forwardedToDownload = true
-                        }
-                    }
-                    UpdateDecision.UpToDate -> state = UpdateState.Current
-                    UpdateDecision.UnsupportedCurrentVersion -> state = UpdateState.Unsupported
+                val result = AppUpdateCheckRepository.check(
+                    appContext, installed.name, installed.code, force,
+                )
+                state = result.asScreenState()
+                if (shouldStartDownload && result is UpdateDecision.Available) {
+                    runningJob = null
+                    startDownload(result.release)
+                    forwardedToDownload = true
                 }
             } catch (_: Exception) {
                 state = UpdateState.Failed(null, R.string.update_error_network)
@@ -451,7 +466,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
             Button(
                 onClick = {
                     when (val current = state) {
-                        UpdateState.Current, UpdateState.Unsupported -> checkUpdates()
+                        UpdateState.Current, UpdateState.Unsupported -> checkUpdates(force = true)
                         is UpdateState.Available -> {
                             if (AppUpdateAssetSelector.select(current.release) != null) {
                                 startDownload(current.release)
@@ -459,7 +474,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                         }
                         is UpdateState.Downloading -> runningJob?.cancel()
                         is UpdateState.Ready -> askInstall = true
-                        is UpdateState.InstallerOpened -> checkUpdates()
+                        is UpdateState.InstallerOpened -> checkUpdates(force = true)
                         is UpdateState.PermissionRequired -> {
                             permissionLauncher.launch(
                                 Intent(
@@ -470,7 +485,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean) {
                         }
                         is UpdateState.Cancelled -> startDownload(current.release)
                         is UpdateState.Failed -> {
-                            if (current.release == null) checkUpdates()
+                            if (current.release == null) checkUpdates(force = true)
                             else if (AppUpdateAssetSelector.select(current.release) == null) {
                                 openOfficialRelease(context, current.release.tagName)
                             } else startDownload(current.release)
