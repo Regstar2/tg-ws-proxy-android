@@ -28,7 +28,12 @@
 4. Launch app, confirm the nonblocking startup dialog when reminders are on. Verify Later postpones the same prompt by 24 hours; Disable reminders persists across restart and may be reversed on the Updates screen.
 5. Open Settings → Updates, check the installed version, release version, collapsible release notes and top-right link. Confirm only one main bottom action appears and remains anchored across available, downloading, preparing, ready, failed and up-to-date.
 6. Tap Download and install. Record download progress and verify the APK passes hash and signer validation; confirm no installer is launched before checks finish.
-7. On Android 8+/9+ test when install-from-this-source is disabled, grant it in Android Settings, return and continue. Reject permission as a separate scenario; app/proxy must remain usable.
+7. On Android 8+/9+, after APK verification and an explicit tap of “Install”, verify that a missing install-from-this-source permission **automatically opens** Android's `ACTION_MANAGE_UNKNOWN_APP_SOURCES` screen scoped to `io.github.regstar2.tgwsproxy`. No manual second tap on “Open settings” is needed.
+   - Grant permission and return: the already verified APK opens directly in the **system package installer**, without re-downloading or another in-app confirmation; Android still requires confirmation of the installation itself.
+   - Deny permission and return: stay on “Permission required”; the app must **not reopen Settings automatically** or launch an installer. The user can manually press “Open settings” to try again. Proxy and other settings remain usable.
+   - Grant permission before attempting an update: after confirmation the installer opens directly, without showing the permission settings screen.
+   - Unavailable or blocked Settings activity: show the explicit system-settings error without opening any unverified APK.
+   - Run `AppUpdateInstallPermissionPolicyTest` for the grant/deny/return decision matrix; this is not a substitute for the physical-device flow.
 8. Confirm Android's own installer dialog; test Cancel without data loss. Repeat, confirm install, restart the application and record updated installed versionCode.
 9. Verify saved settings and route policies, Workers and AWG/WARP remain unchanged; check Telegram MTProto connectivity before and after and that service startup is not blocked by update checks.
 10. Test old com.amurcanov.tgwsproxy installs separately: this app has a different applicationId and cannot be updated in place.
