@@ -22,8 +22,9 @@ class ProxyQuickSettingsTileTest {
         active: Boolean,
         transitioning: Boolean,
         preparingStart: Boolean = false,
+        stopping: Boolean = false,
     ) {
-        val state = ProxyTileStateMapper.resolve(status, running, preparingStart)
+        val state = ProxyTileStateMapper.resolve(status, running, preparingStart, stopping)
         assertEquals(action, state.clickAction)
         assertEquals(active, state.active)
         assertEquals(transitioning, state.transitioning)
@@ -82,6 +83,23 @@ class ProxyQuickSettingsTileTest {
         assertTileState(
             ProxyServiceStatus.RECONNECTING, false,
             ProxyTileClickAction.NONE, active = false, transitioning = true,
+        )
+    }
+
+    @Test
+    fun stopRequestedKeepsActiveRuntimeUnavailableUntilStopIsConfirmed() {
+        assertTileState(
+            ProxyServiceStatus.RUNNING, true,
+            ProxyTileClickAction.NONE, active = false, transitioning = true,
+            stopping = true,
+        )
+        assertTileState(
+            ProxyServiceStatus.STOPPED, false,
+            ProxyTileClickAction.START, active = false, transitioning = false,
+        )
+        assertTileState(
+            ProxyServiceStatus.ERROR, false,
+            ProxyTileClickAction.START, active = false, transitioning = false,
         )
     }
 
