@@ -58,4 +58,10 @@
     <string name="update_prompt_subtitle">New TgWsProxy version · %1$.1f MB</string>
     <string name="update_disable_reminders">Disable reminders</string>
     <string name="update_retry">Retry download</string>
+    <string name="update_quick_channel">App updates</string>
+    <string name="update_quick_started">Downloading update in the background</string>
+    <string name="update_quick_downloading">Downloading verified update…</string>
+    <string name="update_quick_ready">Update verified. Tap to install.</string>
+    <string name="update_quick_failed">Update failed. Tap to see details.</string>
+    <string name="update_quick_already_running">An update is already downloading. Wait for it to finish.</string>
 </resources>
