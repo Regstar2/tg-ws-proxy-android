@@ -255,7 +255,7 @@ class ProxyService : Service() {
         }
         logFrontendStartResult(result)
         if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
-            handleFrontendStartFailure(frontend, result, wasRunning = false)
+            handleFrontendStartFailure(frontend, result, wasRunning = false, port = config.port)
             return
         }
         saveLastConfig(port, ips, poolSize, frontendType)
@@ -293,7 +293,7 @@ class ProxyService : Service() {
         }
         logFrontendStartResult(result)
         if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
-            handleFrontendStartFailure(frontend, result, wasRunning)
+            handleFrontendStartFailure(frontend, result, wasRunning, port = config.port)
             return
         }
 
@@ -433,7 +433,9 @@ class ProxyService : Service() {
         frontend: LocalProxyFrontend,
         result: LocalProxyFrontendStartResult,
         wasRunning: Boolean,
+        port: Int,
     ) {
+        ProxyStartFeedback.report(result.errorCode, port)
         val message = result.message.ifBlank { "Proxy frontend start failed: ${frontend.type}" }
         Log.w("ProxyService", message)
         if (!wasRunning) {
@@ -547,7 +549,7 @@ class ProxyService : Service() {
         }
         logFrontendStartResult(result)
         if (result.state.status != LocalProxyFrontendStatus.RUNNING) {
-            handleFrontendStartFailure(frontend, result, wasRunning = false)
+            handleFrontendStartFailure(frontend, result, wasRunning = false, port = config.port)
             return
         }
         if (saveConfig) {

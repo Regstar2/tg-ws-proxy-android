@@ -85,6 +85,7 @@ import com.amurcanov.tgwsproxy.routeprobe.RouteProbeRequest
 import com.amurcanov.tgwsproxy.routeprobe.RouteProbeTarget
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -335,6 +336,15 @@ private fun ProxyScreen(
     }
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
+    LaunchedEffect(context) {
+        ProxyStartFeedback.busyPortEvents.collect {
+            Toast.makeText(
+                context,
+                context.getString(R.string.proxy_start_port_busy),
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
     var localProxyFrontendType by remember {
         mutableStateOf(localProxyFrontendRepository.load())
     }
