@@ -134,7 +134,7 @@ class ProxyQuickSettingsTileService : TileService() {
             refreshTile()
             try {
                 startService(Intent(this, ProxyService::class.java).apply {
-                    action = ProxyService.ACTION_STOP
+                    setAction(ProxyService.ACTION_STOP)
                 })
                 Log.i(TAG, "TILE_STOP_REQUESTED")
             } catch (error: RuntimeException) {
@@ -185,7 +185,7 @@ class ProxyQuickSettingsTileService : TileService() {
                 ContextCompat.startForegroundService(
                     this@ProxyQuickSettingsTileService,
                     Intent(this@ProxyQuickSettingsTileService, ProxyService::class.java).apply {
-                        action = ProxyService.ACTION_START
+                        setAction(ProxyService.ACTION_START)
                         putExtra(ProxyService.EXTRA_PORT, saved.port)
                         putExtra(ProxyService.EXTRA_IPS, saved.runtimeConfig)
                         putExtra(ProxyService.EXTRA_POOL_SIZE, saved.poolSize)
