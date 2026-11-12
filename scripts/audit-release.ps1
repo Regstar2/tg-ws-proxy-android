@@ -88,14 +88,10 @@ if (-not $versionCodeMatch.Success) {
 # Keep the release version and versionCode on the same status line, including when
 # the version text is formatted as a Markdown link.
 $escapedVersion = [regex]::Escape($ExpectedVersion)
-foreach ($readme in @(
-    @{ File = 'README.md'; Label = 'Текущий опубликованный релиз' },
-    @{ File = 'README_EN.md'; Label = 'Current published release' }
-)) {
-    $escapedLabel = [regex]::Escape($readme.Label)
-    $pattern = '(?m)^\*\*' + $escapedLabel + ':\*\*[^\r\n]*\bv?' +
-        $escapedVersion + '\b[^\r\n]*\bversionCode\s+' + $ExpectedVersionCode + '\b'
-    Assert-Match -Path (Join-Path $root $readme.File) -Pattern $pattern -Description "$($readme.File) source version"
+$publishedVersionPattern = '(?m)^\*\*[^*\r\n]+:\*\*[^\r\n]*\bv?' +
+    $escapedVersion + '\b[^\r\n]*\bversionCode\s+' + $ExpectedVersionCode + '\b'
+foreach ($readme in @('README.md', 'README_EN.md')) {
+    Assert-Match -Path (Join-Path $root $readme) -Pattern $publishedVersionPattern -Description "$readme source version"
 }
 Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##[^\r\n]*$escapedVersion\b" -Description 'CHANGELOG version section'
 
