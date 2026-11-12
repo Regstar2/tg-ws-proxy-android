@@ -117,6 +117,37 @@ Interpretation:
   handshake behavior. The injected script deliberately does not simulate
   a real authenticated Telegram connection or a full AWG network route.
 
+## Additional evidence — Inject 10/s, 2026-11-12
+
+User ran commit `0b46226` on Android listener port 1445.
+Offline PowerShell parser suite PASS; 10 injected connections resulted in
+10 TCP empty replies and 10 `MTProto route rejected` log entries,
+but **zero** `fake tls client hello expected` log entries and no HTTP 301
+redirects. Two completed bidirectional AWG sessions remained healthy,
+PID 3481 stable; zero crashes/ANRs and zero no-route errors.
+The phase stopped after approximately one second following the
+ten-failure safety limit. Evidence was written to
+`artifacts/issue138/repro-20261112-114957.zip` on the user's PC.
+The ZIP contents were not available to this agent.
+
+**Interpretation:** The TCP listener was reached sufficiently to reject
+client handshakes, but the rejection's exact error is not present in the
+console summary. With an enabled, valid Fake TLS masking domain, the
+branch's native implementation would normally respond HTTP 301 for the
+artificial 64-byte `0x7f` payload. When Fake TLS is disabled the same
+payload instead reaches ordinary MTProto transport validation and can be
+rejected as `unsupported mtproto transport` with no HTTP response.
+This is a testable hypothesis, not confirmed device configuration.
+
+A new offline parser regression test recognizes
+`unsupported mtproto transport`, `mtproto handshake read failed`,
+and Fake TLS expected rejection separately, and provides a conditional
+diagnostic hint. Inspect the already captured `Inject-logcat.txt`
+for the exact `MTProto route rejected` lines, and
+`Inject-listeners-before.txt` for port 1445; do not rerun high-rate
+pressure until the mode mismatch has been resolved. The test harness
+does not install the branch's runtime build.
+
 ## Device follow-up — 2026-11-12
 
 User PowerShell 5.1 report: offline parser regression tests PASS.
