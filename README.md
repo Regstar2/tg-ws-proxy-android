@@ -32,8 +32,8 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Статус проекта
 
-**Текущий опубликованный релиз:** [1.11.7 (versionCode 63)](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.7) (опубликован 5 ноября 2026 года)  
-**Готовится:** 1.11.8 (versionCode 64) — [изменения и проверки](docs/releases/v1.11.8.md), релиз ещё не опубликован.  
+**Последний опубликованный релиз:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
+**Версия исходников:** 1.11.8 (versionCode 64) — [изменения и проверки](docs/releases/v1.11.8.md).  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.

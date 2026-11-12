@@ -1,6 +1,6 @@
 # Релизы TgWsProxy Android
 
-## В подготовке: v1.11.8 (ещё не опубликована)
+## v1.11.8 — текущая версия документации релиза
 
 - [Полные заметки на русском](v1.11.8.md) · [English](v1.11.8_EN.md)
 - [Краткий текст GitHub Release](RELEASE_NOTES_v1.11.8.md)
@@ -14,4 +14,4 @@
 - [v1.11.6](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.6) — [русские заметки](v1.11.6.md) · [English](v1.11.6_EN.md)
 - [v1.11.5](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.5) — [русские заметки](v1.11.5.md) · [English](v1.11.5_EN.md)
 
-[CHANGELOG](../../CHANGELOG.md). Подготовленная документация и код версии не означают, что tag и подписанный релиз опубликованы.
+[CHANGELOG](../../CHANGELOG.md) · [Фактический последний опубликованный релиз](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest).

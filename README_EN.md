@@ -34,8 +34,8 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 
 ## Project status
 
-**Current published release:** [1.11.7 (versionCode 63)](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.7) (published November 5, 2026)  
-**In preparation:** 1.11.8 (versionCode 64) — [release notes and validation](docs/releases/v1.11.8_EN.md); not published yet.  
+**Latest published release:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
+**Source version:** 1.11.8 (versionCode 64) — [release notes and verification](docs/releases/v1.11.8_EN.md).  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
