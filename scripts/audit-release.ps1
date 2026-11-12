@@ -93,8 +93,8 @@ foreach ($readme in @(
     @{ File = 'README_EN.md'; Label = 'Current published release' }
 )) {
     $escapedLabel = [regex]::Escape($readme.Label)
-    $pattern = '(?m)^\\*\\*' + $escapedLabel + ':\\*\\*[^\\r\\n]*\\bv?' +
-        $escapedVersion + '\\b[^\\r\\n]*\\bversionCode\\s+' + $ExpectedVersionCode + '\\b'
+    $pattern = '(?m)^\*\*' + $escapedLabel + ':\*\*[^\r\n]*\bv?' +
+        $escapedVersion + '\b[^\r\n]*\bversionCode\s+' + $ExpectedVersionCode + '\b'
     Assert-Match -Path (Join-Path $root $readme.File) -Pattern $pattern -Description "$($readme.File) source version"
 }
 Assert-Match -Path (Join-Path $root 'CHANGELOG.md') -Pattern "(?m)^##[^\r\n]*$escapedVersion\b" -Description 'CHANGELOG version section'
