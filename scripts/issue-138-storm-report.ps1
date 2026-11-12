@@ -34,6 +34,8 @@ function Get-Issue138StormReport {
 
     $rejectedLogLines = 0
     $fakeTlsExpectedLines = 0
+    $unsupportedTransportLines = 0
+    $handshakeReadFailureLines = 0
     $lastSampledClassCount = 0L
     $largestSampledClassCount = 0L
     $connected = 0
@@ -45,8 +47,14 @@ function Get-Issue138StormReport {
     foreach ($line in $Lines) {
         if ($line -match 'MTProto route rejected .*reason=handshake_failed') {
             $rejectedLogLines++
-            if ($line -match 'fake tls client hello expected') {
+            if ($line -match 'fake tls client hello expected|reject_class=unexpected_client_hello') {
                 $fakeTlsExpectedLines++
+            }
+            if ($line -match 'unsupported mtproto transport|reject_class=unsupported_transport') {
+                $unsupportedTransportLines++
+            }
+            if ($line -match 'mtproto handshake read failed|reject_class=handshake_read_failed') {
+                $handshakeReadFailureLines++
             }
             if ($line -match '\bclass_count=(\d+)') {
                 $lastSampledClassCount = [long]$Matches[1]
@@ -76,6 +84,18 @@ function Get-Issue138StormReport {
         ConnectionFailures = $ConnectionFailures
         RejectedLogLines = $rejectedLogLines
         FakeTlsExpectedLogLines = $fakeTlsExpectedLines
+        UnsupportedTransportLogLines = $unsupportedTransportLines
+        HandshakeReadFailureLogLines = $handshakeReadFailureLines
+        HandshakeDiagnosis = if ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
+            $RedirectResponses -eq 0 -and $unsupportedTransportLines -gt 0 -and
+            $fakeTlsExpectedLines -eq 0) {
+            'The listener rejected binary MTProto transport; verify that Fake TLS masking domain is configured and the installed APK listens on the expected port.'
+        } elseif ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
+            $RedirectResponses -eq 0 -and $handshakeReadFailureLines -gt 0) {
+            'The listener reported a handshake read failure; inspect the captured log and the actual frontend configuration.'
+        } else {
+            'No conclusive ingress-mode diagnosis from the available log entries.'
+        }
         HighRejectionLogVolume = (
             ($rejectedLogLines / [double]$DurationSeconds -ge 100) -or
             ($Phase -eq 'Inject' -and $AttemptedConnections -ge 50 -and
