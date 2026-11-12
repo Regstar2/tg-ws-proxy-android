@@ -35,6 +35,7 @@ function Get-Issue138StormReport {
     $rejectedLogLines = 0
     $fakeTlsExpectedLines = 0
     $unsupportedTransportLines = 0
+    $sampleMetadataLines = 0
     $handshakeReadFailureLines = 0
     $lastSampledClassCount = 0L
     $largestSampledClassCount = 0L
@@ -57,6 +58,7 @@ function Get-Issue138StormReport {
                 $handshakeReadFailureLines++
             }
             if ($line -match '\bclass_count=(\d+)') {
+                $sampleMetadataLines++
                 $lastSampledClassCount = [long]$Matches[1]
                 $largestSampledClassCount = [Math]::Max(
                     $largestSampledClassCount, $lastSampledClassCount
@@ -77,6 +79,14 @@ function Get-Issue138StormReport {
     }
 
     $handshakeDiagnosis = 'No conclusive ingress-mode diagnosis from the available log entries.'
+    $likelyUninstrumentedRuntime = $Phase -eq 'Inject' -and
+        $AttemptedConnections -ge 50 -and
+        $RedirectResponses -eq $AttemptedConnections -and
+        $rejectedLogLines -ge [Math]::Ceiling($AttemptedConnections * 0.9) -and
+        $sampleMetadataLines -eq 0
+    if ($likelyUninstrumentedRuntime) {
+        $handshakeDiagnosis = 'Fake TLS redirects all succeeded, but rejected connections were logged individually without class_count metadata. The installed runtime likely predates the Issue 138 sampling patch; verify the actual deployed APK before judging the fix.'
+    }
     if ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
         $RedirectResponses -eq 0 -and $unsupportedTransportLines -gt 0 -and
         $fakeTlsExpectedLines -eq 0) {
@@ -94,6 +104,8 @@ function Get-Issue138StormReport {
         ConnectionFailures = $ConnectionFailures
         RejectedLogLines = $rejectedLogLines
         FakeTlsExpectedLogLines = $fakeTlsExpectedLines
+        SampleMetadataLogLines = $sampleMetadataLines
+        LikelyUninstrumentedRuntime = $likelyUninstrumentedRuntime
         UnsupportedTransportLogLines = $unsupportedTransportLines
         HandshakeReadFailureLogLines = $handshakeReadFailureLines
         HandshakeDiagnosis = $handshakeDiagnosis
