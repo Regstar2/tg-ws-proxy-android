@@ -337,10 +337,10 @@ private fun ProxyScreen(
     val isRunning by ProxyService.isRunning.collectAsStateWithLifecycle()
     val uiMetrics by ProxyRuntimeState.uiMetrics.collectAsStateWithLifecycle()
     LaunchedEffect(context) {
-        ProxyStartFeedback.busyPortEvents.collect { port ->
+        ProxyStartFeedback.busyPortEvents.collect {
             Toast.makeText(
                 context,
-                context.getString(R.string.proxy_start_port_busy, port),
+                context.getString(R.string.proxy_start_port_busy),
                 Toast.LENGTH_LONG,
             ).show()
         }
