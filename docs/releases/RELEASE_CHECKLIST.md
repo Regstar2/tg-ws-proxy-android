@@ -1,53 +1,41 @@
-# Release checklist — v1.11.7
+# Release checklist — v1.11.8
 
-**Состояние:** GitHub Release `v1.11.7` опубликован как stable 2026-11-05, но финальная приёмка на устройстве не завершена. Опубликованные assets: `TgWsProxy-Android-v1.11.7-arm64-v8a.apk` и `.apk.sha256`. Исходный tag указывает на `c9e78cbd2736fc6066e5fb34f04f8638372fb953`. Исходная публичная версия — [v1.11.6](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.6). Отметка PASS относится только к явно указанному commit/артефакту.
+**Состояние: PREPARING / NO-GO.** Последний опубликованный релиз: [v1.11.7](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.7), 2026-11-05. Подготовка ведётся в отдельной ветке; tag и новый APK ещё не созданы. Старый чек-лист v1.11.7 сохранён: [RELEASE_CHECKLIST_v1.11.7.md](RELEASE_CHECKLIST_v1.11.7.md).
 
-## Исходный код и документация
+## Scope и исходники
 
-- [x] Реализация нового списка пяти маршрутов и строгого fallback слита в `main` через [PR #137](https://github.com/Regstar2/tg-ws-proxy-android/pull/137); [Issue #135](https://github.com/Regstar2/tg-ws-proxy-android/issues/135) закрыт как completed.
-- [x] Изменения сохранения/миграции профилей и MTProto route truth реализованы в ветке PR.
-- [x] Код учёта байтов и времени исходящего подключения подготовлен, метрики не обозначены как ping.
-- [x] Исходники, CI-аудит и подготовленные release notes согласованы на `1.11.7 / 63`.
-- [x] Подготовлены `CHANGELOG.md`, README RU/EN, полные release notes RU/EN, краткие GitHub Release notes, процесс публикации, этот чек-лист.
-- [x] Итоговая ветка PR #137 прошла review; PR слит в `main`, Issue #135 закрыт как completed.
-- [ ] Проверены все ссылки и RU/EN ресурсы, переводы и отсутствие неактуальных скриншотов текущего UI.
+- [x] Изменения #139 / PR #144, #138 / PR #145, #146 / PR #147 и #148 / PR #149 объединены в `main`.
+- [x] Предшествующая интеграционная база `9683a988`: [Windows CI и Worker regression SUCCESS](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43198932269) — результат не относится к будущему commit/tag.
+- [ ] Подготовленные README RU/EN, `CHANGELOG.md`, описание версии, GitHub notes и версия Android слиты в `main` без конфликта.
+- [ ] Актуализированы пользовательские скриншоты и обязательные RU/EN ресурсы после проверки фактического UI.
+- [ ] Проверены ссылки, отсутствуют ключи подписи, токены, пользовательские логи, AWG/WARP-конфиги и приватные правила в коммитах и артефактах.
 
-## CI и безопасность
+## Автоматические проверки
 
-- [x] Windows CI и Worker regression **SUCCESS** на кодовом commit `9d59296f1081c67a866410d9bf86dbf682ea738f`: [Actions #42043647479](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/42043647479). Это **до** версии и релизной документации.
-- [x] Release source CI на точном tag `v1.11.7` — **SUCCESS** в [Actions #42063373850](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/42063373850): `scripts/ci.ps1`, Go tests, Android unit/lint/debug build и release metadata audit прошли.
-- [x] `scripts/audit-release.ps1 -ExpectedVersion 1.11.7 -ExpectedVersionCode 63` и `scripts/release.ps1 -Version v1.11.7 -PreflightOnly` прошли внутри release-source CI.
-- [x] Владелец запустил release workflow; signing keystore восстановлен, release build и publish steps завершились SUCCESS.
-- [ ] Общий job `Build and publish release` должен завершиться SUCCESS. В run #42063373850 job помечен failure после публикации; `Post Set up Go` остался in_progress. Job logs недоступны через API (`logs_url=null`), поэтому зависание post-cache cleanup — обоснованная гипотеза, но не подтверждённая точная причина. Исправление workflow проверяется в PR.
-- [ ] Нет приватных ключей, WARP-конфигураций, токенов, пользовательских логов или `AGENTS.md` в Git/артефактах.
+- [ ] Финальный `scripts/ci.ps1` PASS на точном commit/tag v1.11.8 (Go/Worker/Android tests, lint, debug build, locale audit).
+- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.8 -ExpectedVersionCode 64` PASS.
+- [ ] `scripts/release.ps1 -Version v1.11.8 -PreflightOnly` PASS.
+- [ ] GitHub PR checks по **последнему** HEAD PASS, нет незакрытых блокирующих review/comments.
+- [ ] Проверены release job, signing identity и отсутствие повторного использования незаверенных бинарных файлов.
 
-## Android и маршруты (обязательная приёмка)
+## Device acceptance — обязательный GO
 
-- [x] Xiaomi: ранее на `e7dbf969` из лога подтверждены **7** соединений через AWG после недоступного TCP, **4** закрытых двусторонних MTProto-сессии без ошибок передачи. Это **не** тест финальной версии с новыми метриками.
-- [x] Пользователь сообщил, что в уведомлении отображается AWG при TCP fallback и оно визуально не «прыгает» вместе с уведомлением VPN. Проверено на более ранней сборке.
-- [x] Подписанный DEBUG APK с PR HEAD `d237f87e` установлен на Xiaomi поверх существующего пакета без uninstall/data clear; production и test APK установлены успешно.
-- [x] Автоматические UI/instrumentation tests на устройстве: **14/14 PASS**; logcat без FATAL EXCEPTION и ANR.
-- [x] Проверены drag grip и стрелки, enabled/disabled routes, Wi-Fi/mobile policies, защита последнего активного маршрута, reset и TCP → AWG actual-backend status.
-- [ ] Проверить те же сценарии на опубликованном подписанном **Release APK**.
-- [ ] Проверена миграция с установленной **v1.11.6**: пользовательские разрешённые пути и правило `fallback=false` сохранились. Сброс одного профиля не стирает второй.
-- [ ] Подтверждены strict-only CF Proxy, отсутствие выключенного fallback; отказ всех включённых маршрутов виден как ошибка без скрытого обхода.
-- [ ] Подтверждена фактическая двусторонняя передача через выбранные поддерживаемые пути (CF Proxy, TCP, AWG; Worker/Direct — если настроены и доступны); Telegram отправляет/получает текст и медиа.
-- [ ] **На новом APK** во время TCP → AWG подтверждён реальный `actual_backend=awg_warp`, а уведомление показывает AWG; после ошибочных handshake и закрытия старой сессии не становится «Неизвестно».
-- [ ] **На новом APK** при загрузке и отправке файла `↓` соответствует входящим данным, `↑` — исходящим, значения не постоянно нулевые; время подключения указано и не называется ping/RTT.
-- [ ] Проверены уведомления вместе с VPN, Quick Settings, переключение сети и SOCKS5 на отсутствие регрессий.
-- [ ] По [#138](https://github.com/Regstar2/tg-ws-proxy-android/issues/138) установлены причина и влияние массовых Fake TLS отказов **или** документировано обоснованное решение о релизе без исправления после измерения ресурсов/работоспособности; нельзя автоматически считать этот дефект безопасным.
+- [ ] Скачать/установить опубликованный v1.11.7, сохранить существующие пользовательские данные, **поверх него** установить подписанный v1.11.8. `applicationId`, подпись, `versionCode=64` и конфигурация после обновления подтверждены.
+- [ ] Через встроенный updater выполнить **release→release**; отдельно подтвердить fresh permission grant/deny, отсутствие петли settings, ручную установку через системный диалог и отмену без потери данных.
+- [ ] Прогресс/отмена/повтор загрузки, перезапуск UI, background/notification и ошибки сети, checksum, подписи и неподходящего APK приводят к безопасному отказу; неподтверждённый файл не устанавливается.
+- [ ] Сохранены Wi-Fi/mobile route order, strict-only fallback, Worker pool, AWG/WARP profiles, MTProto settings и работа локального порта.
+- [ ] Quick Settings: START → RUNNING → STOP; открытие шторки, события из приложения и уведомления, переходные/inconsistent состояния не инвертируют действие плитки (Xiaomi/Android 14).
+- [ ] При занятом MTProto/SOCKS5 порту показано короткое RU/EN сообщение **без номера порта**; успешный старт и другая ошибка не создают ложного Toast.
+- [ ] Telegram действительно отправляет и получает текст и медиа через разрешённые маршруты; Fake TLS ошибочные входы не сбрасывают подтверждённый backend, не создают crash/ANR и не засоряют логи.
+- [ ] Device evidence содержит SHA APK, Android version, фактическую конфигурацию без секретов, шаги и результаты. Старые smoke на других SHA не выдаются за финальную приёмку.
 
-## Release APK и публикация
+## Публикация и после выпуска
 
-- [x] Аннотированный tag `v1.11.7` указывает на проверенный commit `c9e78cbd2736fc6066e5fb34f04f8638372fb953`.
-- [x] `scripts/release.ps1 -Version v1.11.7` завершился успешно: release APK собран; script проверил `applicationId`, `versionName`, `versionCode` и подпись через `apksigner`, затем создал SHA-256 файл.
-- [ ] Скачать опубликованные APK и `.sha256`, независимо пересчитать SHA-256 и подтвердить совпадение с обоими опубликованными файлами.
-- [ ] Проверена установка **того же Release APK**, который будет опубликован, поверх v1.11.6 без удаления данных; проверены запуск прокси и двусторонний MTProto.
-- [x] Создан один аннотированный tag `v1.11.7` на commit `c9e78cbd` без force.
-- [x] [GitHub Release v1.11.7](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.7) опубликован; GitHub API подтверждает ровно два assets: APK (19 717 766 bytes) и `.sha256` (107 bytes), оба `uploaded`.
-- [x] Release notes содержат ссылки на RU/EN версии и tag.
-- [ ] Общий release workflow должен завершиться SUCCESS после повторного запуска; текущий run опубликовал release, но завершился job-level failure при post-job cleanup.
-- [ ] Проверить скачанные артефакты, опубликованный SHA-256, возможность обновления и двусторонний MTProto на том же Release APK.
-- [ ] [Milestone v1.11.7](https://github.com/Regstar2/tg-ws-proxy-android/milestone/11) закрыт **только после** фактического завершения обязательных критериев.
+- [ ] Зафиксировано решение GO по всем критическим условиям, а не по успешному CI в отдельности.
+- [ ] Создан **один** неизменяемый аннотированный tag `v1.11.8` на подтверждённом `main` SHA, без перемещения старых тегов.
+- [ ] Trusted release workflow завершил exact-tag CI, сборку подписанного APK и публикацию с краткими notes и ссылками на RU/EN tag docs.
+- [ ] Скачаны **ровно два** ожидаемых assets `TgWsProxy-Android-v1.11.8-arm64-v8a.apk` и `.apk.sha256`. Их фактический SHA-256 совпадает с опубликованным digest/файлом, подпись и метаданные APK перепроверены.
+- [ ] Установлен **именно опубликованный** Release APK; Telegram и данные после обновления работают.
+- [ ] README RU/EN, release index и checklist переведены в «опубликовано» только после фактической публикации и проверки assets; ссылка latest указывает на новую стабильную версию.
 
-**Фактический статус:** **PUBLISHED / VALIDATION INCOMPLETE**. GitHub Release уже опубликован как stable, поэтому прежняя отметка `NO-GO / ещё не опубликован` больше не соответствует действительности. Это не означает, что стабильность подтверждена: обязательная проверка опубликованного Release APK на Xiaomi, обновления с v1.11.6 и поведения уведомлений не выполнена. По [#138](https://github.com/Regstar2/tg-ws-proxy-android/issues/138) нужно принять обоснованное решение о влиянии массовых Fake TLS отказов. Не закрывать milestone до завершения этих проверок.
+**NO-GO до выполнения обязательных пунктов.** Особенно важны подписанный update flow и сохранность конфигурации после установки, защита от неподтверждённого APK и согласованность Quick Settings.
