@@ -234,23 +234,28 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ProxyScreen(
-                        openMainRequest = tilePreferencesOpenRequest,
-                        themeMode = themeMode,
-                        onThemeModeChange = {
-                            themeModeName = it.name
-                            prefs.edit().putString("theme_mode", it.name).apply()
-                        },
-                        languageMode = languageMode,
-                        onLanguageModeChange = {
-                            if (it != languageMode) {
-                                languageModeName = it.name
-                                prefs.edit().putString("language_mode", it.name).apply()
-                                applyLanguageMode(it)
-                                recreate()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        ProxyScreen(
+                            openMainRequest = tilePreferencesOpenRequest,
+                            themeMode = themeMode,
+                            onThemeModeChange = {
+                                themeModeName = it.name
+                                prefs.edit().putString("theme_mode", it.name).apply()
+                            },
+                            languageMode = languageMode,
+                            onLanguageModeChange = {
+                                if (it != languageMode) {
+                                    languageModeName = it.name
+                                    prefs.edit().putString("language_mode", it.name).apply()
+                                    applyLanguageMode(it)
+                                    recreate()
+                                }
                             }
-                        }
-                    )
+                        )
+                        AppUpdateStartupPrompt(
+                            enabledForLaunch = intent?.action != TileService.ACTION_QS_TILE_PREFERENCES,
+                        )
+                    }
                 }
             }
         }

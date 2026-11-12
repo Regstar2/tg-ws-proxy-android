@@ -86,13 +86,74 @@ data class SemanticVersion(
     }
 }
 
+data class GitHubReleaseAsset(
+    val name: String,
+    val downloadUrl: String,
+    val size: Long,
+    val contentType: String,
+    val digest: String?,
+)
+
 data class GitHubReleaseInfo(
     val tagName: String,
     val title: String,
     val notes: String,
     val draft: Boolean,
     val prerelease: Boolean,
+    val assets: List<GitHubReleaseAsset> = emptyList(),
 )
+
+data class AppUpdateAssetSelection(
+    val apk: GitHubReleaseAsset,
+    val checksum: GitHubReleaseAsset?,
+    val metadataSha256: String?,
+)
+
+object AppUpdateAssetSelector {
+    private const val MAX_APK_BYTES = 100L * 1024L * 1024L
+    private val sha256Pattern = Regex("^[a-fA-F0-9]{64}$")
+
+    fun select(release: GitHubReleaseInfo): AppUpdateAssetSelection? {
+        if (release.draft || SemanticVersion.parse(release.tagName) == null) return null
+        val name = "TgWsProxy-Android-${release.tagName}-arm64-v8a.apk"
+        val matching = release.assets.filter { it.name == name }
+        if (matching.size != 1) return null
+        val apk = matching.single()
+        if (apk.size !in 1..MAX_APK_BYTES ||
+            apk.contentType !in setOf(
+                "application/vnd.android.package-archive",
+                "application/octet-stream",
+            ) ||
+            !isOfficialAssetUrl(apk.downloadUrl, release.tagName, name)
+        ) return null
+        val checksums = release.assets.filter { it.name == "$name.sha256" }
+        if (checksums.size > 1) return null
+        val checksum = checksums.singleOrNull()?.takeIf {
+            it.size in 1..4096 && isOfficialAssetUrl(it.downloadUrl, release.tagName, it.name)
+        }
+        val digest = apk.digest?.let {
+            if (!it.startsWith("sha256:", ignoreCase = true)) return null
+            it.substringAfter(':').takeIf(sha256Pattern::matches)?.lowercase() ?: return null
+        }
+        if (digest == null && checksum == null) return null
+        return AppUpdateAssetSelection(apk, checksum, digest)
+    }
+
+    private fun isOfficialAssetUrl(url: String, tag: String, name: String): Boolean {
+        val expected = "https://github.com/Regstar2/tg-ws-proxy-android/releases/download/$tag/$name"
+        return url == expected
+    }
+
+    fun parseChecksum(raw: String, expectedName: String): String? {
+        val lines = raw.trim().lines()
+        if (lines.size != 1) return null
+        val line = lines.single().trim()
+        val match = Regex("^([a-fA-F0-9]{64})\\s+\\*?([^\\s]+)$").matchEntire(line)
+            ?: return null
+        if (match.groupValues[2] != expectedName) return null
+        return match.groupValues[1].lowercase()
+    }
+}
 
 sealed interface UpdateDecision {
     data class Available(
@@ -118,6 +179,15 @@ object AppUpdateSelector {
                     return@mapNotNull null
                 }
                 if (version <= current) return@mapNotNull null
+                // A locally signed -debug build of the same release usually
+                // has the same versionCode as its published stable APK.
+                // It must not be offered an impossible same-version upgrade.
+                if (current.prerelease == listOf("debug") &&
+                    version.prerelease.isEmpty() &&
+                    version.major == current.major &&
+                    version.minor == current.minor &&
+                    version.patch == current.patch
+                ) return@mapNotNull null
                 release to version
             }
             .maxWithOrNull(compareBy<Pair<GitHubReleaseInfo, SemanticVersion>> { it.second })
@@ -201,6 +271,26 @@ class GitHubReleasesClient(
                         notes = item.optString("body").trim().take(MAX_RELEASE_NOTES_CHARS),
                         draft = item.optBoolean("draft", false),
                         prerelease = item.optBoolean("prerelease", false),
+                        assets = item.optJSONArray("assets")?.let { assets ->
+                            buildList {
+                                for (assetIndex in 0 until assets.length()) {
+                                    val asset = assets.optJSONObject(assetIndex) ?: continue
+                                    val name = asset.optString("name").trim()
+                                    if (name.isBlank() || name.length > 200) continue
+                                    add(
+                                        GitHubReleaseAsset(
+                                            name = name,
+                                            downloadUrl = asset.optString("browser_download_url").trim(),
+                                            size = asset.optLong("size", -1L),
+                                            contentType = asset.optString("content_type").trim(),
+                                            digest = asset.optString("digest").takeIf {
+                                                it.isNotBlank() && it != "null"
+                                            },
+                                        ),
+                                    )
+                                }
+                            }
+                        }.orEmpty(),
                     ),
                 )
             }

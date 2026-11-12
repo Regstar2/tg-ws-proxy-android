@@ -94,6 +94,34 @@ class AppUpdateDeliveryTest {
     }
 
     @Test
+    fun `debug build is not offered identical stable release`() {
+        val result = AppUpdateSelector.select(
+            currentVersionName = "1.11.7-debug",
+            releases = listOf(release("v1.11.7")),
+        )
+        assertEquals(UpdateDecision.UpToDate, result)
+    }
+
+    @Test
+    fun `debug build is offered a genuinely newer stable release`() {
+        val result = AppUpdateSelector.select(
+            currentVersionName = "1.11.7-debug",
+            releases = listOf(release("v1.11.8"), release("v1.11.7")),
+        )
+        assertTrue(result is UpdateDecision.Available)
+        assertEquals("v1.11.8", (result as UpdateDecision.Available).release.tagName)
+    }
+
+    @Test
+    fun `release candidate can still advance to stable of same core version`() {
+        val result = AppUpdateSelector.select(
+            currentVersionName = "1.11.8-rc.1",
+            releases = listOf(release("v1.11.8")),
+        )
+        assertTrue(result is UpdateDecision.Available)
+    }
+
+    @Test
     fun `draft malformed and older releases are ignored`() {
         val decision = AppUpdateSelector.select(
             currentVersionName = "1.10.13",
