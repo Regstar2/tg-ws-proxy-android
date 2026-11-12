@@ -76,6 +76,16 @@ function Get-Issue138StormReport {
         }
     }
 
+    $handshakeDiagnosis = 'No conclusive ingress-mode diagnosis from the available log entries.'
+    if ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
+        $RedirectResponses -eq 0 -and $unsupportedTransportLines -gt 0 -and
+        $fakeTlsExpectedLines -eq 0) {
+        $handshakeDiagnosis = 'The listener rejected binary MTProto transport; verify that Fake TLS masking domain is configured and the installed APK listens on the expected port.'
+    } elseif ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
+        $RedirectResponses -eq 0 -and $handshakeReadFailureLines -gt 0) {
+        $handshakeDiagnosis = 'The listener reported a handshake read failure; inspect the captured log and the actual frontend configuration.'
+    }
+
     [pscustomobject][ordered]@{
         Phase = $Phase
         DurationSeconds = $DurationSeconds
@@ -86,16 +96,7 @@ function Get-Issue138StormReport {
         FakeTlsExpectedLogLines = $fakeTlsExpectedLines
         UnsupportedTransportLogLines = $unsupportedTransportLines
         HandshakeReadFailureLogLines = $handshakeReadFailureLines
-        HandshakeDiagnosis = if ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
-            $RedirectResponses -eq 0 -and $unsupportedTransportLines -gt 0 -and
-            $fakeTlsExpectedLines -eq 0) {
-            'The listener rejected binary MTProto transport; verify that Fake TLS masking domain is configured and the installed APK listens on the expected port.'
-        } elseif ($Phase -eq 'Inject' -and $AttemptedConnections -gt 0 -and
-            $RedirectResponses -eq 0 -and $handshakeReadFailureLines -gt 0) {
-            'The listener reported a handshake read failure; inspect the captured log and the actual frontend configuration.'
-        } else {
-            'No conclusive ingress-mode diagnosis from the available log entries.'
-        }
+        HandshakeDiagnosis = $handshakeDiagnosis
         HighRejectionLogVolume = (
             ($rejectedLogLines / [double]$DurationSeconds -ge 100) -or
             ($Phase -eq 'Inject' -and $AttemptedConnections -ge 50 -and
