@@ -11,7 +11,7 @@ class LocalProxyFrontendTest {
     @Test
     fun socks5Frontend_startsThroughNativeProxyWrapper() {
         val nativeProxy = RecordingSocks5NativeProxy()
-        val frontend = Socks5LocalProxyFrontend(nativeProxy)
+        val frontend = Socks5LocalProxyFrontend(nativeProxy, FixedPortAvailabilityChecker(true))
 
         val result = frontend.start(
             LocalProxyFrontendConfig(
@@ -36,7 +36,7 @@ class LocalProxyFrontendTest {
 
     @Test
     fun socks5Frontend_nativeStartupRejectionIsNotReportedAsRunning() {
-        val frontend = Socks5LocalProxyFrontend(RecordingSocks5NativeProxy(startResult = -2))
+        val frontend = Socks5LocalProxyFrontend(RecordingSocks5NativeProxy(startResult = -2), FixedPortAvailabilityChecker(true))
         val result = frontend.start(
             LocalProxyFrontendConfig(
                 host = "127.0.0.1",
@@ -51,6 +51,33 @@ class LocalProxyFrontendTest {
         assertEquals("NATIVE_START_REJECTED", result.errorCode)
         frontend.stop()
         assertEquals(LocalProxyFrontendStatus.STOPPED, frontend.getState().status)
+    }
+
+
+    @Test
+    fun socks5Frontend_busyPortIsRejectedBeforeNativeStart() {
+        val nativeProxy = RecordingSocks5NativeProxy()
+        val frontend = Socks5LocalProxyFrontend(nativeProxy, FixedPortAvailabilityChecker(false))
+        val result = frontend.start(
+            LocalProxyFrontendConfig(
+                host = "127.0.0.1",
+                port = 1443,
+                runtimeConfig = "1:149.154.175.50",
+                poolSize = 4,
+                verbose = 1,
+            ),
+        )
+        assertEquals(LocalProxyFrontendStatus.FAILED, result.state.status)
+        assertEquals(MtProtoRuntimeErrorCode.PORT_BUSY.name, result.errorCode)
+        assertEquals(0, nativeProxy.recordedPoolSize)
+    }
+
+    @Test
+    fun busyPortToastIsReservedForConfirmedBindConflicts() {
+        assertEquals(1443, ProxyStartFeedback.busyPortFrom("PORT_BUSY", 1443) ?: -1)
+        assertNull(ProxyStartFeedback.busyPortFrom("NATIVE_START_REJECTED", 1443))
+        assertNull(ProxyStartFeedback.busyPortFrom("PORT_BUSY", 0))
+        assertNull(ProxyStartFeedback.busyPortFrom(null, 1443))
     }
 
     @Test
