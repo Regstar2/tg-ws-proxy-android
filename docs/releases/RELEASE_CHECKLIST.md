@@ -12,11 +12,20 @@
 
 ## Автоматические проверки
 
-- [ ] Финальный `scripts/ci.ps1` PASS на точном commit/tag v1.11.8 (Go/Worker/Android tests, lint, debug build, locale audit).
+- [x] `scripts/ci.ps1` на подготовленном `main` SHA `ceefbc2f`: [GitHub Actions #43223479710](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43223479710), **PASS** (Windows CI / Worker regression).
+- [ ] Финальный `scripts/ci.ps1` PASS на точном **release tag** v1.11.8 (Go/Worker/Android tests, lint, debug build, locale audit).
 - [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.8 -ExpectedVersionCode 64` PASS.
 - [ ] `scripts/release.ps1 -Version v1.11.8 -PreflightOnly` PASS.
-- [ ] GitHub PR checks по **последнему** HEAD PASS, нет незакрытых блокирующих review/comments.
+- [x] Подготовительный PR #150 слит в `main` на `ceefbc2f`; его финальные Windows CI и Worker regression **PASS**, блокирующих review-замечаний нет.
+- [ ] Проверки финального release-ready документационного commit и точного tag v1.11.8 PASS, нет блокирующих review/comments.
 - [ ] Проверены release job, signing identity и отсутствие повторного использования незаверенных бинарных файлов.
+
+## Локальная сборка кандидата — подтверждено 12.11.2026
+
+- [x] `gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` на `ceefbc2f`: **BUILD SUCCESSFUL**. Instrumentation APK только собран, не запускался.
+- [x] `scripts/release.ps1 -Version v1.11.8` на `ceefbc2f`: **BUILD SUCCESSFUL**, `versionName=1.11.8`, `versionCode=64`, подписанный ARM64 APK + SHA-256 сформированы локально.
+- [x] Проверена подпись APK Signature Scheme v2, один signer, certificate SHA-256 `ae55265059933a7b495bd57bc571d294a1850609f56e89117eddf682faae2c6d`; SHA-256 локального APK `1d4e9ae194e5043a949966a1ed07fe37c0a72865ca2fcca89aeb1e852b059746`.
+- [ ] SHA и подписывающий сертификат **будущего опубликованного** APK отдельно подтверждены по скачанному GitHub asset.
 
 ## Device acceptance — обязательный GO
 
