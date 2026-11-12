@@ -27,12 +27,21 @@ internal object NativeSocks5Proxy : Socks5NativeProxy {
 
 internal class Socks5LocalProxyFrontend(
     private val nativeProxy: Socks5NativeProxy = NativeSocks5Proxy,
+    private val portAvailabilityChecker: LocalPortAvailabilityChecker = DefaultLocalPortAvailabilityChecker,
 ) : LocalProxyFrontend {
     private var status = LocalProxyFrontendStatus.STOPPED
 
     override val type: LocalProxyFrontendType = LocalProxyFrontendType.SOCKS5
 
     override fun start(config: LocalProxyFrontendConfig): LocalProxyFrontendStartResult {
+        if (!portAvailabilityChecker.isAvailable(config.host, config.port)) {
+            status = LocalProxyFrontendStatus.FAILED
+            return LocalProxyFrontendStartResult(
+                state = getState(),
+                message = "SOCKS5 local port is busy: host=${config.host} port=${config.port}.",
+                errorCode = MtProtoRuntimeErrorCode.PORT_BUSY.name,
+            )
+        }
         nativeProxy.setPoolSize(config.poolSize)
         val resultCode = nativeProxy.startProxy(
             config.host, config.port, config.runtimeConfig, config.verbose,
