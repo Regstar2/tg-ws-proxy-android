@@ -117,6 +117,42 @@ Interpretation:
   handshake behavior. The injected script deliberately does not simulate
   a real authenticated Telegram connection or a full AWG network route.
 
+## Device follow-up — 2026-11-12
+
+User PowerShell 5.1 report: offline parser regression tests PASS.
+34-second Baseline on the installed Android APK: zero handshake rejection
+log lines, 19 outbound MTProto connections, one completed AWG duplex bridge,
+zero no-route/crash/ANR markers, stable application PID 3481.
+
+The Inject phase then returned ten consecutive invalid outcomes and aborted
+without its own per-phase summary in the previous version of the harness.
+The existing user archive is `repro-20261112-113920.zip`, but its content
+was not attached for inspection. Do **not** conclude the device listener is
+broken, or that the issue is resolved, from the old harness exception.
+
+The amended harness preserves `Inject-failures.txt`, `Inject-result.json`,
+`Inject-logcat.txt`, `Inject-listeners-before.txt` and the ADB forwarding
+mapping on an early stop. It logs response class, a sanitized HTTP status line
+or the exception type/message and reports actual rather than requested time
+for an aborted phase.
+
+For diagnosis, first check the **currently running** MTProto listener is on
+port `1445`, and the configured masking domain is non-empty (Fake TLS).
+Do a short isolated test before repeating a 350/s pressure run:
+
+```powershell
+.\scripts\issue-138-reproduce-storm.ps1 -Mode Inject -DurationSeconds 10 -RatePerSecond 10 -Port 1445
+```
+
+An HTTP 301 is expected for the deliberately invalid 64-byte binary payload
+in Fake TLS mode with masking domain set, as implemented by the native
+`writeFakeTLSRedirect`. If a different frontend is active or the local
+listener is bound to another port, the test's expected HTTP 301 is inapplicable.
+The runner does not install the branch's new APK, so the installed release
+version must be checked separately. Neither a healthy Baseline nor a
+synthetically induced rejected connection proves the original reconnecting
+client's identity.
+
 ## Read-only Xiaomi evidence capture
 
 Use the **actual MTProto port** from the app settings, not a guessed value.
