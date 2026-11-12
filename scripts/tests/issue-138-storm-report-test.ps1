@@ -80,6 +80,29 @@ finally {
     Remove-Item -LiteralPath $fixture -Force -ErrorAction SilentlyContinue
 }
 
+$wrongFrontend = @(
+    1..10 | ForEach-Object {
+        'MTProto route rejected remote=127.0.0.1:51000 reason=handshake_failed error=unsupported mtproto transport reject_class=unsupported_transport'
+    }
+)
+$wrongFrontendReport = Get-Issue138StormReport -Phase 'Inject' -Lines $wrongFrontend -DurationSeconds 1 -AttemptedConnections 10 -RedirectResponses 0 -ConnectionFailures 10
+Assert-Equal 'Unsupported transport category' 10 $wrongFrontendReport.UnsupportedTransportLogLines
+Assert-Equal 'Unsupported transport is not Fake TLS expected' 0 $wrongFrontendReport.FakeTlsExpectedLogLines
+Assert-Equal 'Unsupported transport suggests checking frontend' $true ($wrongFrontendReport.HandshakeDiagnosis -match 'masking domain')
+Assert-Equal 'Unrelated MTProto rejects not counted as read errors' 0 $wrongFrontendReport.HandshakeReadFailureLogLines
+
+$readFailure = Get-Issue138StormReport -Phase 'Inject' -Lines @(
+    'MTProto route rejected remote=127.0.0.1:51000 reason=handshake_failed error=mtproto handshake read failed: EOF reject_class=handshake_read_failed'
+) -DurationSeconds 1 -AttemptedConnections 1 -ConnectionFailures 1
+Assert-Equal 'Handshake read failure category' 1 $readFailure.HandshakeReadFailureLogLines
+Assert-Equal 'Read failure diagnostic' $true ($readFailure.HandshakeDiagnosis -match 'handshake read failure')
+
+$fakeTls = Get-Issue138StormReport -Phase 'Inject' -Lines @(
+    'MTProto route rejected remote=127.0.0.1:51000 reason=handshake_failed error=fake tls client hello expected: ingress_class=unrecognized_binary reject_class=unexpected_client_hello'
+) -DurationSeconds 1 -AttemptedConnections 1 -RedirectResponses 1
+Assert-Equal 'Fake TLS expected category' 1 $fakeTls.FakeTlsExpectedLogLines
+Assert-Equal 'Proper redirect does not imply wrong frontend' $false ($fakeTls.HandshakeDiagnosis -match 'masking domain')
+
 $empty = Get-Issue138StormReport -Phase 'Baseline' -Lines @() -DurationSeconds 5
 Assert-Equal 'Empty capture has zero rejections' 0 $empty.RejectedLogLines
 Assert-Equal 'Empty capture has zero route sessions' 0 $empty.MtProtoConnections
