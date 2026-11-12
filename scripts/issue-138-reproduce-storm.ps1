@@ -211,7 +211,9 @@ try {
         Save-AdbEvidence -Name "$phase-cpu-after" -CommandArgs @('shell', 'top', '-b', '-n', '1', '-p', $processId)
         $afterPid = Get-ProxyPid
         $logLines = Read-Issue138CaptureLines -Path $stdoutFile
-        $report = Get-Issue138StormReport -Phase $phase -Lines $logLines -DurationSeconds $DurationSeconds -AttemptedConnections $attempted -RedirectResponses $redirects -ConnectionFailures $failures
+        $observedSeconds = [Math]::Max(1, [int][Math]::Ceiling($clock.Elapsed.TotalSeconds))
+        $report = Get-Issue138StormReport -Phase $phase -Lines $logLines -DurationSeconds $observedSeconds -AttemptedConnections $attempted -RedirectResponses $redirects -ConnectionFailures $failures
+        $report | Add-Member -NotePropertyName 'RequestedDurationSeconds' -NotePropertyValue $DurationSeconds
         $report | Add-Member -NotePropertyName 'ListenerPidBefore' -NotePropertyValue $processId
         $report | Add-Member -NotePropertyName 'ListenerPidAfter' -NotePropertyValue $afterPid
         $report | Add-Member -NotePropertyName 'ProcessStable' -NotePropertyValue ($processId -eq $afterPid)
