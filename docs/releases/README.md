@@ -1,20 +1,17 @@
-# Релизы
+# Релизы TgWsProxy Android
 
-## Подготовка v1.11.7 (не опубликован)
+## В подготовке: v1.11.8 (ещё не опубликована)
 
-| Документ | Назначение |
-|---|---|
-| [release.md](release.md) | Процесс подготовки, проверки и безопасной публикации |
-| [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) | Критерии GO/NO-GO и фактические результаты |
-| [RELEASE_NOTES_v1.11.7.md](RELEASE_NOTES_v1.11.7.md) | Краткие заметки для GitHub Release |
-| [v1.11.7.md](v1.11.7.md) · [English](v1.11.7_EN.md) | Полные двуязычные заметки |
+- [Полные заметки на русском](v1.11.8.md) · [English](v1.11.8_EN.md)
+- [Краткий текст GitHub Release](RELEASE_NOTES_v1.11.8.md)
+- [План версии](../versions/v1.11.8.md)
+- [Актуальный GO/NO-GO чек-лист](RELEASE_CHECKLIST.md)
+- [Процедура выпуска](release.md)
 
 ## Опубликованные версии
 
-| Документ | Назначение |
-|---|---|
-| [v1.11.6.md](v1.11.6.md) · [English](v1.11.6_EN.md) | Последний опубликованный stable |
-| [RELEASE_NOTES_v1.11.6.md](RELEASE_NOTES_v1.11.6.md) | Текст предыдущего GitHub Release |
-| [v1.11.5.md](v1.11.5.md) · [English](v1.11.5_EN.md) | Предыдущая версия |
+- [v1.11.7](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.7) — [русские заметки](v1.11.7.md) · [English](v1.11.7_EN.md) · [исторический чек-лист](RELEASE_CHECKLIST_v1.11.7.md). Опубликована 2026-11-05; часть device acceptance отмечена как незавершённая.
+- [v1.11.6](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.6) — [русские заметки](v1.11.6.md) · [English](v1.11.6_EN.md)
+- [v1.11.5](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.5) — [русские заметки](v1.11.5.md) · [English](v1.11.5_EN.md)
 
-[CHANGELOG](../../CHANGELOG.md). Документы подготовки не означают, что создан tag или опубликован подписанный APK.
+[CHANGELOG](../../CHANGELOG.md). Подготовленная документация и код версии не означают, что tag и подписанный релиз опубликованы.
