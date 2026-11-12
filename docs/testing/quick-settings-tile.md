@@ -61,3 +61,25 @@ Record only model, Android API, network type (Wi-Fi/mobile/unknown), frontend (M
 7. Test foreground notification controls and MTProto start directly from the app for regressions. Long press is issue #114, not a completion criterion for #122.
 
 The available JVM tests do **not** prove Android 16 SystemUI integration. Leave #122 open until device acceptance is confirmed. Safe collection tags: `ProxyQuickSettingsTile` and `ProxyTileStartPolicy`; review and redact exported artifacts before external sharing.
+
+## v1.11.8 / Issue #146 — visual state and tap consistency
+
+This regression requires **Xiaomi / Android 14 (MIUI or HyperOS)** device acceptance. JVM checks cover the state/command decision, not the state actually painted by SystemUI. Record device model, Android build, APK commit, and whether Wi-Fi or mobile data was used. Do not attach private proxy settings or raw network diagnostics.
+
+The tile now derives its color and tap command from the same `serviceStatus + isRunning` snapshot. `RUNNING + true` is ACTIVE and can dispatch STOP. `STOPPED + false` and `ERROR + false` are INACTIVE and can try START. Starting, reconnecting, a pending tile START/STOP, or **either direction of a status/running mismatch** is UNAVAILABLE and cannot dispatch either command. An Android tile state that does not match the latest snapshot is refreshed instead of executing a stale tap. Before dispatching an asynchronously prepared START, the tile checks the current runtime snapshot again.
+
+1. Start a valid MTProto frontend in MainActivity. Confirm RUNNING and local listener; open the Quick Settings shade. Expect an active tile. Close and reopen the shade; expect the same state.
+2. Tap the active tile once. Confirm `TILE_STOP_REQUESTED`, frontend STOPPED, notification removed, and tile INACTIVE. Reopen the shade; the tile must not remain blue.
+3. Tap the inactive tile once with the valid saved config. Confirm `TILE_START_REQUESTED`, exactly one foreground runtime, and ACTIVE only after RUNNING. Reopen the shade and verify.
+4. Repeat start and stop through MainActivity and the foreground notification (when available). Check the shade after each transition and after recreating MainActivity. The visual state and tap direction must agree with the actual frontend.
+5. During STARTING, RECONNECTING, or delayed updates, tap repeatedly and switch the shade open/closed. No contradictory STOP, duplicate native runtime, or prematurely ACTIVE tile is acceptable. A temporarily unavailable tile is expected.
+6. Switch Wi-Fi/mobile, recover from background, and recreate the app process without force-stop. Repeat. If possible, test a failed start and verify `ERROR + false` remains non-active and can be retried safely.
+7. Capture the redacted tile-only log and note each observed tile color, click result, `serviceStatus`, and `isRunning`. The log records `TILE_STATE`, `TILE_TAP`, `TILE_CLICK_IGNORED`, `TILE_START_SUPERSEDED`, `TILE_STOP_SUPERSEDED`, `TILE_REFRESH_REQUEST_FAILED`, and requested START/STOP. Requests are not proof that the native frontend reached RUNNING/STOPPED.
+
+```powershell
+adb logcat -c
+# Perform the shade/tap scenarios on the device.
+adb logcat -d -v threadtime -s ProxyQuickSettingsTile:V ProxyTileStartPolicy:V ProxyTileTiming:V '*:S'
+```
+
+**Acceptance record:** mark Xiaomi/Android 14 device smoke PASS/FAIL/NOT_RUN, note actual SystemUI behavior, and compare it against service runtime state. Keep the PR unmerged while this required device gate is NOT_RUN.
