@@ -117,6 +117,49 @@ Interpretation:
   handshake behavior. The injected script deliberately does not simulate
   a real authenticated Telegram connection or a full AWG network route.
 
+## Verified ZIP analysis — 2026-11-12 12:01 Android local time
+
+The tester supplied `repro-20261112-120136.zip`; its contents were
+inspected rather than inferred from a console-only summary:
+
+- **Inject, port 1445:** 100/100 deliberately invalid 64-byte binary
+  probes received HTTP 301; 0 transport failures.
+- **Android logcat:** exactly 100 distinct
+  `reason=handshake_failed error=fake tls client hello expected`
+  records. None contained `reject_class` or `class_count`.
+- **Route coexistence:** 10 `MTProto route connected` lines were
+  captured and 3 completed AWG bridges carried positive upstream and
+  downstream bytes. PID 3481 was stable; no `ANR`, crash, or
+  `no_mtproto_route_available` markers were captured.
+- **ADB forward:** temporary host port 62956 mapped to Android
+  `tcp:1445`.
+- **Socket attribution unavailable:** `ss -ltn` and
+  `ss -tnpe` returned `Cannot open netlink socket: Permission denied`.
+  CPU snapshots before/after cannot establish peak CPU under pressure.
+- **Interpretation:** The enabled Fake TLS listener and HTTP redirect
+  path are functional; legacy per-connection logging was reproduced
+  at **10 attempts/s**, not the historical ~347/s. The absence of
+  class-sampling markers strongly indicates the installed APK does not
+  contain the PR's revised native logger, but its exact version has not
+  been established. No evidence here identifies the original spontaneous
+  reconnecting client or establishes the candidate mitigation passed on
+  Android.
+
+The offline report now labels the combination of 100% successful
+redirects, nearly one rejection log per attempt, and no `class_count`
+as `LikelyUninstrumentedRuntime`. This preserves the **excess log**
+failure while making clear it is not proof of a regression in the
+uninstalled candidate build.
+
+**Next valid test:** synchronize the PR branch with current `main`
+without discarding concurrent changes, run CI, and build an APK
+signed with the installed certificate. Upgrade in place only after
+checking version/signature compatibility (never uninstall or clear
+user data). Repeat `-Mode Inject -DurationSeconds 10 -RatePerSecond 10
+-Port 1445` on that installed build: expected few sampled rejection
+records with class counts and 100 HTTP redirects, plus legitimate
+Telegram traffic. Only then evaluate higher reconnect pressure.
+
 ## Device logcat confirmation — 2026-11-12
 
 The user read the existing 11:49 Inject ZIP locally. All ten artificial
