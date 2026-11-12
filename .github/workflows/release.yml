@@ -222,6 +222,9 @@ jobs:
           elseif ($responseText -match '(?i)(HTTP 404|Not Found|release not found)') {
               "skip_build=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
               Write-Host "No existing release found for '$tag'; a new signed release will be built."
+              # gh api returns 1 for the expected 404. Do not let pwsh propagate
+              # that handled exit code as a failed GitHub Actions step.
+              $global:LASTEXITCODE = 0
           }
           else {
               throw "Could not query existing release '$tag': $responseText"
