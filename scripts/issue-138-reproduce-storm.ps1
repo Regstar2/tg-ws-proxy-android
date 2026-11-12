@@ -85,9 +85,21 @@ function Invoke-InvalidFakeTlsConnection {
             if ($received -le 0) { break }
             $read += $received
         }
-        if ($read -lt 12) { return $false }
+        if ($read -le 0) {
+            return [pscustomobject]@{ Redirect = $false; Outcome = 'empty_reply'; Detail = 'server closed without a response' }
+        }
         $response = [System.Text.Encoding]::ASCII.GetString($buffer, 0, $read)
-        return $response.StartsWith('HTTP/1.1 301')
+        if ($response.StartsWith('HTTP/1.1 301')) {
+            return [pscustomobject]@{ Redirect = $true; Outcome = 'http_301'; Detail = 'expected redirect' }
+        }
+        $firstLine = ($response -split "\r?\n", 2)[0]
+        $safeLine = $firstLine -replace '[^\x20-\x7e]', '?'
+        if ($safeLine.Length -gt 100) { $safeLine = $safeLine.Substring(0, 100) }
+        return [pscustomobject]@{
+            Redirect = $false
+            Outcome = 'unexpected_reply'
+            Detail = "bytes=$read first_line=$safeLine"
+        }
     }
     finally {
         $client.Close()
@@ -117,6 +129,7 @@ try {
             throw "adb forward could not allocate a temporary port: $output"
         }
         $forwardPort = [int]$output
+        Save-AdbEvidence -Name 'forward-list' -CommandArgs @('forward', '--list')
     }
 
     $phases = if ($Mode -eq 'Both') { @('Baseline', 'Inject') } else { @($Mode) }
@@ -124,6 +137,7 @@ try {
         $processId = Get-ProxyPid
         $stdoutFile = Join-Path $runDir "$phase-logcat.txt"
         $stderrFile = Join-Path $runDir "$phase-logcat-stderr.txt"
+        Save-AdbEvidence -Name "$phase-listeners-before" -CommandArgs @('shell', 'ss', '-ltn')
         Save-AdbEvidence -Name "$phase-sockets-before" -CommandArgs @('shell', 'ss', '-tnpe')
         Save-AdbEvidence -Name "$phase-cpu-before" -CommandArgs @('shell', 'top', '-b', '-n', '1', '-p', $processId)
         Write-Host "Phase=$phase listener_pid=$processId duration=$DurationSeconds seconds"
@@ -132,6 +146,7 @@ try {
         $redirects = 0
         $failures = 0
         $failureSamples = New-Object 'System.Collections.Generic.List[string]'
+        $abortReason = ''
         $capture = Start-Process -FilePath $adbPath -ArgumentList @(
             '-s', $Serial, 'logcat', "--pid=$processId", '-T', '1', '-v', 'threadtime',
             'TgWsProxy:V', 'AndroidRuntime:E', '*:S'
@@ -150,14 +165,15 @@ try {
                 while ($clock.Elapsed.TotalSeconds -lt $DurationSeconds) {
                     $attempted++
                     try {
-                        if (Invoke-InvalidFakeTlsConnection -HostPort $forwardPort) {
+                        $probe = Invoke-InvalidFakeTlsConnection -HostPort $forwardPort
+                        if ($probe.Redirect) {
                             $redirects++
                             $consecutiveFailures = 0
                         } else {
                             $failures++
                             $consecutiveFailures++
                             if ($failureSamples.Count -lt 20) {
-                                $failureSamples.Add("Attempt $attempted : response was not HTTP 301")
+                                $failureSamples.Add("Attempt $attempted : $($probe.Outcome) ($($probe.Detail))")
                             }
                         }
                     }
@@ -165,11 +181,15 @@ try {
                         $failures++
                         $consecutiveFailures++
                         if ($failureSamples.Count -lt 20) {
-                            $failureSamples.Add("Attempt $attempted : $($_.Exception.GetType().Name)")
+                            $kind = $_.Exception.GetType().Name
+                            $details = $_.Exception.Message
+                            if ($details.Length -gt 200) { $details = $details.Substring(0, 200) }
+                            $failureSamples.Add("Attempt $attempted : $kind ($details)")
                         }
                     }
                     if ($consecutiveFailures -ge 10) {
-                        throw 'Ten consecutive bad responses: listener/Fake TLS setup may be invalid.'
+                        $abortReason = 'Stopped after ten consecutive invalid responses. Inspect Inject-failures.txt, Inject-listeners-before.txt, and Inject-logcat.txt.'
+                        break
                     }
                     $sleepMs = $attempted * $intervalMs - $clock.Elapsed.TotalMilliseconds
                     if ($sleepMs -ge 1) {
@@ -202,6 +222,13 @@ try {
         $report | ConvertTo-Json -Depth 4 |
             Set-Content -LiteralPath (Join-Path $runDir "$phase-result.json") -Encoding UTF8
         $report | Format-List | Out-String | Write-Host
+        if ($phase -eq 'Inject' -and $failureSamples.Count -gt 0) {
+            Write-Host 'First Inject failures:'
+            $failureSamples | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+        }
+        if ($abortReason -ne '') {
+            throw $abortReason
+        }
         if ($report.HighRejectionLogVolume) {
             Write-Warning "High handshake rejection log volume observed in $phase; inspect both phase logs."
             if ($phase -eq 'Inject') {
