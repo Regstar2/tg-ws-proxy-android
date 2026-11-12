@@ -1,7 +1,9 @@
 package com.amurcanov.tgwsproxy
 
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class ProxyServiceStatus {
@@ -31,5 +33,18 @@ object ProxyRuntimeState {
 
     internal fun reset() {
         _uiMetrics.value = ProxyUiMetrics()
+    }
+}
+
+/** One-shot UI feedback; failure events are not replayed after Activity recreation. */
+internal object ProxyStartFeedback {
+    private val _busyPortEvents = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val busyPortEvents = _busyPortEvents.asSharedFlow()
+
+    fun busyPortFrom(errorCode: String?, port: Int): Int? =
+        port.takeIf { it in 1..65535 && errorCode == MtProtoRuntimeErrorCode.PORT_BUSY.name }
+
+    fun report(errorCode: String?, port: Int) {
+        busyPortFrom(errorCode, port)?.let { _busyPortEvents.tryEmit(it) }
     }
 }
