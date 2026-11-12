@@ -125,6 +125,55 @@ if ($smokeSource -notmatch 'Start-Sleep -Milliseconds 500' -or
     throw "Issue #135 route smoke requires a bounded PID wait, backend evidence and safe app handling"
 }
 
+# Issue #138: validate the read-only ingress attribution capture without ADB.
+$issue138Capture = Join-Path $PSScriptRoot 'issue-138-ingress-attribution.ps1'
+if (-not (Test-Path -LiteralPath $issue138Capture)) {
+    throw "Issue #138 ingress evidence capture script is missing"
+}
+$issue138Tokens = $null
+$issue138Errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $issue138Capture, [ref]$issue138Tokens, [ref]$issue138Errors
+) | Out-Null
+if ($issue138Errors) {
+    throw "Issue #138 ingress evidence capture script has invalid PowerShell syntax: $($issue138Errors -join '; ')"
+}
+$issue138Source = Get-Content -LiteralPath $issue138Capture -Raw
+if ($issue138Source -match '(?im)^\s*[^#\r\n]*\badb\b[^\r\n]*\b(?:uninstall|pm\s+clear|logcat\s+-c)\b') {
+    throw "Issue #138 device evidence capture must not remove app data or clear logcat"
+}
+
+# Issue #138: the device reproduction is never invoked by CI (requires a physical
+# Android device); validate its syntax/safety and exercise the report parser offline.
+$stormReproScript = Join-Path $PSScriptRoot 'issue-138-reproduce-storm.ps1'
+$stormReportScript = Join-Path $PSScriptRoot 'issue-138-storm-report.ps1'
+$stormReportTest = Join-Path $PSScriptRoot 'tests/issue-138-storm-report-test.ps1'
+foreach ($path in @($stormReproScript, $stormReportScript, $stormReportTest)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Issue #138 automation file missing: $path"
+    }
+    $tokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $path, [ref]$tokens, [ref]$parseErrors
+    ) | Out-Null
+    if ($parseErrors) {
+        throw "Issue #138 automation syntax invalid: $path : $($parseErrors -join '; ')"
+    }
+}
+$stormSource = Get-Content -LiteralPath $stormReproScript -Raw
+if ($stormSource -notmatch "forward 'tcp:0'" -or
+    $stormSource -notmatch 'forward --remove' -or
+    $stormSource -notmatch 'Compress-Archive' -or
+    $stormSource -match '(?im)^\s*[^#\r\n]*\b(?:uninstall|pm\s+clear|logcat\s+-c)\b') {
+    throw 'Issue #138 stress harness must use bounded temporary ADB forward and preserve app data.'
+}
+Invoke-CheckedCommand -Label 'Issue #138 report parser tests under Windows PowerShell 5.1' -FilePath $windowsPowerShell.Source -Arguments @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $stormReportTest
+)
+Write-Host "Issue #138 report parser tests under PowerShell"
+& $stormReportTest
+
 # Guard against an AGP instrumentation cleanup removing the production app.
 $routeInstallSource = Get-Content -LiteralPath $routeInstallScript -Raw
 if ($routeInstallSource -match '(?m)^[^#\r\n]*:app:connectedDebugAndroidTest') {
