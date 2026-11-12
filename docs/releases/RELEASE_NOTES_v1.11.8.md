@@ -21,7 +21,7 @@ v1.11.8 добавляет проверяемое скачивание и зап
 
 ## Проверено
 
-CI интеграционной базы `9683a988`: [PASS](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43198932269). Основной Xiaomi-путь обновления подписанный debug → v1.11.7 подтверждён ранее. Нагрузочный Fake TLS smoke с двусторонним AWG/MTProto также подтверждён на коде исправления. **CI итогового v1.11.8 tag, подписанный Release APK и обновление v1.11.7 → v1.11.8 ещё не проверялись.**
+CI `main` на `ceefbc2f`: [PASS](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43223479710). Локальные Android unit tests, lint, debug/androidTest APK: **PASS** (instrumentation на устройстве не запускалась). Подписанный локальный Release APK `1.11.8/64` собран; сертификат и APK Signature Scheme v2 проверены. Основной Xiaomi-путь обновления подписанный debug → v1.11.7 и нагрузочный Fake TLS smoke были подтверждены ранее. **Тест установки подписанного v1.11.8 на Xiaomi, обновление v1.11.7 → v1.11.8 с сохранением данных и CI exact release tag остаются NOT_RUN.**
 
 ## Известные ограничения
 
@@ -29,6 +29,6 @@ CI интеграционной базы `9683a988`: [PASS](https://github.com/R
 
 ## Артефакты
 
-Планируются `TgWsProxy-Android-v1.11.8-arm64-v8a.apk` и `TgWsProxy-Android-v1.11.8-arm64-v8a.apk.sha256`. Фактические hash/размеры появятся после сборки.
+Планируются `TgWsProxy-Android-v1.11.8-arm64-v8a.apk` и `TgWsProxy-Android-v1.11.8-arm64-v8a.apk.sha256`. Локальный подписанный кандидат собран, его SHA-256: `1d4e9ae194e5043a949966a1ed07fe37c0a72865ca2fcca89aeb1e852b059746` (сертификат SHA-256: `ae55265059933a7b495bd57bc571d294a1850609f56e89117eddf682faae2c6d`). **Этот hash не следует выдавать за hash будущего опубликованного APK:** после exact-tag build и публикации требуется проверка фактических GitHub assets.
 
 [CHANGELOG](https://github.com/Regstar2/tg-ws-proxy-android/blob/v1.11.8/CHANGELOG.md) · [Сравнение с v1.11.7](https://github.com/Regstar2/tg-ws-proxy-android/compare/v1.11.7...v1.11.8)
