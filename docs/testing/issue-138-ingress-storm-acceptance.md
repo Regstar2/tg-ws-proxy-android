@@ -117,6 +117,33 @@ Interpretation:
   handshake behavior. The injected script deliberately does not simulate
   a real authenticated Telegram connection or a full AWG network route.
 
+## Device logcat confirmation — 2026-11-12
+
+The user read the existing 11:49 Inject ZIP locally. All ten artificial
+connections emitted `reason=handshake_failed error=unsupported mtproto
+transport` (exact string from Android logcat), not `fake tls client hello
+expected`. Each request ended with an empty TCP reply, as the current
+harness reports. The ADB map was `tcp:60755 -> tcp:1445`; the
+`ss -ltn` text filter yielded no listening port lines, but ten app-side
+handshake rejection events establish the listener was reached.
+
+The *running APK* has not been demonstrated to contain PR #145's native
+changes: no `reject_class` or `class_count` appeared on those rejections.
+Updating a PowerShell test does not upgrade the Android APK.
+In the branch's native code, this unsupported-transport rejection is the
+expected non-FakeTLS validation outcome for the injected 64 `0x7f` bytes,
+whereas an enabled Fake TLS domain should yield HTTP 301. Do not call
+`fake_tls=false` proven until the deployed runtime configuration has been
+checked.
+
+Before next device acceptance, confirm an active MTProto frontend with
+valid masking domain, port 1445, matching app-generated EE proxy link, and
+install a candidate build signed by the existing installation certificate.
+Do not uninstall/clear data to work around an incompatible signing key.
+Then re-run the low-rate Inject preflight and only if it succeeds try
+the intended pressure run. The original source of the loopback reconnect
+storm remains unidentified.
+
 ## Additional evidence — Inject 10/s, 2026-11-12
 
 User ran commit `0b46226` on Android listener port 1445.
