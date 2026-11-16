@@ -52,7 +52,7 @@ func TestWebSocketTLSNameIsIndependentOfHTTPHost(t *testing.T) {
 			}
 			select {
 			case got := <-observed:
-				if got != [3]string{wantSNI, tc.host, "/apiws"} {
+				if got != ([3]string{wantSNI, tc.host, "/apiws"}) {
 					t.Fatalf("SNI/Host/path = %v, want %v", got, [3]string{wantSNI, tc.host, "/apiws"})
 				}
 			default:
