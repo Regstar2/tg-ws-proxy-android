@@ -6,7 +6,7 @@
 
 | Уровень | DC2 | DC4 |
 | --- | --- | --- |
-| Upstream / HTTP Host | `kws2.`<base-domain>`` | `kws4.`<base-domain>`` |
+| Upstream / HTTP Host | `kws2.<base-domain>` | `kws4.<base-domain>` |
 | TLS SNI | `<base-domain>` | `<base-domain>` |
 | WebSocket path | `/apiws` | `/apiws` |
 
