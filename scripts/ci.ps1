@@ -235,6 +235,17 @@ Invoke-CheckedCommand `
     -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dc2ABTest)
 & $dc2ABTest
 
+
+$issue156Smoke = Join-Path $PSScriptRoot 'issue-156-cfproxy-device-smoke.ps1'
+$issue156Tokens = $null
+$issue156Errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $issue156Smoke, [ref]$issue156Tokens, [ref]$issue156Errors
+) | Out-Null
+if ($issue156Errors) { throw "Issue #156 smoke syntax errors: $($issue156Errors -join '; ')" }
+Invoke-CheckedCommand -Label 'Issue #156 CF report regression (Windows PowerShell 5.1)' -FilePath $windowsPowerShell.Source -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $issue156Smoke, '-SelfTest')
+& $issue156Smoke -SelfTest
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.8' -ExpectedVersionCode 64
 if ($LASTEXITCODE -ne 0) {
