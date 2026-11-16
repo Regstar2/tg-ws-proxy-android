@@ -35,7 +35,7 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 ## Project status
 
 **Latest published release:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Source version:** 1.11.8 (versionCode 64) — [release notes and verification](docs/releases/v1.11.8_EN.md).  
+**Source version:** 1.11.9 (versionCode 65) — [release notes and verification](docs/releases/v1.11.9_EN.md). **The v1.11.9 public release has not yet been verified.**  
 **Stage:** stable patch; original Flowseal Worker is available only as an experimental route
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
@@ -303,7 +303,7 @@ Build and copy the APK to the local `artifacts/` directory:
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.7
+.\scripts\release.ps1 -Version v1.11.9
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces the APK plus SHA-256 in `dist/`.
@@ -338,7 +338,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.7` release notes | [docs/releases/v1.11.7_EN.md](docs/releases/v1.11.7_EN.md) · [Russian](docs/releases/v1.11.7.md) |
+| `1.11.9` release notes | [docs/releases/v1.11.9_EN.md](docs/releases/v1.11.9_EN.md) · [Russian](docs/releases/v1.11.9.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 

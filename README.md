@@ -33,7 +33,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 ## Статус проекта
 
 **Последний опубликованный релиз:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Версия исходников:** 1.11.8 (versionCode 64) — [изменения и проверки](docs/releases/v1.11.8.md).  
+**Версия исходников:** 1.11.9 (versionCode 65) — [изменения и проверки](docs/releases/v1.11.9.md). **Публичный релиз v1.11.9 пока не подтверждён.**  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
@@ -304,7 +304,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.7
+.\scripts\release.ps1 -Version v1.11.9
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -339,7 +339,7 @@ app\build\outputs\apk\debug\app-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.7` | [docs/releases/v1.11.7.md](docs/releases/v1.11.7.md) · [English](docs/releases/v1.11.7_EN.md) |
+| Release notes `1.11.9` | [docs/releases/v1.11.9.md](docs/releases/v1.11.9.md) · [English](docs/releases/v1.11.9_EN.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 
