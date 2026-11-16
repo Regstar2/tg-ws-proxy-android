@@ -124,7 +124,7 @@ internal class RouteProbeNetworkSteps(
         }
     }
 
-    fun probeHttpHead(sniHost: String, dialHost: String, path: String = "/"): RouteProbeStepResult {
+    fun probeHttpHead(sniHost: String, dialHost: String, path: String = "/", httpHost: String = sniHost): RouteProbeStepResult {
         val started = System.nanoTime()
         return try {
             Socket().use { raw ->
@@ -141,7 +141,7 @@ internal class RouteProbeNetworkSteps(
                     val writer = BufferedWriter(
                         OutputStreamWriter(tls.getOutputStream(), StandardCharsets.US_ASCII),
                     )
-                    writer.write("HEAD $path HTTP/1.1\r\nHost: $sniHost\r\nConnection: close\r\n\r\n")
+                    writer.write("HEAD $path HTTP/1.1\r\nHost: $httpHost\r\nConnection: close\r\n\r\n")
                     writer.flush()
                     val reader = BufferedReader(
                         InputStreamReader(tls.getInputStream(), StandardCharsets.US_ASCII),
@@ -172,7 +172,7 @@ internal class RouteProbeNetworkSteps(
         }
     }
 
-    fun probeWebSocket(sniHost: String, dialHost: String, path: String): RouteProbeStepResult {
+    fun probeWebSocket(sniHost: String, dialHost: String, path: String, httpHost: String = sniHost): RouteProbeStepResult {
         val started = System.nanoTime()
         return try {
             Socket().use { raw ->
@@ -186,7 +186,7 @@ internal class RouteProbeNetworkSteps(
                     params.serverNames = listOf(SNIHostName(sniHost))
                     tls.sslParameters = params
                     tls.startHandshake()
-                    val upgraded = performWsUpgrade(tls, sniHost, path)
+                    val upgraded = performWsUpgrade(tls, httpHost, path)
                     if (upgraded.success) {
                         stepOk(RouteProbeStep.WEBSOCKET_HANDSHAKE, started, upgraded.detail)
                     } else {
