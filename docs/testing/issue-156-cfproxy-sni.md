@@ -6,9 +6,9 @@
 
 | Уровень | DC2 | DC4 |
 | --- | --- | --- |
-| Upstream / HTTP Host | kws2.<base-domain> | kws4.<base-domain> |
-| TLS SNI | <base-domain> | <base-domain> |
-| WebSocket path | /apiws | /apiws |
+| Upstream / HTTP Host | `kws2.`<base-domain>`` | `kws4.`<base-domain>`` |
+| TLS SNI | `<base-domain>` | `<base-domain>` |
+| WebSocket path | `/apiws` | `/apiws` |
 
 Контракт применяется одинаково к MTProto и SOCKS5 Cloudflare Proxy. Встроенная диагностика использует upstream Host для DNS/TCP, базовый домен для TLS и исходный Host для HTTP HEAD или WebSocket upgrade.
 
@@ -20,7 +20,7 @@
 
 Техническая идея адаптирована из форка [malordin/tg-ws-proxy-android](https://github.com/malordin/tg-ws-proxy-android), commit [a98fd27c384452b8b0e78a4273abf005077aad6b](https://github.com/malordin/tg-ws-proxy-android/commit/a98fd27c384452b8b0e78a4273abf005077aad6b).
 
-В исходном отчёте форка описан следующий симптом: TCP к Cloudflare устанавливался, но TLS ClientHello с SNI вида kwsN.<domain> завершался таймаутом; с базовым доменом в SNI проходил WebSocket upgrade. В адаптации сохранены независимые значения TLS server name и HTTP Host. Изменения перенесены точечно в существующие MTProto, SOCKS5 и RouteProbe пути; форк целиком не копировался.
+В исходном отчёте форка описан следующий симптом: TCP к Cloudflare устанавливался, но TLS ClientHello с SNI вида `kwsN.<domain>` завершался таймаутом; с базовым доменом в SNI проходил WebSocket upgrade. В адаптации сохранены независимые значения TLS server name и HTTP Host. Изменения перенесены точечно в существующие MTProto, SOCKS5 и RouteProbe пути; форк целиком не копировался.
 
 Источник диагностики: [docs/fork-sni.md](https://github.com/malordin/tg-ws-proxy-android/blob/main/docs/fork-sni.md).
 
@@ -30,7 +30,7 @@
 
 - сохранение базового TLS SNI и исходного HTTP Host для DC2/DC4;
 - сохранение прежнего поведения Direct WS и Worker;
-- WebSocket path /apiws;
+- WebSocket path `/apiws`;
 - MTProto и SOCKS5 Cloudflare Proxy;
 - IP fallback, отмену TLS handshake и ограниченные повторные попытки;
 - HTTP-ошибки, включая 403/421/1013, без автоматического возврата к прежнему SNI;
@@ -52,11 +52,11 @@
 
 Поэтому подтверждена работоспособность на проверенном пользователем устройстве и в его тестовой среде, но отдельная проверка доставки сообщений/медиа и матрица операторов остаются без независимого evidence.
 
-Скрипт scripts/issue-156-cfproxy-device-smoke.ps1 формирует агрегированный статус CF_DUPLEX_OBSERVED_MEDIA_UNVERIFIED, если найдены двусторонние байты при selected_backend=actual_backend=cf_proxy_ws и fallback_used=false. Такой статус подтверждает двусторонний обмен байтами, но не подтверждает доставку пользовательских сообщений или медиа.
+Скрипт scripts/issue-156-cfproxy-device-smoke.ps1 формирует агрегированный статус `CF_DUPLEX_OBSERVED_MEDIA_UNVERIFIED`, если найдены двусторонние байты при `selected_backend=actual_backend=`cf_proxy_ws`` и `fallback_used=false`. Такой статус подтверждает двусторонний обмен байтами, но не подтверждает доставку пользовательских сообщений или медиа.
 
 ## Изоляция тестовой инфраструктуры
 
-CfProxySmokeConfigReceiver находится в debug source set и защищён разрешением android.permission.DUMP. Он временно применяет CF-only policy, сохраняет исходные настройки и восстанавливает их после теста. В release source set этот receiver не включается.
+`CfProxySmokeConfigReceiver` находится в debug source set и защищён разрешением `android.permission.DUMP`. Он временно применяет CF-only policy, сохраняет исходные настройки и восстанавливает их после теста. В release source set этот receiver не включается.
 
 Скрипт не удаляет приложение и пользовательские данные. Сырые временные логи удаляются после формирования локального агрегированного отчёта. Не публиковать device serial, IP, MTProto secret, Worker URL, ключи подписи или пользовательские данные.
 
@@ -83,4 +83,4 @@ HTTP 101 и успешный TLS handshake сами по себе не явля�
 & ./scripts/issue-156-cfproxy-device-smoke.ps1 -InstallSignedDebug -SigningRoot 'C:/Base/projects/TGWSProxyAndroid' -Seconds 90
 ~~~
 
-Скрипт использует существующий issue-135-rebuild-device.ps1, оригинальный ключ подписи и безопасную установку поверх приложения. Требуются одно авторизованное ARM64 Android-устройство, установленный Telegram и выбранный MTProto frontend. Полный результат и ограничения кодируются в локальном report.json; перед публикацией отчёт необходимо проверить на отсутствие чувствительных данных.
+Скрипт использует существующий issue-135-rebuild-device.ps1, оригинальный ключ подписи и безопасную установку поверх приложения. Требуются одно авторизованное ARM64 Android-устройство, установленный Telegram и выбранный MTProto frontend. Полный результат и ограничения кодируются в локальном `report.json`; перед публикацией отчёт необходимо проверить на отсутствие чувствительных данных.
