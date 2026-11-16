@@ -25,3 +25,17 @@
 4. Повторить после переподключения, Wi-Fi ↔ мобильная сеть, Stop/Cancel, смены маршрута и перезапуска. Проверить отсутствие массовых reconnect, зависших TLS и утечки CF reservations.
 5. Сравнить с `main` на той же сети, сохранить только обезличенные логи без IP, secret, Worker URL и пользовательских данных.
 6. Для каждой сети отмечать PASS только при подтверждённом двустороннем обмене; иначе FAIL или NOT_TESTED. Исходную жалобу #154 не закрывать без такого подтверждения.
+
+## Автоматизированный Android CF-only smoke (#156)
+
+В debug-only APK добавлен DUMP-protected ADB receiver CfProxySmokeConfigReceiver. Он сохраняет исходные настройки и временно устанавливает единственный маршрут cf_proxy_ws для Wi-Fi, mobile и unknown. Скрипт останавливает прокси, восстанавливает настройки и удаляет временный сырой logcat. В release APK приёмник отсутствует.
+
+Для сборки оригинальным release-ключом и запуска проверки из отдельного worktree:
+
+~~~powershell
+& .\scripts\issue-156-cfproxy-device-smoke.ps1 -InstallSignedDebug -SigningRoot 'C:\Base\projects\TGWSProxyAndroid' -Seconds 90
+~~~
+
+Скрипт использует существующий issue-135-rebuild-device.ps1: Android unit tests, lint, native Android build, подписанный APK, безопасное adb install -r без удаления пользовательских данных. Локальный Windows Go-тестовый exe при этом не запускается. Требуются устройство ARM64, оригинальный ключ, выбранный MTProto frontend и Telegram.
+
+Скрипт открывает публичный Telegram-канал без отправки сообщений и анализирует фактические selected_backend, actual_backend, fallback_used, up_bytes/down_bytes и знаки DC. Итог CF_DUPLEX_OBSERVED_MEDIA_UNVERIFIED означает только двусторонние байты через Cloudflare; он не доказывает доставку пользовательских сообщений или загрузку медиа. FAIL_OFF_ROUTE и FAIL_NO_DUPLEX — отрицательные результаты, отсутствие закрытых сессий — INCONCLUSIVE. На недоступных сетях операторов сохраняется NOT_TESTED. Отчёт artifacts/issue156/<timestamp>/report.json содержит только агрегированные показатели.
