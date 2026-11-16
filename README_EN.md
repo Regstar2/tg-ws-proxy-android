@@ -259,7 +259,7 @@ Built-in diagnostics show:
 
 The runtime uses the `TgWsProxy` logcat tag. Diagnostic probes should not change the active route policy.
 
-## Routes (v1.11.7 release preparation)
+## Routes (available since v1.11.7)
 
 Under **Settings → Routes**, Wi-Fi and mobile data have independent policies. All five routes appear in **one reorderable list**, including disabled routes. Enabling or disabling a route does not move its row. Arrows and drag gestures reorder both active and inactive entries; enabled routes are attempted **in visible top-to-bottom order** by the MTProto frontend. With one enabled route, there is no implicit fallback.
 
@@ -324,7 +324,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Before tagging v1.11.7, verify migration from v1.11.6, strict route ordering, TCP → AWG and live throughput in notifications. Updating v1.11.6 in place requires the same signing certificate. Apps installed before the `applicationId` change (`com.amurcanov.tgwsproxy`) remain separate packages. Validate the signed Release APK independently from Debug builds: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Before tagging v1.11.9, verify an in-place update from v1.11.8 without data removal, actual Cloudflare Proxy without silent fallback, and two-way Telegram message and media transfers. Known TLS verification and notification reconnect limitations are documented in the [v1.11.9 notes](docs/releases/v1.11.9_EN.md). Validate the signed Release APK independently from Debug builds: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
