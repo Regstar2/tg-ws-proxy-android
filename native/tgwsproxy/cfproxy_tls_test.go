@@ -5,9 +5,62 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 )
+
+func TestWebSocketTLSNameIsIndependentOfHTTPHost(t *testing.T) {
+	cases := []struct {
+		name, dialIP, host, serverName string
+	}{
+		{"cf_dc2_hostname", "kws2.pool.example", "kws2.pool.example", "pool.example"},
+		{"cf_dc4_ip_fallback", "203.0.113.4", "kws4.pool.example", "pool.example"},
+		{"direct_ws", "149.154.167.220", "kws2.web.telegram.org", ""},
+		{"worker_ws", "worker.example", "worker.example", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			observed := make(chan [3]string, 1)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				observed <- [3]string{r.TLS.ServerName, r.Host, r.URL.Path}
+				w.Header().Set("Connection", "Upgrade")
+				w.Header().Set("Upgrade", "websocket")
+				w.WriteHeader(http.StatusSwitchingProtocols)
+			}))
+			defer server.Close()
+
+			ws, err := wsConnectWithCurvesContextDialSNI(
+				context.Background(), tc.dialIP, tc.host, tc.serverName, "/apiws", 2,
+				classicalTLSCurves(),
+				func(ctx context.Context, network, address string) (net.Conn, error) {
+					if network != "tcp" || address != net.JoinHostPort(tc.dialIP, "443") {
+						t.Errorf("unexpected dial: %s %s", network, address)
+					}
+					return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ws.Close()
+
+			wantSNI := tc.serverName
+			if wantSNI == "" {
+				wantSNI = tc.host
+			}
+			select {
+			case got := <-observed:
+				if got != ([3]string{wantSNI, tc.host, "/apiws"}) {
+					t.Fatalf("SNI/Host/path = %v, want %v", got, [3]string{wantSNI, tc.host, "/apiws"})
+				}
+			default:
+				t.Fatal("WebSocket upgrade request did not reach server")
+			}
+		})
+	}
+}
 
 func TestCFProxyTLSClientHelloUsesClassicalGroups(t *testing.T) {
 	client, server := net.Pipe()
@@ -71,6 +124,9 @@ func TestCFProxyTLSDoesNotRetryNonTLSFailures(t *testing.T) {
 		&wsStageError{Stage: "tcp_dial", Err: errors.New("offline")},
 		&wsStageError{Stage: "ws_upgrade_read", Err: errors.New("timeout")},
 		&wsStageError{Stage: "tls_handshake", Err: context.Canceled},
+		&WsHandshakeError{StatusCode: 403},
+		&WsHandshakeError{StatusCode: 421},
+		&WsHandshakeError{StatusCode: 1013},
 		&WsHandshakeError{StatusCode: 503},
 	} {
 		calls := 0

@@ -12,6 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
+internal data class CfProxyProbeEndpoint(val upstreamHost: String, val tlsServerName: String, val path: String)
+
+internal fun cfProxyProbeEndpoint(baseDomain: String, dc: Int): CfProxyProbeEndpoint =
+    CfProxyProbeEndpoint("kws$dc.$baseDomain", baseDomain, "/apiws")
+
 class RouteProbeRunner(
     private val config: RouteProbeConfig = RouteProbeConfig.DEFAULT,
 ) {
@@ -171,21 +176,21 @@ class RouteProbeRunner(
             )
         }
         val wsDc = ConnectionRuntimeConfig.effectiveWsHostDc(2)
-        val host = "kws$wsDc.$domain"
+        val endpoint = cfProxyProbeEndpoint(domain, wsDc)
         val out = mutableListOf<RouteProbeStepResult>()
-        out += steps.probeDns(host)
+        out += steps.probeDns(endpoint.upstreamHost)
         if (out.last().status != RouteProbeStatus.OK) {
             return out
         }
-        out += steps.probeTcp(host, 443)
+        out += steps.probeTcp(endpoint.upstreamHost, 443)
         if (out.last().status != RouteProbeStatus.OK) {
             return out
         }
-        out += steps.probeTls(host, host)
+        out += steps.probeTls(endpoint.tlsServerName, endpoint.upstreamHost)
         if (config.runWebSocketHandshake && out.last().status == RouteProbeStatus.OK) {
-            out += steps.probeWebSocket(host, host, "/apiws")
+            out += steps.probeWebSocket(endpoint.tlsServerName, endpoint.upstreamHost, endpoint.path, httpHost = endpoint.upstreamHost)
         } else if (!config.runWebSocketHandshake && out.last().status == RouteProbeStatus.OK) {
-            out += steps.probeHttpHead(host, host, "/apiws")
+            out += steps.probeHttpHead(endpoint.tlsServerName, endpoint.upstreamHost, endpoint.path, httpHost = endpoint.upstreamHost)
         }
         return out
     }
