@@ -716,6 +716,7 @@ func wsConnect(ip, domain, path string, timeout float64) (*RawWebSocket, error) 
 type compatibleWebSocketTLSDialer struct {
 	defaultAttempted bool
 	ctx              context.Context
+	serverName       string
 	dial             func(ip, domain, path string, timeout float64, curves []tls.CurveID) (*RawWebSocket, error)
 }
 
