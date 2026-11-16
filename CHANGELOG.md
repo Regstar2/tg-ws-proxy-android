@@ -4,6 +4,8 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 
 ## Unreleased
 
+## 1.11.9
+
 - Для Cloudflare Proxy разделены TLS SNI и HTTP WebSocket Host: TLS использует базовый домен, а Host сохраняет `kwsN.<domain>` для выбора DC и путь `/apiws`. Изменение применяется к MTProto, SOCKS5 и встроенной диагностике; Direct WS и Cloudflare Worker не затронуты (#156, PR #157). Работоспособность подтверждена владельцем на Android в одной тестовой среде; совместимость со всеми операторами не заявляется.
 
 ## 1.11.8 — 2026-11-12

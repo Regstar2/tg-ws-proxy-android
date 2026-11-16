@@ -33,7 +33,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 ## Статус проекта
 
 **Последний опубликованный релиз:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Версия исходников:** 1.11.8 (versionCode 64) — [изменения и проверки](docs/releases/v1.11.8.md).  
+**Версия исходников:** 1.11.9 (versionCode 65) — [изменения и проверки](docs/releases/v1.11.9.md). **Публичный релиз v1.11.9 пока не подтверждён.**  
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
@@ -260,7 +260,7 @@ TgWsProxy обрабатывает соединения, которые Telegram
 
 Runtime использует тег `TgWsProxy` в logcat. Диагностические проверки не должны менять активную политику маршрутов.
 
-## Маршруты (v1.11.7 — подготовка релиза)
+## Маршруты (реализованы начиная с v1.11.7)
 
 В **Настройки → Маршруты** есть два независимых профиля: Wi-Fi и мобильная сеть. Все пять путей отображаются **в одном списке**, включая отключённые. Положение строки сохраняется при включении/выключении, а её приоритет меняется стрелками или перетаскиванием. В MTProto включённые маршруты используются **строго сверху вниз**, пропуская выключенные; при единственном включённом fallback отсутствует.
 
@@ -304,7 +304,7 @@ app\build\outputs\apk\debug\app-debug.apk
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.7
+.\scripts\release.ps1 -Version v1.11.9
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
@@ -325,7 +325,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Для v1.11.7 проверьте миграцию настроек с v1.11.6, строгий порядок, TCP → AWG и реальную скорость в уведомлении. Обновление поверх v1.11.6 возможно только с той же подписью; установленное до смены `applicationId` приложение `com.amurcanov.tgwsproxy` остаётся отдельным пакетом. Подписанный Release APK проверяется отдельно от Debug APK: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Для v1.11.9 перед выпуском проверьте обновление поверх v1.11.8 без удаления данных, реальный Cloudflare Proxy без скрытого fallback, отправку и получение сообщений и медиа. Известные ограничения TLS-проверки и переподключения из уведомления перечислены в [заметках версии](docs/releases/v1.11.9.md). Подписанный Release APK необходимо проверять отдельно от Debug APK по [release checklist](docs/releases/RELEASE_CHECKLIST.md).
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
@@ -339,7 +339,7 @@ app\build\outputs\apk\debug\app-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.7` | [docs/releases/v1.11.7.md](docs/releases/v1.11.7.md) · [English](docs/releases/v1.11.7_EN.md) |
+| Release notes `1.11.9` | [docs/releases/v1.11.9.md](docs/releases/v1.11.9.md) · [English](docs/releases/v1.11.9_EN.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 
