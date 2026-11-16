@@ -12,7 +12,7 @@
 
 Контракт применяется одинаково к MTProto и SOCKS5 Cloudflare Proxy. Встроенная диагностика использует upstream Host для DNS/TCP, базовый домен для TLS и исходный Host для HTTP HEAD или WebSocket upgrade.
 
-Изменение ограничено Cloudflare Proxy. Direct WS и Cloudflare Worker сохраняют прежние SNI/Host. Если явно не задан отдельный TLS server name, WebSocket dialer использует исходный domain — прежнее поведение остальных маршрутов. Проверка сертификата не отключается; trust-all и отключение hostname verification не добавлялись.
+Изменение ограничено Cloudflare Proxy. Direct WS и Cloudflare Worker сохраняют прежние SNI/Host. Если явно не задан отдельный TLS server name, WebSocket dialer использует исходный domain — прежнее поведение остальных маршрутов. TLS-конфигурация не менялась этим PR. При этом существующий webSocketTLSConfig() уже устанавливает InsecureSkipVerify=true: данный native WebSocket путь не проверяет цепочку сертификата и hostname. Это предшествующее изменение ограничение безопасности, не введённое PR #157 и не исправленное в рамках Issue #156.
 
 Это исправление устраняет наблюдавшиеся TLS timeout в проверенной конфигурации. Оно не доказывает, что причиной всех проблем Telegram на всех сетях является фильтрация SNI, и не гарантирует доступность на каждом операторе.
 
@@ -59,6 +59,11 @@
 `CfProxySmokeConfigReceiver` находится в debug source set и защищён разрешением `android.permission.DUMP`. Он временно применяет CF-only policy, сохраняет исходные настройки и восстанавливает их после теста. В release source set этот receiver не включается.
 
 Скрипт не удаляет приложение и пользовательские данные. Сырые временные логи удаляются после формирования локального агрегированного отчёта. Не публиковать device serial, IP, MTProto secret, Worker URL, ключи подписи или пользовательские данные.
+
+
+## Предсуществующее ограничение проверки TLS
+
+В текущей реализации native WebSocket dialer функция webSocketTLSConfig() устанавливает InsecureSkipVerify=true. Поэтому соединение не проверяет доверенную цепочку сертификата и соответствие hostname. PR #157 только разделяет SNI и HTTP Host и не меняет эту политику. Успешный TLS handshake в этом пути не означает аутентификацию Cloudflare/upstream-сервера. Исправление проверки сертификатов требует отдельной задачи и тестов для Cloudflare, Direct WS, Worker и IP fallback; не считать этот риск устранённым в v1.11.9.
 
 ## Состояние сетевой матрицы
 
