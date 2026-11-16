@@ -76,6 +76,14 @@ if ($LASTEXITCODE -ne 0 -or $devices.Count -ne 1) {
 }
 $serial = $devices[0]
 $package = 'io.github.regstar2.tgwsproxy'
+$component = "$package/com.amurcanov.tgwsproxy.CfProxySmokeConfigReceiver"
+$activity = "$package/com.amurcanov.tgwsproxy.MainActivity"
+function Invoke-CfSmoke([string]$Action) {
+    $result = @(& $adb -s $serial shell am broadcast --include-stopped-packages -n $component -a "$package.action.CF_SMOKE_$Action")
+    if ($LASTEXITCODE -ne 0 -or -not @($result | Where-Object { $_ -match 'result=101' }).Count) {
+        throw "Debug-only CF smoke action $Action failed: $($result -join '; ')"
+    }
+}
 if ($InstallSignedDebug) {
     $params = @{ SkipInstrumentedTests = $true }
     if ($SigningRoot) { $params.SigningRoot = $SigningRoot }
@@ -90,19 +98,52 @@ New-Item -ItemType Directory -Path $dir -Force | Out-Null
 $raw = Join-Path $dir 'temporary-logcat.txt'
 $err = Join-Path $dir 'temporary-stderr.txt'
 $log = $null
+$configured = $false
+$started = $false
+$restored = $false
+$failure = ''
 try {
+    & $adb -s $serial shell am force-stop $package
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to stop previous proxy process' }
+    $configured = $true
+    Invoke-CfSmoke 'CONFIGURE'
+    & $adb -s $serial shell am start -n $activity | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to open proxy app' }
+    Start-Sleep -Seconds 2
     $log = Start-Process -FilePath $adb -ArgumentList @('-s',$serial,'logcat','-T','1',
         '-v','threadtime','TgWsProxy:V','AndroidRuntime:E','*:S') -RedirectStandardOutput $raw -RedirectStandardError $err -PassThru -NoNewWindow
     Start-Sleep -Seconds 2
     if ($log.HasExited) { throw 'Logcat capture did not start' }
+    Invoke-CfSmoke 'START'
+    $started = $true
+    Start-Sleep -Seconds 3
     $launch = @(& $adb -s $serial shell am start -a android.intent.action.VIEW -d 'tg://resolve?domain=telegram' -p $TelegramPackage)
     if ($LASTEXITCODE -ne 0) { Write-Warning 'Telegram public channel did not open' }
-    Write-Host "Capturing $Seconds seconds. The proxy must already be running with ONLY cf_proxy_ws enabled."
+    Write-Host "CF-only automatic capture: $Seconds seconds; existing settings will be restored."
     Start-Sleep -Seconds $Seconds
+} catch {
+    $failure = $_.Exception.Message
+    Write-Warning "CF smoke failed: $failure"
 } finally {
+    try {
+        if ($started) {
+            & $adb -s $serial shell am start -n $activity | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to foreground proxy for stop' }
+            Invoke-CfSmoke 'STOP'
+            Start-Sleep -Seconds 3
+        }
+    } catch { Write-Warning "Proxy stop failed: $_" }
     if ($null -ne $log -and -not $log.HasExited) {
         Stop-Process -Id $log.Id -ErrorAction SilentlyContinue
         [void]$log.WaitForExit(5000)
+    }
+    if ($configured) {
+        try {
+            & $adb -s $serial shell am force-stop $package | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to stop proxy before restoring' }
+            Invoke-CfSmoke 'RESTORE'
+            $restored = $true
+        } catch { Write-Warning "CF preference restoration failed: $_" }
     }
 }
 try {
@@ -110,10 +151,14 @@ try {
     $report = Get-Issue156Report $lines
     $report['commit'] = (& git rev-parse HEAD)
     $report['captureSeconds'] = $Seconds
+    $report['settingsRestored'] = $restored
+    $report['runnerError'] = $failure
     $file = Join-Path $dir 'report.json'
     $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $file -Encoding UTF8
     $report | Format-Table -AutoSize | Out-String | Write-Host
     Write-Host "Aggregate report: $file"
+    if (-not $restored) { throw 'CF settings not confirmed restored; inspect debug backup' }
+    if ($failure) { throw "CF smoke interrupted: $failure" }
     if ($report.status -ne 'CF_DUPLEX_OBSERVED_MEDIA_UNVERIFIED') {
         throw "CF acceptance is incomplete: $($report.status)"
     }
