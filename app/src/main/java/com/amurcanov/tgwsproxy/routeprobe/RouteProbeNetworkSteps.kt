@@ -255,8 +255,7 @@ internal class RouteProbeNetworkSteps(
             val line = reader.readLine() ?: break
             if (line.isEmpty()) break
         }
-        val code = status.split(' ').getOrNull(1)?.toIntOrNull()
-        return if (code == 101) WsUpgrade(true, status) else WsUpgrade(false, status)
+        return if (isSuccessfulWebSocketUpgrade(status)) WsUpgrade(true, status) else WsUpgrade(false, status)
     }
 
     private fun stepOk(step: RouteProbeStep, startedNs: Long, detail: String): RouteProbeStepResult {
@@ -294,3 +293,6 @@ internal class RouteProbeNetworkSteps(
 
     private fun elapsedMs(startNs: Long) = (System.nanoTime() - startNs) / 1_000_000
 }
+
+internal fun isSuccessfulWebSocketUpgrade(statusLine: String): Boolean =
+    statusLine.split(' ').getOrNull(1)?.toIntOrNull() == 101

@@ -126,6 +126,7 @@ func TestCFProxyTLSDoesNotRetryNonTLSFailures(t *testing.T) {
 		&wsStageError{Stage: "tls_handshake", Err: context.Canceled},
 		&WsHandshakeError{StatusCode: 403},
 		&WsHandshakeError{StatusCode: 421},
+		&WsHandshakeError{StatusCode: 1013},
 		&WsHandshakeError{StatusCode: 503},
 	} {
 		calls := 0
