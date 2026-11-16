@@ -80,7 +80,7 @@ HTTP 101 и успешный TLS handshake сами по себе не явля�
 Из корня репозитория:
 
 ~~~powershell
-& .\scripts\issue-156-cfproxy-device-smoke.ps1 -InstallSignedDebug -SigningRoot 'C:\Base\projects\TGWSProxyAndroid' -Seconds 90
+& ./scripts/issue-156-cfproxy-device-smoke.ps1 -InstallSignedDebug -SigningRoot 'C:/Base/projects/TGWSProxyAndroid' -Seconds 90
 ~~~
 
 Скрипт использует существующий issue-135-rebuild-device.ps1, оригинальный ключ подписи и безопасную установку поверх приложения. Требуются одно авторизованное ARM64 Android-устройство, установленный Telegram и выбранный MTProto frontend. Полный результат и ограничения кодируются в локальном report.json; перед публикацией отчёт необходимо проверить на отсутствие чувствительных данных.
