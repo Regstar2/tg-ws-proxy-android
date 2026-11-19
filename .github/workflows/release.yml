@@ -162,14 +162,16 @@ jobs:
                   throw "Existing release '$tag' is not the expected published stable release."
               }
 
-              $apkName = "TgWsProxy-Android-$tag-arm64-v8a.apk"
-              $checksumName = "$apkName.sha256"
-              $expectedNames = @($apkName, $checksumName) | Sort-Object
+              $abis = @('armeabi-v7a', 'arm64-v8a', 'universal')
+              $expectedNames = @($abis | ForEach-Object {
+                  "TgWsProxy-Android-$tag-$_.apk"
+                  "TgWsProxy-Android-$tag-$_.apk.sha256"
+              }) | Sort-Object
               $actualNames = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
 
-              if ($actualNames.Count -ne 2 -or
+              if ($actualNames.Count -ne 6 -or
                   ($actualNames -join "`n") -cne ($expectedNames -join "`n")) {
-                  throw "Existing release '$tag' must contain exactly the expected APK and SHA-256 assets."
+                  throw "Existing release '$tag' must contain exactly three APKs and three SHA-256 assets."
               }
 
               $downloadDir = Join-Path $env:RUNNER_TEMP ("tgwsproxy-release-verify-" + [guid]::NewGuid().ToString('N'))
@@ -180,6 +182,9 @@ jobs:
                       throw "Could not download existing release assets for '$tag'."
                   }
 
+                  foreach ($abi in $abis) {
+                  $apkName = "TgWsProxy-Android-$tag-$abi.apk"
+                  $checksumName = "$apkName.sha256"
                   $apkPath = Join-Path $downloadDir $apkName
                   $checksumPath = Join-Path $downloadDir $checksumName
                   if (-not (Test-Path -LiteralPath $apkPath) -or
@@ -209,6 +214,7 @@ jobs:
                   if ($checksumAsset.digest -and $checksumAsset.digest -cne "sha256:$checksumAssetHash") {
                       throw "GitHub checksum asset digest does not match the downloaded checksum file."
                   }
+                  }
               }
               finally {
                   if (Test-Path -LiteralPath $downloadDir) {
@@ -217,7 +223,7 @@ jobs:
               }
 
               "skip_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-              Write-Host "Existing release '$tag' and both published assets passed SHA-256 verification. Build and upload will be skipped."
+              Write-Host "Existing release '$tag' and all six published assets passed SHA-256 verification. Build and upload will be skipped."
           }
           elseif ($responseText -match '(?i)(HTTP 404|Not Found|release not found)') {
               "skip_build=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -311,28 +317,32 @@ jobs:
 
           $apk = @($files | Where-Object Extension -eq '.apk')
           $checksums = @($files | Where-Object Name -like '*.sha256')
-          if ($files.Count -ne 2 -or $apk.Count -ne 1 -or $checksums.Count -ne 1) {
-              throw "Expected exactly one APK and one SHA-256 file in dist/; found files=$($files.Count), APK=$($apk.Count), checksum=$($checksums.Count)."
+          if ($files.Count -ne 6 -or $apk.Count -ne 3 -or $checksums.Count -ne 3) {
+              throw "Expected three APKs and three SHA-256 files in dist/."
           }
 
-          $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-arm64-v8a.apk"
+          foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+          $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-$abi.apk"
           $checksumName = "$apkName.sha256"
-          if ($apk[0].Name -cne $apkName -or $checksums[0].Name -cne $checksumName) {
-              throw "Release artifact names do not match the expected versioned names."
-          }
+          $apkPath = Join-Path './dist' $apkName
+          $checksumPath = Join-Path './dist' $checksumName
+          if (-not (Test-Path -LiteralPath $apkPath) -or -not (Test-Path -LiteralPath $checksumPath)) { throw 'Missing release artifact pair' }
+          py -3 ./scripts/audit-apk-abis.py $apkPath $abi
+          if ($LASTEXITCODE -ne 0) { throw "APK ABI audit failed: $abi" }
 
-          $checksumLine = (Get-Content -LiteralPath $checksums[0].FullName -Raw).Trim()
+          $checksumLine = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
           $escapedApkName = [regex]::Escape($apkName)
           $checksumMatch = [regex]::Match($checksumLine, "^(?<hash>[A-Fa-f0-9]{64})  $escapedApkName$")
           if (-not $checksumMatch.Success) {
               throw "Release checksum file has an invalid format."
           }
-          $actualHash = (Get-FileHash -LiteralPath $apk[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualHash = (Get-FileHash -LiteralPath $apkPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($checksumMatch.Groups['hash'].Value.ToLowerInvariant() -cne $actualHash) {
               throw "Release APK does not match its SHA-256 checksum file."
           }
 
           Write-Host "Verified APK SHA-256: $actualHash"
+          }
           Write-Host 'Release artifacts:'
           $files | ForEach-Object { Write-Host " - $($_.FullName)" }
 

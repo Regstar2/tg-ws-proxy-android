@@ -7,6 +7,7 @@ val releaseVersionCode = 65
 val releaseVersionName = "1.11.9"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
+val isolatedAbiSmoke = providers.gradleProperty("isolatedAbiSmoke").orNull == "true"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val script = rootProject.file("scripts/build-native-android.ps1")
@@ -14,12 +15,15 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val goSources = files(
         rootProject.fileTree(nativeDir) { include("**/*.go", "go.mod", "go.sum") },
     )
-    val output = project.file("src/main/jniLibs/arm64-v8a/libtgwsproxy.so")
+    val nativeOutputs = listOf("armeabi-v7a", "arm64-v8a").map {
+        project.file("src/main/jniLibs/$it/libtgwsproxy.so")
+    }
     val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
 
     inputs.file(script)
     inputs.files(goSources)
-    outputs.file(output)
+    outputs.files(nativeOutputs)
+    inputs.property("ndkRoot", System.getenv("ANDROID_NDK_ROOT") ?: "auto")
     workingDir = rootProject.projectDir
     commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
 }
@@ -59,7 +63,7 @@ android {
         }
 
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
         }
     }
 
@@ -81,6 +85,9 @@ android {
 
     buildTypes {
         debug {
+            if (isolatedAbiSmoke) {
+                applicationIdSuffix = ".abismoke"
+            }
             versionNameSuffix = "-debug"
             if (signedWorkerSmoke) {
                 signingConfig = signingConfigs.findByName("release")
@@ -95,6 +102,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true
         }
     }
     compileOptions {

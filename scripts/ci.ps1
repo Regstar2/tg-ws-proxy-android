@@ -43,6 +43,7 @@ if (-not (Test-Path $gradle)) {
 }
 
 $nativeDir = Join-Path $root 'native\tgwsproxy'
+Invoke-CheckedCommand -Label 'Native failed-build regression (Windows PowerShell 5.1)' -FilePath $windowsPowerShell.Source -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'tests\native-build-failure-test.ps1'))
 if (-not (Test-Path $nativeDir)) {
     throw "Native runtime directory not found: $nativeDir"
 }
@@ -289,12 +290,17 @@ $quickSettingsManifestTest = Join-Path $PSScriptRoot 'tests\quick-settings-prefe
 Write-Host "`n==> Verify merged Android Quick Settings preferences manifest"
 & $quickSettingsManifestTest
 
-$debugApk = Join-Path $root 'app\build\outputs\apk\debug\app-debug.apk'
+$debugApk = Join-Path $root 'app\build\outputs\apk\debug\app-universal-debug.apk'
 if (-not (Test-Path $debugApk)) {
     throw "Expected debug APK was not produced: $debugApk"
 }
 
 Write-Host "`n==> Verify packaged Android application identity"
+Invoke-CheckedCommand -Label 'APK ABI audit regression tests' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_apk_abis.py')
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+    $apk = Join-Path $root "app\build\outputs\apk\debug\app-$abi-debug.apk"
+    Invoke-CheckedCommand -Label "Audit APK native payload $abi" -FilePath $pythonLauncher.Source -Arguments @('-3', (Join-Path $PSScriptRoot 'audit-apk-abis.py'), $apk, $abi)
+}
 & (Join-Path $PSScriptRoot 'tests\application-identity-test.ps1') -ApkPath $debugApk
 if ($LASTEXITCODE -ne 0) { throw "Android application identity verification failed." }
 

@@ -205,7 +205,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
             state = UpdateState.Failed(release, R.string.update_quick_already_running)
             return
         }
-        if (AppUpdateAssetSelector.select(release) == null) {
+        if (AppUpdateAssetSelector.select(release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) == null) {
             state = UpdateState.Failed(release, R.string.update_asset_unavailable)
             return
         }
@@ -353,7 +353,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
     }
     val actionLabel = when (state) {
         UpdateState.Current, UpdateState.Unsupported -> R.string.update_check_now
-        is UpdateState.Available -> if (AppUpdateAssetSelector.select(sourceRelease!!) != null) {
+        is UpdateState.Available -> if (AppUpdateAssetSelector.select(sourceRelease!!, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) != null) {
             R.string.update_download_install
         } else R.string.update_open_release
         is UpdateState.Downloading -> R.string.update_cancel_download
@@ -364,7 +364,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
         is UpdateState.Cancelled -> R.string.update_download_install
         is UpdateState.Failed -> when {
             sourceRelease == null -> R.string.update_check_now
-            AppUpdateAssetSelector.select(sourceRelease) == null -> R.string.update_open_release
+            AppUpdateAssetSelector.select(sourceRelease, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) == null -> R.string.update_open_release
             else -> R.string.update_retry
         }
         UpdateState.Checking -> R.string.update_status_checking
@@ -425,7 +425,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (sourceRelease != null) {
-                                val size = AppUpdateAssetSelector.select(sourceRelease)?.apk?.size
+                                val size = AppUpdateAssetSelector.select(sourceRelease, android.os.Build.SUPPORTED_ABIS.orEmpty().toList())?.apk?.size
                                 if (size != null) {
                                     Text(
                                         stringResource(R.string.update_size_abi, size / 1048576.0),
@@ -468,7 +468,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            if (AppUpdateAssetSelector.select(current.release) == null) {
+                            if (AppUpdateAssetSelector.select(current.release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) == null) {
                                 Text(stringResource(R.string.update_asset_unavailable),
                                     color = MaterialTheme.colorScheme.error)
                             }
@@ -549,7 +549,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
                     when (val current = state) {
                         UpdateState.Current, UpdateState.Unsupported -> checkUpdates(force = true)
                         is UpdateState.Available -> {
-                            if (AppUpdateAssetSelector.select(current.release) != null) {
+                            if (AppUpdateAssetSelector.select(current.release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) != null) {
                                 startDownload(current.release)
                             } else openOfficialRelease(context, current.release.tagName)
                         }
@@ -561,7 +561,7 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
                         is UpdateState.Cancelled -> startDownload(current.release)
                         is UpdateState.Failed -> {
                             if (current.release == null) checkUpdates(force = true)
-                            else if (AppUpdateAssetSelector.select(current.release) == null) {
+                            else if (AppUpdateAssetSelector.select(current.release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) == null) {
                                 openOfficialRelease(context, current.release.tagName)
                             } else startDownload(current.release)
                         }

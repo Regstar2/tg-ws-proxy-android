@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ApkPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'app\build\outputs\apk\debug\app-debug.apk')
+    [string]$ApkPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'app\build\outputs\apk\debug\app-universal-debug.apk')
 )
 
 Set-StrictMode -Version Latest

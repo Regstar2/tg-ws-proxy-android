@@ -134,7 +134,7 @@ internal object AppUpdateCheckRepository {
             is UpdateDecision.Available -> {
                 val release = decision.release
                 val items = JSONArray()
-                val matching = AppUpdateAssetSelector.select(release)
+                val matching = AppUpdateAssetSelector.select(release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList())
                 val selectedAssets = if (matching != null) {
                     listOfNotNull(matching.apk, matching.checksum)
                 } else release.assets.take(8)

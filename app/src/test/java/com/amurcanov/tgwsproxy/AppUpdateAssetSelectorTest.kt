@@ -6,6 +6,37 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AppUpdateAssetSelectorTest {
+    private fun select(release: GitHubReleaseInfo, abis: List<String> = listOf("arm64-v8a")) =
+        AppUpdateAssetSelector.select(release, abis)
+    @Test
+    fun selectsArmv7On32BitAndroid() {
+        val arm = filename.replace("arm64-v8a", "armeabi-v7a")
+        val selected = select(
+            release(asset(filename, digest = digest), asset(arm, digest = digest)),
+            listOf("armeabi-v7a", "armeabi"),
+        )
+        assertEquals(arm, selected?.apk?.name)
+    }
+
+    @Test
+    fun prefersDeviceAbiOrderThenUniversal() {
+        val arm = filename.replace("arm64-v8a", "armeabi-v7a")
+        val universal = filename.replace("arm64-v8a", "universal")
+        val all = release(asset(arm, digest = digest), asset(universal, digest = digest), asset(filename, digest = digest))
+        assertEquals(filename, select(all, listOf("arm64-v8a", "armeabi-v7a"))?.apk?.name)
+        assertEquals(universal, select(release(asset(universal, digest = digest)), listOf("armeabi-v7a"))?.apk?.name)
+        assertNull(select(all, listOf("x86_64", "x86")))
+        assertNull(select(all, emptyList()))
+        assertNull(select(release(asset(filename, digest = digest)), listOf("armeabi-v7a")))
+    }
+
+    @Test
+    fun universalStillRequiresOfficialSourceAndIntegrity() {
+        val name = filename.replace("arm64-v8a", "universal")
+        assertNull(select(release(asset(name)), listOf("armeabi-v7a")))
+        assertNull(select(release(asset(name, digest = digest).copy(downloadUrl = "https://evil.example/$name")), listOf("armeabi-v7a")))
+        assertNull(select(release(asset(name, digest = digest), asset(name, digest = digest)), listOf("arm64-v8a")))
+    }
     private val tag = "v1.11.8"
     private val filename = "TgWsProxy-Android-v1.11.8-arm64-v8a.apk"
     private val digest = "sha256:" + "a".repeat(64)
@@ -24,7 +55,7 @@ class AppUpdateAssetSelectorTest {
 
     @Test
     fun selectsOfficialArm64ReleaseWithDigest() {
-        val selected = AppUpdateAssetSelector.select(release(asset(filename, digest = digest)))
+        val selected = select(release(asset(filename, digest = digest)))
         assertNotNull(selected)
         assertEquals(filename, selected!!.apk.name)
         assertEquals("a".repeat(64), selected.metadataSha256)
@@ -32,7 +63,7 @@ class AppUpdateAssetSelectorTest {
 
     @Test
     fun acceptsShaSidecarWithoutApiDigest() {
-        val selected = AppUpdateAssetSelector.select(
+        val selected = select(
             release(asset(filename), asset("$filename.sha256", size = 107L)),
         )
         assertNotNull(selected)
@@ -41,32 +72,32 @@ class AppUpdateAssetSelectorTest {
 
     @Test
     fun rejectsDownloadsWithoutChecksumEvidence() {
-        assertNull(AppUpdateAssetSelector.select(release(asset(filename))))
+        assertNull(select(release(asset(filename))))
     }
 
     @Test
     fun rejectsDuplicateOfficialApkAssets() {
-        assertNull(AppUpdateAssetSelector.select(
+        assertNull(select(
             release(asset(filename, digest = digest), asset(filename, digest = digest))
         ))
     }
 
     @Test
     fun rejectsAlteredUrlAndOtherArchitecture() {
-        assertNull(AppUpdateAssetSelector.select(release(
+        assertNull(select(release(
             asset(filename, digest = digest).copy(downloadUrl = "https://evil.example/update.apk")
         )))
-        assertNull(AppUpdateAssetSelector.select(
+        assertNull(select(
             release(asset(filename.replace("arm64-v8a", "x86"), digest = digest))
         ))
     }
 
     @Test
     fun rejectsInvalidMetadataAndExcessiveSize() {
-        assertNull(AppUpdateAssetSelector.select(release(
+        assertNull(select(release(
             asset(filename, digest = "sha256:INVALID")
         )))
-        assertNull(AppUpdateAssetSelector.select(release(
+        assertNull(select(release(
             asset(filename, size = 120L * 1024L * 1024L, digest = digest)
         )))
     }
