@@ -20,8 +20,9 @@
     <string name="stop_proxy">Stop proxy</string>
     <string name="apply_telegram">Apply in Telegram</string>
     <string name="apply_telegram_disabled_hint">Start the proxy first, then apply it in Telegram.</string>
-    <string name="copy_proxy_address">Copy proxy address</string>
-    <string name="proxy_address_copied">Proxy address copied</string>
+    <string name="copy_proxy_link">Copy proxy link</string>
+    <string name="socks5_link_copied">SOCKS5 proxy link copied</string>
+    <string name="socks5_link_unavailable">SOCKS5 proxy link is unavailable: check the port.</string>
     <string name="section_connection">Connection</string>
     <string name="section_routes">Routes</string>
     <string name="section_route_probe">Route check</string>
