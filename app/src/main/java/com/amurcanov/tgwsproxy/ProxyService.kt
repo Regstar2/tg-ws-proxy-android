@@ -461,6 +461,8 @@ class ProxyService : Service() {
         }
         val type = currentFrontend.type
         if (type == LocalProxyFrontendType.MTPROTO_EXPERIMENTAL) {
+            // Native MTProto start cannot rebind the port while the old listener is active.
+            stopProxy()
             startProxy(lastPort, lastIps, lastPoolSize, type)
             return
         }
