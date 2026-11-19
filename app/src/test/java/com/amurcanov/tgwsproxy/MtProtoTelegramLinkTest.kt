@@ -34,6 +34,59 @@ class MtProtoTelegramLinkTest {
     }
 
     @Test
+    fun homeCopy_mtProtoLinkMatchesConnectionSettingsForDefaultAndFakeTls() {
+        val config = MtProtoProxyConfig.default { fixedSecret }
+        for (candidate in listOf(config, config.copy(fakeTlsDomain = "www.google.com"))) {
+            assertEquals(
+                MtProtoTelegramLinkBuilder.httpsLink(candidate),
+                ProxyTelegramLinkBuilder.httpsLink(
+                    LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
+                    candidate,
+                    socks5Port = 0,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun homeCopy_socks5LinkContainsLocalHostAndPort() {
+        assertEquals(
+            "https://t.me/socks?server=127.0.0.1&port=1443",
+            ProxyTelegramLinkBuilder.httpsLink(
+                LocalProxyFrontendType.SOCKS5,
+                MtProtoProxyConfig.default { fixedSecret },
+                socks5Port = 1443,
+            ),
+        )
+    }
+
+    @Test
+    fun homeCopy_socks5LinkRejectsInvalidPorts() {
+        val config = MtProtoProxyConfig.default { fixedSecret }
+        for (port in listOf(-1, 0, 65536)) {
+            assertNull(
+                ProxyTelegramLinkBuilder.httpsLink(
+                    LocalProxyFrontendType.SOCKS5,
+                    config,
+                    socks5Port = port,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun homeCopy_mtProtoLinkRejectsInvalidConfig() {
+        val config = MtProtoProxyConfig.default { fixedSecret }.copy(port = 0)
+        assertNull(
+            ProxyTelegramLinkBuilder.httpsLink(
+                LocalProxyFrontendType.MTPROTO_EXPERIMENTAL,
+                config,
+                socks5Port = 1443,
+            ),
+        )
+    }
+
+    @Test
     fun tgUri_usesOfficialProxyParametersAndDdSecretPrefix() {
         val config = MtProtoProxyConfig.default { fixedSecret }
 
