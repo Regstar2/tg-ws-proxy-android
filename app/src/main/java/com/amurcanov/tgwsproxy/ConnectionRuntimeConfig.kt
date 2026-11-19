@@ -5,6 +5,10 @@ import com.amurcanov.tgwsproxy.worker.WorkerFailoverPayload
 import com.amurcanov.tgwsproxy.worker.WorkerTransport
 
 object ConnectionRuntimeConfig {
+    // Default applies only when no explicit user preference has been saved.
+    // CF WS/80 is plaintext; turning this off selects verified WSS/443.
+    const val DEFAULT_CF_PROXY_NO_TLS = true
+
     private val defaultDcIps = mapOf(
         1 to "149.154.175.50",
         2 to "149.154.167.51",
@@ -36,7 +40,7 @@ object ConnectionRuntimeConfig {
         flowsealMediaFixEnabled: Boolean = false,
         flowsealMediaFixDc: Int = WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
         flowsealMediaFixIp: String = WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
-        cfProxyNoTls: Boolean = false,
+        cfProxyNoTls: Boolean = DEFAULT_CF_PROXY_NO_TLS,
     ): String {
         val orderedPolicy = routePolicy?.let(NetworkRoutePolicyEditor::normalize)
         val effectiveMode = if (orderedPolicy != null) {
