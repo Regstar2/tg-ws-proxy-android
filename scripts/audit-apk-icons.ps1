@@ -1,6 +1,6 @@
 # Audit debug APK for legacy icon resources.
 param(
-    [string]$ApkPath = "$PSScriptRoot\..\app\build\outputs\apk\debug\app-debug.apk"
+    [string]$ApkPath = "$PSScriptRoot\..\app\build\outputs\apk\debug\app-universal-debug.apk"
 )
 
 $ErrorActionPreference = "Stop"

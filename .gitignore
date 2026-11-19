@@ -2,6 +2,7 @@
 .vscode/
 local.properties
 app/build/
+__pycache__/
 artifacts/
 dist/
 external/upstreams/

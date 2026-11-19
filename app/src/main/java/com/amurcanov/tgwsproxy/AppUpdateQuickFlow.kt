@@ -87,7 +87,7 @@ internal object AppUpdateQuickFlow {
      */
     fun start(activity: Activity, release: GitHubReleaseInfo): Boolean {
         if (state is State.Downloading || state is State.Verified) return false
-        if (AppUpdateAssetSelector.select(release) == null) return false
+        if (AppUpdateAssetSelector.select(release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) == null) return false
 
         val app = activity.application
         observeActivityLifecycle(app)

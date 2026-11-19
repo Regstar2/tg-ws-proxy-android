@@ -118,14 +118,21 @@ This prevents publishing a tag whose APK reports a different application version
 
 ### Output
 
-For `v1.10.13` the expected output is:
+For `v1.11.9` the expected output is three APK/checksum pairs:
 
 ```text
-dist/TgWsProxy-Android-v1.10.13-arm64-v8a.apk
-dist/TgWsProxy-Android-v1.10.13-arm64-v8a.apk.sha256
+dist/TgWsProxy-Android-v1.11.9-armeabi-v7a.apk
+dist/TgWsProxy-Android-v1.11.9-armeabi-v7a.apk.sha256
+dist/TgWsProxy-Android-v1.11.9-arm64-v8a.apk
+dist/TgWsProxy-Android-v1.11.9-arm64-v8a.apk.sha256
+dist/TgWsProxy-Android-v1.11.9-universal.apk
+dist/TgWsProxy-Android-v1.11.9-universal.apk.sha256
 ```
 
 `dist/` is generated locally and is ignored by Git.
+The release workflow validates all six names and checksums. The local release
+script preserves unrelated older local artifacts; use a clean release workspace
+when publishing. See [ABI builds](android-abis.md) for native payload verification.
 
 ## Verification before the first automated release
 

@@ -91,7 +91,7 @@ try {
     & .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
     if ($LASTEXITCODE -ne 0) { throw "Gradle build, lint or tests failed. Device was not changed." }
 
-    $apk = Join-Path $Root "app/build/outputs/apk/debug/app-debug.apk"
+    $apk = Join-Path $Root "app/build/outputs/apk/debug/app-universal-debug.apk"
     $testApk = Join-Path $Root "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
     if (-not (Test-Path -LiteralPath $apk) -or -not (Test-Path -LiteralPath $testApk)) {
         throw "One of the required APKs is missing. Device was not changed."

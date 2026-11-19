@@ -15,7 +15,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
 private const val MAX_UPDATE_BYTES = 100L * 1024L * 1024L
@@ -47,7 +46,7 @@ class AppUpdateInstaller(private val context: Context) {
             throw UpdateInstallException("Update download is already in progress")
         }
         try {
-        val selection = AppUpdateAssetSelector.select(release)
+        val selection = AppUpdateAssetSelector.select(release, android.os.Build.SUPPORTED_ABIS.orEmpty().toList())
             ?: throw UpdateInstallException("No verifiable official APK for this release")
         directory.mkdirs()
         pendingFile.delete()
@@ -156,14 +155,8 @@ class AppUpdateInstaller(private val context: Context) {
         if ((archive.applicationInfo?.minSdkVersion ?: Int.MAX_VALUE) > Build.VERSION.SDK_INT) {
             throw UpdateInstallException("APK requires newer Android")
         }
-        ZipFile(file).use { zip ->
-            val abiNames = zip.entries().asSequence()
-                .filter { !it.isDirectory && it.name.startsWith("lib/") && it.name.endsWith(".so") }
-                .mapNotNull { it.name.split('/').getOrNull(1) }
-                .toSet()
-            if (abiNames != setOf("arm64-v8a")) {
-                throw UpdateInstallException("APK native libraries do not match arm64-v8a")
-            }
+        if (!AppUpdateApkAbi.isCompatible(file, Build.SUPPORTED_ABIS.toList())) {
+            throw UpdateInstallException("APK native libraries are incompatible or incomplete")
         }
         val installedSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             installed.signingInfo?.apkContentsSigners?.toList().orEmpty()

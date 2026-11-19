@@ -69,13 +69,13 @@ internal fun AppUpdateStartupPrompt(enabledForLaunch: Boolean) {
                 "reminders=${preferences.enabled}; eligibleToPrompt=$canPrompt",
         )
         if (candidate != null &&
-            AppUpdateAssetSelector.select(candidate) != null &&
+            AppUpdateAssetSelector.select(candidate, android.os.Build.SUPPORTED_ABIS.orEmpty().toList()) != null &&
             canPrompt
         ) release = candidate
     }
 
     val available = release ?: return
-    val size = AppUpdateAssetSelector.select(available)?.apk?.size ?: return
+    val size = AppUpdateAssetSelector.select(available, android.os.Build.SUPPORTED_ABIS.orEmpty().toList())?.apk?.size ?: return
 
     UpdateAvailableDialog(
         tagName = available.tagName,

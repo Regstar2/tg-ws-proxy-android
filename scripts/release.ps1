@@ -38,8 +38,8 @@ if (-not (Test-Path $releaseNotes)) {
     throw "Release notes were not found for ${Version}: $releaseNotes"
 }
 
-$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
-Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode artifact=$artifactName"
+$abis = @('armeabi-v7a', 'arm64-v8a', 'universal')
+Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode ABIs=$($abis -join ',')"
 
 if ($PreflightOnly) {
     Write-Host 'Release metadata preflight passed.'
@@ -72,10 +72,14 @@ if (-not (Test-Path $keystorePath)) {
 }
 
 $dist = Join-Path $root 'dist'
-if (Test-Path $dist) {
-    Remove-Item $dist -Recurse -Force
-}
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
+# Preserve unrelated local artifacts; replace only this version's known outputs.
+foreach ($abi in $abis) {
+    $target = Join-Path $dist "TgWsProxy-Android-$Version-$abi.apk"
+    foreach ($path in @($target, "$target.sha256")) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
+}
 
 $buildScript = Join-Path $PSScriptRoot 'build-apk.ps1'
 if (-not (Test-Path $buildScript)) {
@@ -88,10 +92,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Release APK build failed with exit code $LASTEXITCODE."
 }
 
-$sourceApk = Join-Path $root 'artifacts\apk\release\tgwsproxy-release.apk'
-if (-not (Test-Path $sourceApk)) {
-    throw "Expected release APK was not produced: $sourceApk"
-}
 
 $sdkRoot = $env:ANDROID_SDK_ROOT
 if ([string]::IsNullOrWhiteSpace($sdkRoot)) {
@@ -119,7 +119,13 @@ if (-not $aapt) {
     throw "aapt.exe was not found under $buildToolsRoot."
 }
 
-Write-Host '==> Verify APK package/version metadata'
+foreach ($abi in $abis) {
+$sourceApk = Join-Path $root "artifacts\apk\release\tgwsproxy-release-$abi.apk"
+$artifactName = "TgWsProxy-Android-$Version-$abi.apk"
+if (-not (Test-Path $sourceApk)) { throw "Missing APK: $sourceApk" }
+& py -3 (Join-Path $PSScriptRoot 'audit-apk-abis.py') $sourceApk $abi
+if ($LASTEXITCODE -ne 0) { throw "APK ABI validation failed for $abi" }
+Write-Host "==> Verify $abi APK package/version metadata"
 $badgingLines = @(& $aapt.FullName dump badging $sourceApk)
 if ($LASTEXITCODE -ne 0) {
     throw "aapt dump badging failed with exit code $LASTEXITCODE."
@@ -144,10 +150,11 @@ Copy-Item -Force $sourceApk $artifactPath
 $hash = (Get-FileHash -Path $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumPath = "$artifactPath.sha256"
 Set-Content -Path $checksumPath -Value "$hash  $artifactName" -Encoding ascii
+}
 
 $files = @(Get-ChildItem $dist -File)
-if ($files.Count -ne 2) {
-    throw "Expected exactly APK and SHA-256 checksum in dist/, found $($files.Count) files."
+if (@($files | Where-Object { $_.Name -like "TgWsProxy-Android-$Version-*.apk*" }).Count -ne 6) {
+    throw "Expected three APKs and three SHA-256 checksums for $Version in dist/."
 }
 
 Write-Host "Release artifacts prepared:"

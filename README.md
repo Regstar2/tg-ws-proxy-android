@@ -8,7 +8,7 @@
 
 [![Release](https://img.shields.io/github/v/release/Regstar2/tg-ws-proxy-android?style=for-the-badge)](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/Regstar2/tg-ws-proxy-android/trusted-ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/Regstar2/tg-ws-proxy-android/actions/workflows/trusted-ci.yml)
-[![Platform](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#требования)
+[![Platform](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a%20%7C%20armeabi--v7a-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#требования)
 [![License](https://img.shields.io/github/license/Regstar2/tg-ws-proxy-android?style=for-the-badge&label=license)](LICENSE)
 
 **Русский** · [English](README_EN.md)
@@ -33,7 +33,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 ## Статус проекта
 
 **Последний опубликованный релиз:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Версия исходников:** 1.11.9 (versionCode 65) — [изменения и проверки](docs/releases/v1.11.9.md). **Публичный релиз v1.11.9 пока не подтверждён.**  
+**Версия исходников:** 1.11.9 (versionCode 65) — [изменения и проверки](docs/releases/v1.11.9.md).
 **Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
@@ -82,7 +82,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ## Быстрый старт
 
-1. Установите ARM64 APK из [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases), если нужная версия опубликована, либо [соберите debug APK](#сборка).
+1. Установите подходящий ARMv7, ARM64 или Universal APK из [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases), если нужная версия опубликована, либо [соберите debug APK](#сборка).
 2. Откройте TgWsProxy.
 3. Оставьте frontend **MTProto Proxy** и порт `1443`, если он не занят другим локальным сервисом.
 4. Нажмите **Включить прокси**.
@@ -95,7 +95,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 ### Для использования
 
 - Android 8.0 или новее (`minSdk 26`);
-- устройство с ABI `arm64-v8a`;
+- устройство с ABI `armeabi-v7a` (ARMv7) или `arm64-v8a` (ARM64);
 - установленный Telegram;
 - сеть, в которой доступен хотя бы один разрешённый маршрут.
 
@@ -115,7 +115,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 Проверьте [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases) на наличие APK нужной версии. Локально собранный debug APK устанавливается через ADB:
 
 ```powershell
-adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r app\build\outputs\apk\debug\app-universal-debug.apk
 ```
 
 При переходе между debug- и release-подписями Android может потребовать удалить ранее установленное приложение. Перед удалением приложения учитывайте, что его локальные настройки могут быть потеряны.
@@ -124,7 +124,7 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 Проверка новых версий выполняется асинхронно и не останавливает локальный прокси. Когда доступна совместимая версия, TgWsProxy может показать необязательное предложение при запуске. **«Позже»** откладывает напоминание на 24 часа; напоминания можно отключить и снова включить через **Настройки → Обновления**. Там же доступны ручная проверка, сведения о релизе и ссылка на GitHub.
 
-Кнопка **«Скачать и установить»** в стартовом предложении скачивает официальный ARM64 APK без перехода на экран «Обновления». Приложение проверяет контрольную сумму SHA-256, APK-подпись, идентификатор пакета и повышение `versionCode`. При уже выданном разрешении после проверки сразу открывается **системный установщик Android**, в котором пользователь отдельно подтверждает установку. Без разрешения приложение открывает экран обновлений, а затем системную настройку **«Установка неизвестных приложений»** для TgWsProxy. После выдачи разрешения используется тот же проверенный APK — повторная загрузка не требуется.
+Кнопка **«Скачать и установить»** в стартовом предложении скачивает официальный APK для ABI из `Build.SUPPORTED_ABIS` (сначала подходящий отдельный APK, затем Universal) без перехода на экран «Обновления». Приложение проверяет контрольную сумму SHA-256, APK-подпись, идентификатор пакета и повышение `versionCode`. При уже выданном разрешении после проверки сразу открывается **системный установщик Android**, в котором пользователь отдельно подтверждает установку. Без разрешения приложение открывает экран обновлений, а затем системную настройку **«Установка неизвестных приложений»** для TgWsProxy. После выдачи разрешения используется тот же проверенный APK — повторная загрузка не требуется.
 
 Во время загрузки может отображаться уведомление с прогрессом и отменой (если уведомления разрешены). При сворачивании установка не запускается поверх других приложений: нужно вернуться в TgWsProxy. Если Android завершит процесс, незавершённая загрузка не восстанавливается автоматически. При ошибке проверки или установки доступен переход к [официальному релизу](https://github.com/Regstar2/tg-ws-proxy-android/releases). Непроверенные APK не устанавливаются. Обновление может прервать активные прокси-соединения; это не бесшумная установка.
 
@@ -239,7 +239,7 @@ Android-часть написана на Kotlin и Jetpack Compose. Нативн
 - URL Cloudflare Worker, proxy secrets, keystore и переменные подписи нельзя публиковать в issue, логах или коммитах.
 - Release signing использует локальные переменные окружения; keystore исключён из Git.
 - Feedback не прикладывает runtime-логи, proxy credentials, Telegram data, IP-адреса или секреты автоматически.
-- Обновление из приложения загружает официальный ARM64 APK, проверяет SHA-256, сертификат подписи, пакет и код версии до запуска системного установщика. Основной путь обновления до `1.11.7 (63)` подтверждён на Xiaomi; оставшиеся сценарии и ограничения перечислены в [чек-листе #139](docs/testing/issue-139-in-app-update-acceptance.md).
+- Обновление из приложения загружает официальный совместимый ARMv7, ARM64 или Universal APK, проверяет SHA-256, сертификат подписи, пакет и код версии до запуска системного установщика. Основной путь обновления до `1.11.7 (63)` подтверждён на Xiaomi; оставшиеся сценарии и ограничения перечислены в [чек-листе #139](docs/testing/issue-139-in-app-update-acceptance.md).
 - Masking domain меняет форму Fake TLS handshake, но не превращает приложение в VPN.
 
 Перед публикацией диагностического отчёта проверьте его вручную.
@@ -285,7 +285,7 @@ Runtime использует тег `TgWsProxy` в logcat. Диагностич�
 | Kotlin | `1.9.22` |
 | compileSdk / targetSdk | `35` / `35` |
 | minSdk | `26` |
-| ABI | `arm64-v8a` |
+| ABI | `armeabi-v7a`, `arm64-v8a`; Universal |
 
 Сборка debug APK:
 
@@ -293,10 +293,10 @@ Runtime использует тег `TgWsProxy` в logcat. Диагностич�
 .\gradlew.bat assembleDebug
 ```
 
-Gradle вызывает native build и генерацию иконок через `preBuild`. Результат:
+Gradle вызывает native build обеих ABI и генерацию иконок через `preBuild`. Создаются `app-armeabi-v7a-debug.apk`, `app-arm64-v8a-debug.apk` и Universal:
 
 ```text
-app\build\outputs\apk\debug\app-debug.apk
+app\build\outputs\apk\debug\app-universal-debug.apk
 ```
 
 Сборка с копированием APK в локальный каталог `artifacts/`:
@@ -311,7 +311,9 @@ app\build\outputs\apk\debug\app-debug.apk
 .\scripts\release.ps1 -Version v1.11.9
 ```
 
-Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует APK + SHA-256 в `dist/`.
+Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует три APK (ARMv7, ARM64, Universal) с отдельными SHA-256 в `dist/`. Все варианты сохраняют один `versionCode`.
+
+Подробные [инструкции по ABI и безопасным тестам](docs/development/android-abis.md), [результаты #162](docs/testing/issue-162-armv7-results.md).
 
 Отдельная сборка Go runtime:
 
@@ -363,7 +365,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 ## Ограничения
 
-- поддерживается только ABI `arm64-v8a`;
+- поддерживаются ARMv7 и ARM64; x86/x86_64 в APK не включаются;
 - приложение является прокси для Telegram, а не системным VPN;
 - доступность маршрутов зависит от сети и внешней инфраструктуры;
 - Consumer WARP provisioning зависит от внешнего API; fresh install может потребовать отдельный bootstrap Worker, если direct registration недоступна. При включённом встроенном bootstrap registration-запрос может пройти через инфраструктуру проекта; эту политику можно отключить в настройках;

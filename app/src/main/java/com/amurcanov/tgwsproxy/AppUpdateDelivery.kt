@@ -113,9 +113,17 @@ object AppUpdateAssetSelector {
     private const val MAX_APK_BYTES = 100L * 1024L * 1024L
     private val sha256Pattern = Regex("^[a-fA-F0-9]{64}$")
 
-    fun select(release: GitHubReleaseInfo): AppUpdateAssetSelection? {
+    fun select(release: GitHubReleaseInfo, supportedAbis: List<String>): AppUpdateAssetSelection? {
         if (release.draft || SemanticVersion.parse(release.tagName) == null) return null
-        val name = "TgWsProxy-Android-${release.tagName}-arm64-v8a.apk"
+        val candidates = supportedAbis.distinct().filter { it in setOf("arm64-v8a", "armeabi-v7a") }
+        if (candidates.isEmpty()) return null
+        for (abi in candidates + "universal") {
+            selectNamed(release, "TgWsProxy-Android-${release.tagName}-$abi.apk")?.let { return it }
+        }
+        return null
+    }
+
+    private fun selectNamed(release: GitHubReleaseInfo, name: String): AppUpdateAssetSelection? {
         val matching = release.assets.filter { it.name == name }
         if (matching.size != 1) return null
         val apk = matching.single()
