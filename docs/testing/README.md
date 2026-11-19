@@ -46,7 +46,7 @@ Automation contract: [../development/github-automation.md](../development/github
 ## Basic build
 
 - [ ] Gradle sync / `.\gradlew.bat assembleDebug`
-- [ ] Install APK (`adb install -r app\build\outputs\apk\debug\app-debug.apk` or `scripts\build-apk.ps1`)
+- [ ] Install APK (`adb install -r app\build\outputs\apk\debug\app-universal-debug.apk` or `scripts\build-apk.ps1`)
 - [ ] Launch app without crash
 
 ## Basic runtime
