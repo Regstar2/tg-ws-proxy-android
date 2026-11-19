@@ -26,7 +26,7 @@ func TestWebSocketTLSNameIsIndependentOfHTTPHost(t *testing.T) {
 			}
 			server, roots, observed := newNativeVerifiedWSTestServer(t, []string{wantSNI}, false)
 
-			ws, err := wsConnectWithCurvesContextDialSNI(
+			ws, err := wsConnectWithCurvesContextDialSNIWithRoots(
 				context.Background(), tc.dialIP, tc.host, tc.serverName, "/apiws", 2,
 				classicalTLSCurves(),
 				func(ctx context.Context, network, address string) (net.Conn, error) {
