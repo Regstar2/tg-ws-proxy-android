@@ -125,6 +125,25 @@ func TestNativeWebSocketRejectsInvalidCertificates(t *testing.T) {
 	}
 }
 
+func TestNativeWebSocketRejectsSelfSignedCertificate(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer server.Close()
+	ws, err := wsConnectWithCurvesContextDialSNIWithRoots(
+		context.Background(), "127.0.0.1", "example.com", "example.com",
+		"/apiws", 2, classicalTLSCurves(), dialNativeVerifiedWSTestServer(server), x509.NewCertPool(),
+	)
+	if ws != nil {
+		ws.Close()
+		t.Fatal("self-signed server without an approved root was accepted")
+	}
+	var verification *tls.CertificateVerificationError
+	if !errors.As(err, &verification) {
+		t.Fatalf("self-signed server failure=%T: %v", err, err)
+	}
+}
+
 func TestNativeWebSocketConfigurationsVerifyHostnames(t *testing.T) {
 	cases := []struct {
 		name string
