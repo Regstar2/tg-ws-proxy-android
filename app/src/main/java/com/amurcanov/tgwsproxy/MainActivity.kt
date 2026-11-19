@@ -1607,20 +1607,31 @@ private fun ProxyScreen(
     val diagLabelCf = stringResource(R.string.diag_test_cf)
     val diagLabelTcp = stringResource(R.string.diag_test_tcp)
     val diagLabelAll = stringResource(R.string.diag_test_all)
-    val copyProxyAddressAction by rememberUpdatedState {
-        val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
-        cm?.setPrimaryClip(ClipData.newPlainText("Proxy address", proxyAddress))
-        Toast.makeText(context, context.getString(R.string.proxy_address_copied), Toast.LENGTH_SHORT).show()
-    }
-    val copyMtProtoTelegramLinkAction by rememberUpdatedState {
-        val link = MtProtoTelegramLinkBuilder.httpsLink(mtProtoConfigFromInput())
+    val copyProxyTelegramLinkAction by rememberUpdatedState {
+        val link = ProxyTelegramLinkBuilder.httpsLink(
+            frontendType = localProxyFrontendType,
+            mtProtoConfig = mtProtoConfigFromInput(),
+            socks5Port = portText.toIntOrNull() ?: 0,
+        )
         if (link == null) {
-            Toast.makeText(context, context.getString(R.string.mtproto_link_unavailable), Toast.LENGTH_SHORT).show()
+            val messageRes = when (localProxyFrontendType) {
+                LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> R.string.mtproto_link_unavailable
+                LocalProxyFrontendType.SOCKS5 -> R.string.socks5_link_unavailable
+            }
+            Toast.makeText(context, context.getString(messageRes), Toast.LENGTH_SHORT).show()
             return@rememberUpdatedState
         }
-        val cm = ContextCompat.getSystemService(context, ClipboardManager::class.java)
-        cm?.setPrimaryClip(ClipData.newPlainText("MTProto proxy link", link))
-        Toast.makeText(context, context.getString(R.string.mtproto_link_copied), Toast.LENGTH_SHORT).show()
+        val clipboard = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+        val clipLabel = when (localProxyFrontendType) {
+            LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> "MTProto proxy link"
+            LocalProxyFrontendType.SOCKS5 -> "SOCKS5 proxy link"
+        }
+        clipboard?.setPrimaryClip(ClipData.newPlainText(clipLabel, link))
+        val copiedMessageRes = when (localProxyFrontendType) {
+            LocalProxyFrontendType.MTPROTO_EXPERIMENTAL -> R.string.mtproto_link_copied
+            LocalProxyFrontendType.SOCKS5 -> R.string.socks5_link_copied
+        }
+        Toast.makeText(context, context.getString(copiedMessageRes), Toast.LENGTH_SHORT).show()
     }
     val shareMtProtoTelegramLinkAction by rememberUpdatedState {
         val link = MtProtoTelegramLinkBuilder.httpsLink(mtProtoConfigFromInput())
@@ -1737,7 +1748,7 @@ private fun ProxyScreen(
                         proxyAddress = proxyAddress,
                         isRunning = isRunning,
                         activeModeLabel = activePolicyChipText,
-                        onCopyAddress = copyProxyAddressAction,
+                        onCopyLink = copyProxyTelegramLinkAction,
                     )
 
                     if (notificationPrefs.showMetricsInApp) {
@@ -1899,7 +1910,7 @@ private fun ProxyScreen(
                             Toast.LENGTH_SHORT,
                         ).show()
                     },
-                    onCopyTelegramLink = copyMtProtoTelegramLinkAction,
+                    onCopyTelegramLink = copyProxyTelegramLinkAction,
                     onShareTelegramLink = shareMtProtoTelegramLinkAction,
                 )
                 if (isRunning) {
