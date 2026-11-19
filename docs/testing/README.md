@@ -2,7 +2,7 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The latest published stable release is v1.11.9. The current source candidate is **v1.11.10/66**, including TLS validation, opt-in WS/80, notification reconnect, Telegram link copying and ARMv7/ARM64/Universal. Verify final signed APKs separately; see [release checklist](../releases/RELEASE_CHECKLIST.md).
+The latest published stable release is v1.11.9. The current source candidate is **v1.11.10/66**, including TLS validation, default-on plaintext WS/80 for unset preferences, notification reconnect, Telegram link copying and ARMv7/ARM64/Universal. Verify final signed APKs separately; see [release checklist](../releases/RELEASE_CHECKLIST.md).
 
 ## v1.11.10 device acceptance
 
