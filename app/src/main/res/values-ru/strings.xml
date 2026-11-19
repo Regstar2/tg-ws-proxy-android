@@ -20,8 +20,9 @@
     <string name="stop_proxy">Выключить прокси</string>
     <string name="apply_telegram">Применить в Telegram</string>
     <string name="apply_telegram_disabled_hint">Сначала включите прокси, затем примените его в Telegram.</string>
-    <string name="copy_proxy_address">Скопировать адрес прокси</string>
-    <string name="proxy_address_copied">Адрес прокси скопирован</string>
+    <string name="copy_proxy_link">Скопировать ссылку прокси</string>
+    <string name="socks5_link_copied">Ссылка SOCKS5 скопирована</string>
+    <string name="socks5_link_unavailable">Ссылка SOCKS5 недоступна: проверьте порт.</string>
     <string name="section_connection">Подключение</string>
     <string name="section_routes">Маршруты</string>
     <string name="section_route_probe">Проверка маршрутов</string>

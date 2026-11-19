@@ -79,6 +79,15 @@ Automation contract: [../development/github-automation.md](../development/github
 - [ ] Apply the recommended/default configuration where applicable
 - [ ] Reset adaptive/runtime statistics where exposed — proxy remains usable
 
+## Copy proxy link
+
+- [ ] With MTProto selected, copy the link using the home-screen icon. Confirm that the clipboard contains `https://t.me/proxy` with the current host, port and secret.
+- [ ] Compare the home-screen MTProto link with **Settings → Connection → Copy link**; the values must match.
+- [ ] Repeat with a valid Fake TLS domain and confirm that the generated secret includes the domain encoding.
+- [ ] Switch to SOCKS5 and copy the link. Confirm `https://t.me/socks?server=127.0.0.1&port=<configured_port>` with no MTProto secret.
+- [ ] For an invalid connection configuration, copying must show a validation message instead of placing a malformed link in the clipboard.
+- [ ] Do not attach real copied MTProto links to reports or logs: they include the connection secret.
+
 ## Route status UI
 
 - [ ] **Mode/policy** matches the configured strategy

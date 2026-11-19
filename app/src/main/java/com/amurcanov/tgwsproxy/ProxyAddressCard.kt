@@ -26,7 +26,7 @@ fun ProxyAddressCard(
     proxyAddress: String,
     isRunning: Boolean,
     activeModeLabel: String,
-    onCopyAddress: () -> Unit,
+    onCopyLink: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     ElevatedCard(
@@ -85,10 +85,10 @@ fun ProxyAddressCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = onCopyAddress) {
+                IconButton(onClick = onCopyLink) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
-                        contentDescription = stringResource(R.string.copy_proxy_address),
+                        contentDescription = stringResource(R.string.copy_proxy_link),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }

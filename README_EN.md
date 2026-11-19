@@ -140,6 +140,10 @@ In-place updates require a matching `applicationId` and compatible signing ident
 
 Without a masking domain, the link uses a `dd<32 hex chars>` secret. With a configured domain, it uses `ee<secret><domain_hex>`.
 
+To copy the configuration for another Telegram client on the **same device**, tap the copy icon next to the proxy address on the home screen. In MTProto mode, it copies an `https://t.me/proxy` link with the current host, port and secret, including the Fake TLS domain when configured. This is the same link produced by **Settings → Connection → Copy link**. Open it in a client that supports proxy links; **Apply in Telegram** still opens Telegram directly.
+
+**Do not publish the copied MTProto link:** it contains the proxy secret. The local address `127.0.0.1` is accessible only from the device running TgWsProxy.
+
 ### WARP / AmneziaWG
 
 Under **Settings → Cloudflare → WARP / AmneziaWG**, you can create a Consumer WARP profile automatically or import an existing `.conf`. Automatically created profiles pass structural validation, bounded autotuning, and full-duplex network validation before they are persisted. At most one profile is selected at a time.
@@ -148,7 +152,7 @@ The `awg_warp` route is used only for connections that Telegram sends to the loc
 
 ### SOCKS5 compatibility mode
 
-Configure Telegram manually:
+In SOCKS5 mode, the home-screen copy icon produces a link such as `https://t.me/socks?server=127.0.0.1&port=1443`, using the current application port. If the Telegram client does not handle this link, configure the connection manually:
 
 ```text
 Host: 127.0.0.1
@@ -157,7 +161,7 @@ Username: empty
 Password: empty
 ```
 
-When the port is changed in the application, use the same value in Telegram.
+When the port is changed in the application, use the same value in Telegram. The SOCKS5 link does not contain an MTProto secret.
 
 ## Operating modes
 
@@ -166,7 +170,7 @@ When the port is changed in the application, use the same value in Telegram.
 | Frontend | Purpose | Limitation |
 |---|---|---|
 | MTProto Proxy | Primary mode applied through an MTProto proxy link | Uses the application's local port only |
-| SOCKS5 / WebSocket | Compatibility with Telegram's manual SOCKS5 configuration | Requires manual host and port entry |
+| SOCKS5 / WebSocket | Compatibility with Telegram's SOCKS5 configuration | Copyable link, or manual host and port entry when the client does not support links |
 
 ### Routes
 

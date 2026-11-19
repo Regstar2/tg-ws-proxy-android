@@ -49,6 +49,23 @@ internal object MtProtoTelegramLinkBuilder {
     }
 }
 
+internal object ProxyTelegramLinkBuilder {
+    fun httpsLink(
+        frontendType: LocalProxyFrontendType,
+        mtProtoConfig: MtProtoProxyConfig,
+        socks5Port: Int,
+    ): String? = when (frontendType) {
+        LocalProxyFrontendType.MTPROTO_EXPERIMENTAL ->
+            MtProtoTelegramLinkBuilder.httpsLink(mtProtoConfig)
+        LocalProxyFrontendType.SOCKS5 ->
+            if (socks5Port in 1..65535) {
+                "https://t.me/socks?server=$DEFAULT_LOCAL_PROXY_HOST&port=$socks5Port"
+            } else {
+                null
+            }
+    }
+}
+
 internal enum class MtProtoUiStatus {
     SOCKS5_WS_STABLE,
     MTPROTO_DISABLED,
