@@ -1,4 +1,4 @@
-# Foreground notifications (through v1.11.7)
+# Foreground notifications
 
 TgWsProxy runs as an Android foreground service while the local MTProto or SOCKS5 frontend is active. Android requires a **visible notification** for foreground services.
 
@@ -9,7 +9,7 @@ TgWsProxy cannot fully remove the notification while the proxy is running. You c
 When the proxy is running:
 
 - **Stop** — stops the proxy service
-- **Reconnect** — restops runtime connections without changing settings
+- **Reconnect** — restarts the active proxy frontend using its saved settings (see lifecycle details below)
 - **Open** — opens the app
 
 When stopped:
@@ -18,6 +18,14 @@ When stopped:
 - **Open** — opens the app
 
 Tap the notification body to open the app (single-top, no duplicate stack).
+
+### Reconnect lifecycle
+
+The notification's `ACTION_RECONNECT` is handled by `ProxyService.reconnectProxy()`. For a running MTProto frontend, it calls `stopProxy()` **before** `startProxy(lastPort, lastIps, lastPoolSize, type)`. The native listener must release its local TCP port before `MtProtoLocalProxyFrontend.start()` checks availability and binds again. Starting a second listener first would incorrectly report `PORT_BUSY` against the proxy's own port.
+
+This is a full MTProto restart: active proxy sessions are interrupted and the foreground service notification is rebuilt. The saved port, route configuration and pool size are reused. SOCKS5 retains its existing `restartSocks5()` path; reconnecting from a stopped state uses a valid saved configuration. The `ACTION_RECONFIGURE` route-policy hot-update path is separate and does not stop the MTProto listener.
+
+**Device check:** start MTProto, confirm that Telegram connects, use **Reconnect** in the notification, and verify that no erroneous "Port busy" message appears and Telegram reconnects. Repeat, then check Stop/Start. The owner confirmed that notification reconnect works on an Android device with the fixed test build on 2026-11-19. Automated SystemUI coverage and additional-device compatibility were not established.
 
 ## Icons
 
