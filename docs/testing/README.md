@@ -7,7 +7,7 @@ The latest published stable release is v1.11.9. The current source candidate is 
 ## v1.11.10 device acceptance
 
 - [ ] Verify Android CA trust roots, CF WSS/443, Direct WS, Worker Legacy and Chunk Relay with valid upstream certificates; controlled invalid certificates must fail.
-- [ ] Test explicit WS/80 without TLS on Wi-Fi and cellular; keep WSS/443 as default.
+- [ ] Test default-on WS/80 on new preferences, explicit false/WSS/443, persistence after restart and synchronization with the Quick Settings runtime. Repeat on Wi-Fi and cellular.
 - [ ] Test MTProto notification reconnect, MTProto/Fake TLS/SOCKS5 copied links, real message/media transfer and route fallback.
 - [ ] Test ARMv7, ARM64 and Universal native/JNA on supported devices, and in-place signed upgrade from v1.11.9; emulator translation failures are not PASS.
 

@@ -21,7 +21,7 @@
 
 - [ ] Проверены Android CA trust roots, валидный WSS/443 CF DC2/DC4, IP fallback, Direct WS и оба Worker-транспорта.
 - [ ] Некорректные CA и hostname отклонены в контролируемой TLS fixture; нет trust-all.
-- [ ] Явный WS/80 default-off и безопасность plaintext описаны и проверены; нет скрытой смены route policy.
+- [ ] WS/80 включён по умолчанию при отсутствии сохранённой настройки, явный false сохраняет WSS/443 после перезапуска; предупреждение о plaintext и route policy проверены.
 - [ ] MTProto reconnect из уведомления, SOCKS5 regression и копирование Telegram ссылок проверены.
 - [ ] Сообщения и медиа Telegram, переключение Wi-Fi/mobile, контроль фактического backend проверены.
 - [ ] ARMv7, ARM64, Universal и native/JNA проверены на подходящих физических устройствах; эмуляторные SIGSEGV/SIGABRT не помечены PASS.

@@ -57,7 +57,7 @@ Outbound route kinds:
 - `awg_warp` (userspace AWG/WARP, no VpnService);
 - `tcp_fallback`.
 
-WebSocket is a transport, not a route kind. CF Proxy defaults to verified WSS/443; opt-in WS/80 is plaintext and unauthenticated. These choices share the cf_proxy_ws route.
+WebSocket is a transport, not a route kind. In v1.11.10, CF Proxy defaults to plaintext WS/80 for an unset preference. Persisted false preserves verified WSS/443; persisted true selects WS/80. This transport is unauthenticated and unencrypted. These choices share the cf_proxy_ws route.
 
 ## Build toolchain
 

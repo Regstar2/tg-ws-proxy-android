@@ -233,7 +233,7 @@ Detailed design: [docs/architecture/architecture.md](docs/architecture/architect
 
 ## Security
 
-Native TLS now validates the upstream CA chain and hostname (PR #167). Standard CF Proxy WSS/443 remains the default; explicitly enabled WS/80 is **plaintext and unauthenticated**. Android CA acceptance remains pending (#158).
+Native TLS now validates the upstream CA chain and hostname (PR #167). In v1.11.10, CF Proxy defaults to WS/80 **without TLS encryption or server authentication** when no preference is saved. Turn off “CF Proxy without TLS” to use verified WSS/443. Explicitly saved choices are preserved. Android CA acceptance remains pending (#158).
 
 - MTProto secrets, query parameters, and sensitive addresses are masked in the interface, diagnostic reports, and logs where the implementation supports it.
 - The WARP/AWG private key is generated/stored locally in app-private storage and is not sent to the Consumer WARP API; only the public key and required registration metadata are sent externally.
@@ -340,7 +340,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Before publishing v1.11.10, verify signed APKs for all three variants, Android TLS CA roots and real WSS/Worker transport, in-place update from v1.11.9, notification reconnect and Telegram media. Optional WS/80 is plaintext and unauthenticated. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
+Before publishing v1.11.10, verify signed APKs for all three variants, Android TLS CA roots and real WSS/Worker transport, in-place update from v1.11.9, notification reconnect and Telegram media. WS/80 is enabled by default for unset preferences and is plaintext and unauthenticated. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 

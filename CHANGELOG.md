@@ -9,7 +9,7 @@ All notable user-facing changes are listed here. Detailed notes for older releas
 - Исправлено переподключение MTProto из уведомления: существующий TCP listener освобождается перед повторным запуском (PR #165). Подтверждено владельцем на Android; автоматического SystemUI-теста нет.
 - Главная кнопка копирует Telegram-ссылку с актуальными MTProto secret/Fake TLS или SOCKS5 параметрами, как в настройках (PR #166). CI и Android clipboard smoke подтверждены владельцем.
 - Native WSS/HTTPS/uTLS подключение проверяет сертификат и hostname, ошибка верификации не ведёт к ослабленному TLS fallback (PR #167, первая часть #158). Реальные Android CA и все transport-пути ещё требуют итогового smoke.
-- Добавлен явный экспериментальный Cloudflare Proxy WS/80 без TLS, выключенный по умолчанию (PR #169). На Xiaomi отдельной ветки: Wi-Fi 12/12, mobile 7/12; пять мобильных запросов завершились timeout.
+- В 1.11.10 CF Proxy без TLS (WS/80) включён по умолчанию при отсутствии сохранённого выбора (PR #169). Явно выбранный WSS/443 не перезаписывается; отключение переключателя включает TLS/443. WS/80 не шифрует внешний участок и не проверяет сервер. На Xiaomi отдельной ветки: Wi-Fi 12/12, mobile 7/12; пять мобильных timeout.
 - Подготовлены ARMv7, ARM64 и Universal APK, ABI-aware updater и выпуск трёх подписанных APK с тремя SHA-256 (PR #170, #162). Native/JNA работал на Xiaomi; ARM translation на x86-эмуляторах завершалась сбоями.
 - Version metadata 1.11.10 / 66 и документация подготовлены, но финальная подписанная сборка и exact-tag CI не проверены.
 

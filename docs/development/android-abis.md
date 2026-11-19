@@ -18,6 +18,8 @@ Set-Location C:\Base\projects\TGWSProxyAndroid
 .\scripts\release.ps1 -Version v1.11.10
 ```
 
+In v1.11.10, CF Proxy defaults to plaintext WS/80 if no preference is saved; persisted false selects verified WSS/443. This is a transport default, not an ABI change. For WSS/443, turn off CF Proxy without TLS.
+
 Signed in-place debug smoke: scripts/build-signed-worker-smoke.ps1 -Install. This requires the original release keystore in local release-signing.env; signed Debug uses versionCode 66, ordinary debug uses 67 and a different signer. Do not uninstall existing data to work around a signing conflict.
 
 Gradle preBuild compiles both Go/CGO shared libraries. The native script verifies

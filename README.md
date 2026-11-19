@@ -234,7 +234,7 @@ Android-часть написана на Kotlin и Jetpack Compose. Нативн
 
 ## Безопасность
 
-Native TLS теперь проверяет CA chain и hostname upstream (PR #167). По умолчанию CF Proxy использует WSS/443; отдельно включаемый WS/80 **не имеет TLS и аутентификации сервера**. Проверка Android CA на финальном APK ещё требуется (#158).
+Native TLS теперь проверяет CA chain и hostname upstream (PR #167). В 1.11.10 при отсутствии сохранённого выбора CF Proxy использует WS/80 **без TLS и аутентификации сервера**. Для защищённого WSS/443 выключите «CF Proxy без TLS». Явно сохранённый выбор пользователя сохраняется. Проверка Android CA на финальном APK ещё требуется (#158).
 
 - MTProto secret, query-параметры и чувствительные адреса маскируются в интерфейсе, диагностических отчётах и логах там, где это предусмотрено реализацией.
 - WARP/AWG private key генерируется/хранится локально в app-private storage и не отправляется Consumer WARP API; наружу передаётся только public key и необходимые registration metadata.
@@ -341,7 +341,7 @@ app\build\outputs\apk\debug\app-universal-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Перед публикацией v1.11.10 необходимы проверка всех трёх подписанных APK, системных Android CA и реального WSS/Worker, обновления поверх v1.11.9, переподключения из уведомления и передачи Telegram-медиа. Опциональный WS/80 работает без TLS и аутентификации сервера. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
+Перед публикацией v1.11.10 необходимы проверка всех трёх подписанных APK, системных Android CA и реального WSS/Worker, обновления поверх v1.11.9, переподключения из уведомления и передачи Telegram-медиа. WS/80 включён по умолчанию при отсутствии сохранённого значения и работает без TLS и аутентификации сервера. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
