@@ -425,10 +425,19 @@ private fun UpdateScreen(modifier: Modifier, autoDownload: Boolean, quickHandoff
                                 fontWeight = FontWeight.SemiBold,
                             )
                             if (sourceRelease != null) {
-                                val size = AppUpdateAssetSelector.select(sourceRelease)?.apk?.size
-                                if (size != null) {
+                                val selection = AppUpdateAssetSelector.select(sourceRelease)
+                                if (selection != null) {
+                                    val abiLabel = if (selection.nativeAbis.size == 1) {
+                                        stringResource(R.string.update_abi_arm64)
+                                    } else {
+                                        stringResource(R.string.update_abi_universal)
+                                    }
                                     Text(
-                                        stringResource(R.string.update_size_abi, size / 1048576.0),
+                                        stringResource(
+                                            R.string.update_size_abi,
+                                            selection.apk.size / 1048576.0,
+                                            abiLabel,
+                                        ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

@@ -112,7 +112,7 @@ class AppUpdateInstaller(private val context: Context) {
             }
             val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
             if (actualHash != expectedHash) throw UpdateInstallException("APK SHA-256 mismatch")
-            verifySignedPackage(pendingFile)
+            verifySignedPackage(pendingFile, selection.nativeAbis)
             if (!pendingFile.renameTo(verifiedFile)) throw UpdateInstallException("Unable to finalize APK")
             verifiedFile
         } catch (error: Exception) {
@@ -126,7 +126,7 @@ class AppUpdateInstaller(private val context: Context) {
     }
 
     @Suppress("DEPRECATION")
-    private fun verifySignedPackage(file: File) {
+    private fun verifySignedPackage(file: File, expectedNativeAbis: Set<String>) {
         val result = ApkVerifier.Builder(file)
             .setMinCheckedPlatformVersion(Build.VERSION.SDK_INT)
             .build()
@@ -157,12 +157,14 @@ class AppUpdateInstaller(private val context: Context) {
             throw UpdateInstallException("APK requires newer Android")
         }
         ZipFile(file).use { zip ->
-            val abiNames = zip.entries().asSequence()
-                .filter { !it.isDirectory && it.name.startsWith("lib/") && it.name.endsWith(".so") }
-                .mapNotNull { it.name.split('/').getOrNull(1) }
-                .toSet()
-            if (abiNames != setOf("arm64-v8a")) {
-                throw UpdateInstallException("APK native libraries do not match arm64-v8a")
+            val entries = zip.entries().asSequence()
+                .filterNot { it.isDirectory }
+                .map { it.name }
+                .toList()
+            if (!UpdateApkAbiValidator.hasExpectedNativeLibraries(entries, expectedNativeAbis)) {
+                throw UpdateInstallException(
+                    "APK native libraries do not match expected ABI set: ${expectedNativeAbis.sorted().joinToString()}",
+                )
             }
         }
         val installedSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

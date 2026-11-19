@@ -118,6 +118,16 @@ fun AwgWarpProfilesPage(
                     uri = uri,
                     name = context.getString(R.string.awg_warp_imported_profile_name),
                 )
+                val importError = result.exceptionOrNull()
+                if (importError != null) {
+                    AppLogger.e(
+                        context = context,
+                        category = AppLogCategory.UI,
+                        message = "AWG profile import failed",
+                        details = mapOf("exception" to importError.javaClass.name),
+                        tr = importError.takeIf { BuildConfig.DEBUG },
+                    )
+                }
                 importBusy = false
                 message = if (result.isSuccess) {
                     context.getString(R.string.awg_warp_import_success)

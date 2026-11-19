@@ -50,7 +50,9 @@
     <string name="update_permission_settings_unavailable">Could not open the Android install-source settings. Check this permission in system settings, then retry.</string>
     <string name="update_asset_unavailable">Automatic install is unavailable: the official APK or checksum is missing. Open the release page.</string>
     <string name="update_download_failed">Could not safely download or verify the APK. Try again or open the release page.</string>
-    <string name="update_size_abi">%1$.1f MB · arm64-v8a</string>
+    <string name="update_size_abi">%1$.1f MB · %2$s</string>
+    <string name="update_abi_universal">universal</string>
+    <string name="update_abi_arm64">arm64-v8a</string>
     <string name="update_progress">%1$.1f of %2$.1f MB · %3$d%%</string>
     <string name="update_reminders">Remind me about updates</string>
     <string name="update_reminders_hint">When opening the app</string>

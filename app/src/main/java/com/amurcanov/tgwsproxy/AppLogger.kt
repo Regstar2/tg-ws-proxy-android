@@ -57,7 +57,13 @@ object AppLogger {
         val prefs = PersistentLoggingPrefsStore.load(
             context.getSharedPreferences("ProxyPrefs", Context.MODE_PRIVATE),
         )
-        PersistentLogStore.log(context, prefs, safe)
+        val persistentEvent = if (BuildConfig.DEBUG && tr != null) {
+            val stackTrace = AppLogSanitizer.sanitizeText(tr.stackTraceToString()).take(16_384)
+            safe.copy(details = safe.details + ("stacktrace" to stackTrace))
+        } else {
+            safe
+        }
+        PersistentLogStore.log(context, prefs, persistentEvent)
     }
 }
 

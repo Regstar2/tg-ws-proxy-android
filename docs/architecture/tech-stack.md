@@ -21,7 +21,7 @@ Android configuration:
 - `compileSdk 35`;
 - `targetSdk 35`;
 - `minSdk 26` (Android 8.0+);
-- supported ABI: `arm64-v8a`;
+- supported ABIs: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`;
 - application id: `com.amurcanov.tgwsproxy`.
 
 The currently published application version in the build metadata is `1.10.12` (`versionCode 50`). `v1.10.13` is the active development target and must not be presented as released until its release gate is complete.
@@ -34,6 +34,9 @@ The Android build produces:
 
 ```text
 app/src/main/jniLibs/arm64-v8a/libtgwsproxy.so
+app/src/main/jniLibs/armeabi-v7a/libtgwsproxy.so
+app/src/main/jniLibs/x86/libtgwsproxy.so
+app/src/main/jniLibs/x86_64/libtgwsproxy.so
 ```
 
 The Gradle `preBuild` task invokes `scripts/build-native-android.ps1`, then the library is packaged into the APK and accessed from Kotlin through JNA/CGO bridge functions.

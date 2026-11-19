@@ -160,11 +160,23 @@ func (cfg *awgWarpConfig) parseInterfaceField(key, value string, seenOptions map
 		if _, exists := seenOptions[uapiKey]; exists {
 			return fmt.Errorf("duplicate %s", key)
 		}
-		if err := validateAwgWarpDeviceOption(uapiKey, value); err != nil {
+		normalizedValue := value
+		switch uapiKey {
+		case "random_trailers", "disable_cookies":
+			switch strings.ToLower(value) {
+			case "on", "true", "1":
+				normalizedValue = "true"
+			case "off", "false", "0":
+				normalizedValue = "false"
+			default:
+				return fmt.Errorf("%s must be on/off or true/false", key)
+			}
+		}
+		if err := validateAwgWarpDeviceOption(uapiKey, normalizedValue); err != nil {
 			return err
 		}
 		seenOptions[uapiKey] = struct{}{}
-		cfg.deviceOptions = append(cfg.deviceOptions, awgWarpOption{key: uapiKey, value: value})
+		cfg.deviceOptions = append(cfg.deviceOptions, awgWarpOption{key: uapiKey, value: normalizedValue})
 		return nil
 	}
 }
@@ -343,6 +355,24 @@ func awgWarpDeviceOptionKey(normalized string) (string, bool) {
 	switch normalized {
 	case "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5":
 		return normalized, true
+	case "headerprotectionkey":
+		return "header_protection_key", true
+	case "contentpaddingaddition":
+		return "content_padding_addition", true
+	case "rekeyaftertime":
+		return "rekey_after_time", true
+	case "rekeytimeout":
+		return "rekey_timeout", true
+	case "rejectaftertime":
+		return "reject_after_time", true
+	case "keepalivetimeout":
+		return "keepalive_timeout", true
+	case "maxhandshakeattempts":
+		return "max_handshake_attempts", true
+	case "randomtrailers":
+		return "random_trailers", true
+	case "disablecookies":
+		return "disable_cookies", true
 	default:
 		return "", false
 	}
@@ -357,6 +387,34 @@ func validateAwgWarpDeviceOption(key, value string) error {
 	case "s1", "s2", "s3", "s4":
 		if _, err := strconv.ParseUint(value, 10, 16); err != nil {
 			return fmt.Errorf("%s must be an unsigned 16-bit integer", strings.ToUpper(key))
+		}
+	case "header_protection_key":
+		decoded, err := hex.DecodeString(value)
+		if err != nil || len(decoded) != 32 {
+			return errors.New("HEADER_PROTECTION_KEY must be 32 bytes of hex")
+		}
+	case "content_padding_addition", "rekey_after_time", "rekey_timeout", "reject_after_time", "keepalive_timeout", "max_handshake_attempts":
+		parts := strings.Split(value, "-")
+		if len(parts) < 1 || len(parts) > 2 {
+			return fmt.Errorf("%s must be an unsigned 32-bit integer or range", key)
+		}
+		lo, err := strconv.ParseUint(parts[0], 10, 32)
+		if err != nil {
+			return fmt.Errorf("%s has an invalid lower bound", key)
+		}
+		hi := lo
+		if len(parts) == 2 {
+			hi, err = strconv.ParseUint(parts[1], 10, 32)
+			if err != nil {
+				return fmt.Errorf("%s has an invalid upper bound", key)
+			}
+		}
+		if hi < lo {
+			return fmt.Errorf("%s range upper bound is below lower bound", key)
+		}
+	case "random_trailers", "disable_cookies":
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%s must be a boolean", key)
 		}
 	case "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5":
 		if strings.TrimSpace(value) == "" {

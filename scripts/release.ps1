@@ -38,7 +38,7 @@ if (-not (Test-Path $releaseNotes)) {
     throw "Release notes were not found for ${Version}: $releaseNotes"
 }
 
-$artifactName = "TgWsProxy-Android-$Version-arm64-v8a.apk"
+$artifactName = "TgWsProxy-Android-$Version-universal.apk"
 Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode artifact=$artifactName"
 
 if ($PreflightOnly) {

@@ -301,6 +301,11 @@ object AwgWarpConfigParser {
         "s1", "s2", "s3", "s4",
         "h1", "h2", "h3", "h4",
         "i1", "i2", "i3", "i4", "i5",
+        "headerprotectionkey",
+        "contentpaddingaddition",
+        "rekeyaftertime", "rekeytimeout", "rejectaftertime",
+        "keepalivetimeout", "maxhandshakeattempts",
+        "randomtrailers", "disablecookies",
     )
 
     fun parse(text: String): Result<AwgWarpConfigDetails> = runCatching {
@@ -400,8 +405,19 @@ object AwgWarpConfigParser {
         require(decoded?.size == 32) { "Invalid WireGuard key" }
     }
 
-    private fun keyCanonical(normalized: String): String = when {
-        normalized.startsWith("jc") -> if (normalized == "jc") "Jc" else normalized.replaceFirstChar(Char::uppercase)
+    private fun keyCanonical(normalized: String): String = when (normalized) {
+        "jc" -> "Jc"
+        "jmin" -> "Jmin"
+        "jmax" -> "Jmax"
+        "headerprotectionkey" -> "HeaderProtectionKey"
+        "contentpaddingaddition" -> "ContentPaddingAddition"
+        "rekeyaftertime" -> "RekeyAfterTime"
+        "rekeytimeout" -> "RekeyTimeout"
+        "rejectaftertime" -> "RejectAfterTime"
+        "keepalivetimeout" -> "KeepaliveTimeout"
+        "maxhandshakeattempts" -> "MaxHandshakeAttempts"
+        "randomtrailers" -> "RandomTrailers"
+        "disablecookies" -> "DisableCookies"
         else -> normalized.replaceFirstChar(Char::uppercase)
     }
 

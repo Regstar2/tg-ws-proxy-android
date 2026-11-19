@@ -9,19 +9,27 @@ val releaseVersionName = "1.11.9"
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
-    val script = rootProject.file("scripts/build-native-android.ps1")
+    val isTermux = System.getenv("PREFIX")?.contains("com.termux") == true
+    val script = rootProject.file(
+        if (isTermux) "scripts/build-native-android-termux.sh"
+        else "scripts/build-native-android.ps1"
+    )
     val nativeDir = rootProject.file("native/tgwsproxy")
     val goSources = files(
         rootProject.fileTree(nativeDir) { include("**/*.go", "go.mod", "go.sum") },
     )
-    val output = project.file("src/main/jniLibs/arm64-v8a/libtgwsproxy.so")
     val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
 
     inputs.file(script)
     inputs.files(goSources)
-    outputs.file(output)
+    outputs.dir(project.file("src/main/jniLibs"))
+    outputs.dir(rootProject.file("artifacts/native"))
     workingDir = rootProject.projectDir
-    commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+    if (isTermux) {
+        commandLine("bash", script.absolutePath)
+    } else {
+        commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+    }
 }
 
 val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
@@ -31,8 +39,11 @@ val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
     inputs.file(rootProject.file("icon.png"))
     outputs.dir(project.file("src/main/res"))
     workingDir = rootProject.projectDir
+    val isTermux = System.getenv("PREFIX")?.contains("com.termux") == true
     if (isWindows) {
         commandLine("py", "-3", script.absolutePath)
+    } else if (isTermux) {
+        commandLine("python", script.absolutePath)
     } else {
         commandLine("python3", script.absolutePath)
     }
@@ -45,6 +56,7 @@ tasks.named("preBuild") {
 android {
     namespace = "com.amurcanov.tgwsproxy"
     compileSdk = 35
+    buildToolsVersion = providers.gradleProperty("androidBuildToolsVersion").orElse(if (System.getenv("PREFIX")?.contains("com.termux") == true) "37.0.0" else "35.0.0").get()
 
     defaultConfig {
         applicationId = "io.github.regstar2.tgwsproxy"
@@ -59,7 +71,9 @@ android {
         }
 
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(
+                listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            )
         }
     }
 
@@ -81,6 +95,10 @@ android {
 
     buildTypes {
         debug {
+            // Keep signed Worker smoke builds upgrade-compatible with the installed release app.
+            if (!signedWorkerSmoke) {
+                applicationIdSuffix = ".debug"
+            }
             versionNameSuffix = "-debug"
             if (signedWorkerSmoke) {
                 signingConfig = signingConfigs.findByName("release")
@@ -109,6 +127,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"

@@ -23,10 +23,11 @@ object PersistentLoggingPrefsStore {
     private const val KEY_MAX_SIZE_MB = "persistent_logs_max_size_mb"
 
     fun load(prefs: SharedPreferences): PersistentLoggingPrefs {
-        val enabled = prefs.getBoolean(KEY_ENABLED, false)
-        val verbosityName = prefs.getString(KEY_VERBOSITY, PersistentLogVerbosity.IMPORTANT.name)
+        val defaultVerbosity = if (BuildConfig.DEBUG) PersistentLogVerbosity.DEBUG else PersistentLogVerbosity.IMPORTANT
+        val enabled = prefs.getBoolean(KEY_ENABLED, BuildConfig.DEBUG)
+        val verbosityName = prefs.getString(KEY_VERBOSITY, defaultVerbosity.name)
         val verbosity = runCatching { PersistentLogVerbosity.valueOf(verbosityName ?: "") }
-            .getOrDefault(PersistentLogVerbosity.IMPORTANT)
+            .getOrDefault(defaultVerbosity)
         val retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 7).coerceAtLeast(1)
         val maxMb = prefs.getInt(KEY_MAX_SIZE_MB, 50).coerceAtLeast(10)
         val maxBytes = maxMb.toLong() * 1024L * 1024L

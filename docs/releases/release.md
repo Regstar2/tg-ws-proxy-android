@@ -5,8 +5,8 @@
 ## Метаданные
 
 - Версия `1.11.9`, `versionCode 65`, тег `v1.11.9`.
-- Пакет `io.github.regstar2.tgwsproxy`, Android 8.0+, `arm64-v8a`.
-- Ожидаемые assets: `TgWsProxy-Android-v1.11.9-arm64-v8a.apk` и `TgWsProxy-Android-v1.11.9-arm64-v8a.apk.sha256`.
+- Пакет `io.github.regstar2.tgwsproxy`, Android 8.0+, четыре ABI: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`.
+- Ожидаемые assets: `TgWsProxy-Android-v1.11.9-universal.apk` и `TgWsProxy-Android-v1.11.9-universal.apk.sha256`.
 - [RU notes](v1.11.9.md) · [EN notes](v1.11.9_EN.md) · [GitHub notes](RELEASE_NOTES_v1.11.9.md) · [GO/NO-GO](RELEASE_CHECKLIST.md).
 
 ## До создания тега

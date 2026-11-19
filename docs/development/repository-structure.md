@@ -38,7 +38,7 @@ Android-приложение: Kotlin, Jetpack Compose UI, `ProxyService`, нас
 Собранная библиотека:
 
 ```text
-app/src/main/jniLibs/arm64-v8a/libtgwsproxy.so
+app/src/main/jniLibs/<ABI>/libtgwsproxy.so (four Android ABIs)
 ```
 
 Она генерируется build-процессом и в Git не коммитится.

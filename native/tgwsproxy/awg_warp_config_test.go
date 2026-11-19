@@ -143,3 +143,34 @@ func TestAwgWarpUAPIConfigOrdersDeviceOptionsBeforePeer(t *testing.T) {
 		t.Fatal("UAPI config is missing AllowedIPs")
 	}
 }
+
+func TestParseAwgWarpConfigSupportsAWG31Options(t *testing.T) {
+	options := "ContentPaddingAddition = 27-97\n" +
+		"RekeyAfterTime = 116-131\n" +
+		"RekeyTimeout = 6-9\n" +
+		"RejectAfterTime = 171-196\n" +
+		"KeepaliveTimeout = 9-16\n" +
+		"MaxHandshakeAttempts = 18-26\n" +
+		"RandomTrailers = on\n" +
+		"DisableCookies = on\n"
+	configText := strings.Replace(awgWarpTestConfig, "I1 = <r 10>\n", "I1 = <r 10>\n"+options, 1)
+	cfg, err := parseAwgWarpConfig(configText)
+	if err != nil {
+		t.Fatalf("parse AWG 3.1 config: %v", err)
+	}
+	uapi := cfg.uapiConfig()
+	for _, expected := range []string{
+		"content_padding_addition=27-97\n",
+		"rekey_after_time=116-131\n",
+		"rekey_timeout=6-9\n",
+		"reject_after_time=171-196\n",
+		"keepalive_timeout=9-16\n",
+		"max_handshake_attempts=18-26\n",
+		"random_trailers=true\n",
+		"disable_cookies=true\n",
+	} {
+		if !strings.Contains(uapi, expected) {
+			t.Errorf("UAPI config missing %q", expected)
+		}
+	}
+}

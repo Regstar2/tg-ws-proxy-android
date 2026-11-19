@@ -107,18 +107,34 @@ data class AppUpdateAssetSelection(
     val apk: GitHubReleaseAsset,
     val checksum: GitHubReleaseAsset?,
     val metadataSha256: String?,
+    val nativeAbis: Set<String>,
 )
 
 object AppUpdateAssetSelector {
     private const val MAX_APK_BYTES = 100L * 1024L * 1024L
     private val sha256Pattern = Regex("^[a-fA-F0-9]{64}$")
+    private val universalAbis = setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+    private val legacyArm64Abis = setOf("arm64-v8a")
 
     fun select(release: GitHubReleaseInfo): AppUpdateAssetSelection? {
         if (release.draft || SemanticVersion.parse(release.tagName) == null) return null
-        val name = "TgWsProxy-Android-${release.tagName}-arm64-v8a.apk"
-        val matching = release.assets.filter { it.name == name }
-        if (matching.size != 1) return null
-        val apk = matching.single()
+
+        val universalName = "TgWsProxy-Android-${release.tagName}-universal.apk"
+        val legacyName = "TgWsProxy-Android-${release.tagName}-arm64-v8a.apk"
+        val universalMatches = release.assets.filter { it.name == universalName }
+        val legacyMatches = release.assets.filter { it.name == legacyName }
+        if (universalMatches.size > 1 || legacyMatches.size > 1) return null
+
+        // Prefer the universal artifact when both formats exist; retain ARM64-only
+        // support so already-published releases remain eligible for in-app updates.
+        val (name, apk, nativeAbis) = when {
+            universalMatches.size == 1 ->
+                Triple(universalName, universalMatches.single(), universalAbis)
+            legacyMatches.size == 1 ->
+                Triple(legacyName, legacyMatches.single(), legacyArm64Abis)
+            else -> return null
+        }
+
         if (apk.size !in 1..MAX_APK_BYTES ||
             apk.contentType !in setOf(
                 "application/vnd.android.package-archive",
@@ -126,6 +142,7 @@ object AppUpdateAssetSelector {
             ) ||
             !isOfficialAssetUrl(apk.downloadUrl, release.tagName, name)
         ) return null
+
         val checksums = release.assets.filter { it.name == "$name.sha256" }
         if (checksums.size > 1) return null
         val checksum = checksums.singleOrNull()?.takeIf {
@@ -136,7 +153,7 @@ object AppUpdateAssetSelector {
             it.substringAfter(':').takeIf(sha256Pattern::matches)?.lowercase() ?: return null
         }
         if (digest == null && checksum == null) return null
-        return AppUpdateAssetSelection(apk, checksum, digest)
+        return AppUpdateAssetSelection(apk, checksum, digest, nativeAbis)
     }
 
     private fun isOfficialAssetUrl(url: String, tag: String, name: String): Boolean {

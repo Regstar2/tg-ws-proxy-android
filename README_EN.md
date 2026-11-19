@@ -94,7 +94,7 @@ When Telegram cannot connect, open the built-in diagnostics and test the selecte
 ### For use
 
 - Android 8.0 or newer (`minSdk 26`);
-- an `arm64-v8a` device;
+- one of the supported ABIs: `arm64-v8a`, `armeabi-v7a`, `x86`, or `x86_64`;
 - Telegram installed;
 - a network where at least one allowed route is available.
 
@@ -280,7 +280,7 @@ Current toolchain:
 | Kotlin | `1.9.22` |
 | compileSdk / targetSdk | `35` / `35` |
 | minSdk | `26` |
-| ABI | `arm64-v8a` |
+| ABI | `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` |
 
 Build a debug APK:
 
@@ -358,7 +358,7 @@ As of **v1.11.5**, every tile start rebuilds the runtime from **current saved se
 
 ## Limitations
 
-- only the `arm64-v8a` ABI is supported;
+- supported ABIs: `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`;
 - the application is a Telegram proxy, not a system-wide VPN;
 - route availability depends on the network and external infrastructure;
 - Consumer WARP provisioning depends on an external API; a fresh install may require the Worker bootstrap when direct registration is unavailable;

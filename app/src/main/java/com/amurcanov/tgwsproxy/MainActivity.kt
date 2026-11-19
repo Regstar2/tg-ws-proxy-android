@@ -1000,7 +1000,7 @@ private fun ProxyScreen(
             DiagnosticsViewModel.onScreenOpened()
             diagnosticsViewModel.syncRuntimeRoute(enrichedRuntimeRoute())
             diagnosticsViewModel.loadFromRepository()
-            val persistentEnabled = prefs.getBoolean("persistent_logs_enabled", false)
+            val persistentEnabled = PersistentLoggingPrefsStore.load(prefs).enabled
             val bytes = PersistentLogStore.totalSizeBytes(context)
             diagnosticsViewModel.updatePersistentLogsState(
                 enabled = persistentEnabled,
@@ -2707,12 +2707,11 @@ private fun ProxyScreen(
 
                 // Persistent file logging (optional)
                 var persistentEnabled by rememberSaveable {
-                    mutableStateOf(prefs.getBoolean("persistent_logs_enabled", false))
+                    mutableStateOf(PersistentLoggingPrefsStore.load(prefs).enabled)
                 }
                 var persistentLevelName by rememberSaveable {
                     mutableStateOf(
-                        prefs.getString("persistent_logs_level", PersistentLogVerbosity.IMPORTANT.name)
-                            ?: PersistentLogVerbosity.IMPORTANT.name
+                        PersistentLoggingPrefsStore.load(prefs).verbosity.name
                     )
                 }
                 var retentionDays by rememberSaveable {

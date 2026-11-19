@@ -162,7 +162,12 @@ jobs:
                   throw "Existing release '$tag' is not the expected published stable release."
               }
 
-              $apkName = "TgWsProxy-Android-$tag-arm64-v8a.apk"
+              $apkCandidates = @("TgWsProxy-Android-$tag-universal.apk", "TgWsProxy-Android-$tag-arm64-v8a.apk")
+              $matchingApks = @($release.assets | Where-Object { $_.name -in $apkCandidates })
+              if ($matchingApks.Count -ne 1) {
+                  throw "Existing release $tag must contain exactly one supported APK asset."
+              }
+              $apkName = $matchingApks[0].name
               $checksumName = "$apkName.sha256"
               $expectedNames = @($apkName, $checksumName) | Sort-Object
               $actualNames = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
@@ -315,7 +320,7 @@ jobs:
               throw "Expected exactly one APK and one SHA-256 file in dist/; found files=$($files.Count), APK=$($apk.Count), checksum=$($checksums.Count)."
           }
 
-          $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-arm64-v8a.apk"
+          $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-universal.apk"
           $checksumName = "$apkName.sha256"
           if ($apk[0].Name -cne $apkName -or $checksums[0].Name -cne $checksumName) {
               throw "Release artifact names do not match the expected versioned names."

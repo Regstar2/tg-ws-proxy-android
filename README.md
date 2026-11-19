@@ -95,7 +95,7 @@ TgWsProxy запускает локальный прокси на Android-уст
 ### Для использования
 
 - Android 8.0 или новее (`minSdk 26`);
-- устройство с ABI `arm64-v8a`;
+- ABI устройства: `arm64-v8a`, `armeabi-v7a`, `x86` или `x86_64`;
 - установленный Telegram;
 - сеть, в которой доступен хотя бы один разрешённый маршрут.
 
@@ -281,7 +281,7 @@ Runtime использует тег `TgWsProxy` в logcat. Диагностич�
 | Kotlin | `1.9.22` |
 | compileSdk / targetSdk | `35` / `35` |
 | minSdk | `26` |
-| ABI | `arm64-v8a` |
+| ABI | `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` |
 
 Сборка debug APK:
 
@@ -359,7 +359,7 @@ app\build\outputs\apk\debug\app-debug.apk
 
 ## Ограничения
 
-- поддерживается только ABI `arm64-v8a`;
+- поддерживаются ABI `arm64-v8a`, `armeabi-v7a`, `x86` и `x86_64`;
 - приложение является прокси для Telegram, а не системным VPN;
 - доступность маршрутов зависит от сети и внешней инфраструктуры;
 - Consumer WARP provisioning зависит от внешнего API; fresh install может потребовать отдельный bootstrap Worker, если direct registration недоступна. При включённом встроенном bootstrap registration-запрос может пройти через инфраструктуру проекта; эту политику можно отключить в настройках;

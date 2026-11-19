@@ -7,19 +7,12 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $sourceDir = Join-Path $repoRoot "native\tgwsproxy"
-$artifactDir = Join-Path $repoRoot "artifacts\native\arm64-v8a"
-$jniLibDir = Join-Path $repoRoot "app\src\main\jniLibs\arm64-v8a"
-$outLib = Join-Path $artifactDir "libtgwsproxy.so"
 
 function Resolve-GoExe {
     $cmd = Get-Command go -ErrorAction SilentlyContinue
-    if ($cmd) {
-        return $cmd.Source
-    }
+    if ($cmd) { return $cmd.Source }
     $fallback = "C:\Program Files\Go\bin\go.exe"
-    if (Test-Path $fallback) {
-        return $fallback
-    }
+    if (Test-Path $fallback) { return $fallback }
     throw "Go executable not found"
 }
 
@@ -38,53 +31,90 @@ function Resolve-AndroidNdkRoot {
         throw "Android NDK not found under $ndkBase"
     }
     $latest = Get-ChildItem $ndkBase -Directory | Sort-Object Name -Descending | Select-Object -First 1
-    if (-not $latest) {
-        throw "No Android NDK versions found under $ndkBase"
-    }
+    if (-not $latest) { throw "No Android NDK versions found under $ndkBase" }
     return $latest.FullName
 }
 
 $goExe = Resolve-GoExe
 $ndkRoot = Resolve-AndroidNdkRoot
-$clang = Join-Path $ndkRoot "toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android$ApiLevel-clang.cmd"
-if (-not (Test-Path $clang)) {
-    $clang = Join-Path $ndkRoot "toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android$ApiLevel-clang"
+$ndkBin = Join-Path $ndkRoot "toolchains\llvm\prebuilt\windows-x86_64\bin"
+if (-not (Test-Path $ndkBin)) {
+    throw "Windows Android NDK toolchain not found: $ndkBin"
 }
-if (-not (Test-Path $clang)) {
-    throw "Android clang toolchain not found for API $ApiLevel under $ndkRoot"
+if (-not (Test-Path $sourceDir)) {
+    throw "Go source directory not found: $sourceDir"
 }
 
-New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-New-Item -ItemType Directory -Force -Path $jniLibDir | Out-Null
+$targets = @(
+    @{ Abi = "arm64-v8a"; GoArch = "arm64"; Triple = "aarch64-linux-android"; GoArm = $null },
+    @{ Abi = "armeabi-v7a"; GoArch = "arm"; Triple = "armv7a-linux-androideabi"; GoArm = "7" },
+    @{ Abi = "x86"; GoArch = "386"; Triple = "i686-linux-android"; GoArm = $null },
+    @{ Abi = "x86_64"; GoArch = "amd64"; Triple = "x86_64-linux-android"; GoArm = $null }
+)
 
-$oldGoos = $env:GOOS
-$oldGoarch = $env:GOARCH
-$oldCgo = $env:CGO_ENABLED
-$oldCc = $env:CC
+$savedEnv = @{}
+$envNames = @("GOOS", "GOARCH", "GOARM", "CGO_ENABLED", "CC", "CXX")
+foreach ($name in $envNames) {
+    $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
 
 try {
     $env:GOOS = "android"
-    $env:GOARCH = "arm64"
     $env:CGO_ENABLED = "1"
-    $env:CC = $clang
 
-    Push-Location $sourceDir
-    try {
-        & $goExe build -buildmode=c-shared -trimpath -o $outLib .
-    } finally {
-        Pop-Location
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "go build failed with exit code $LASTEXITCODE"
-    }
+    foreach ($target in $targets) {
+        $compilerStem = "$($target.Triple)$ApiLevel-clang"
+        $cc = Join-Path $ndkBin "$compilerStem.cmd"
+        if (-not (Test-Path $cc)) { $cc = Join-Path $ndkBin $compilerStem }
+        $cxxStem = "$($target.Triple)$ApiLevel-clang++"
+        $cxx = Join-Path $ndkBin "$cxxStem.cmd"
+        if (-not (Test-Path $cxx)) { $cxx = Join-Path $ndkBin $cxxStem }
+        if (-not (Test-Path $cc)) {
+            throw "Android C compiler not found for ABI $($target.Abi): $compilerStem"
+        }
+        if (-not (Test-Path $cxx)) {
+            throw "Android C++ compiler not found for ABI $($target.Abi): $cxxStem"
+        }
 
-    Copy-Item -Force $outLib (Join-Path $jniLibDir "libtgwsproxy.so")
-    Write-Host "Native library built:" $outLib
-    Write-Host "Native library copied to:" (Join-Path $jniLibDir "libtgwsproxy.so")
+        $artifactDir = Join-Path $repoRoot "artifacts\native\$($target.Abi)"
+        $jniLibDir = Join-Path $repoRoot "app\src\main\jniLibs\$($target.Abi)"
+        $outLib = Join-Path $artifactDir "libtgwsproxy.so"
+        New-Item -ItemType Directory -Force -Path $artifactDir, $jniLibDir | Out-Null
+
+        $env:GOARCH = $target.GoArch
+        if ($target.GoArm) { $env:GOARM = $target.GoArm }
+        else { Remove-Item Env:GOARM -ErrorAction SilentlyContinue }
+        $env:CC = $cc
+        $env:CXX = $cxx
+
+        Write-Host "==> Building $($target.Abi) (GOARCH=$($target.GoArch), API=$ApiLevel)"
+        Push-Location $sourceDir
+        try {
+            & $goExe build -buildmode=c-shared -trimpath -o $outLib .
+            if ($LASTEXITCODE -ne 0) {
+                throw "Go native build failed for $($target.Abi) with exit code $LASTEXITCODE"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+
+        if (-not (Test-Path $outLib) -or (Get-Item $outLib).Length -eq 0) {
+            throw "Native library was not created for $($target.Abi)"
+        }
+        Copy-Item -Force $outLib (Join-Path $jniLibDir "libtgwsproxy.so")
+        Write-Host "Built and packaged $($target.Abi): $outLib"
+    }
 }
 finally {
-    $env:GOOS = $oldGoos
-    $env:GOARCH = $oldGoarch
-    $env:CGO_ENABLED = $oldCgo
-    $env:CC = $oldCc
+    foreach ($name in $envNames) {
+        if ($null -eq $savedEnv[$name]) {
+            [Environment]::SetEnvironmentVariable($name, $null, "Process")
+        }
+        else {
+            [Environment]::SetEnvironmentVariable($name, $savedEnv[$name], "Process")
+        }
+    }
 }
+
+Write-Host "All Android native ABIs built successfully: arm64-v8a, armeabi-v7a, x86, x86_64"
