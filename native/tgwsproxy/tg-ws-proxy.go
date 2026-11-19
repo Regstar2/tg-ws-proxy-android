@@ -23,6 +23,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -734,7 +735,7 @@ func (d *compatibleWebSocketTLSDialer) connect(ip, domain, path string, timeout 
 	// Some networks drop the larger hybrid post-quantum ClientHello used by Go's defaults.
 	ws, err := dial(ip, domain, path, timeout, classicalTLSCurves())
 	var stageErr *wsStageError
-	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) || (d.ctx != nil && d.ctx.Err() != nil) {
+	if err == nil || d.defaultAttempted || !errors.As(err, &stageErr) || stageErr.Stage != "tls_handshake" || errors.Is(err, context.Canceled) || isCertificateVerificationFailure(err) || (d.ctx != nil && d.ctx.Err() != nil) {
 		return ws, err
 	}
 	d.defaultAttempted = true
@@ -753,9 +754,9 @@ func classicalTLSCurves() []tls.CurveID { return []tls.CurveID{tls.X25519, tls.C
 
 func webSocketTLSConfig(domain string, curves []tls.CurveID) *tls.Config {
 	return &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         domain,
-		CurvePreferences:   curves,
+		ServerName:       domain,
+		CurvePreferences: curves,
+		RootCAs:         nativeTLSRootCAs(),
 	}
 }
 
@@ -772,6 +773,12 @@ func wsConnectWithCurvesContextDial(ctx context.Context, ip, domain, path string
 }
 
 func wsConnectWithCurvesContextDialSNI(ctx context.Context, ip, domain, serverName, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
+	return wsConnectWithCurvesContextDialSNIWithRoots(ctx, ip, domain, serverName, path, timeout, curves, dialContext, nil)
+}
+
+// wsConnectWithCurvesContextDialSNIWithRoots lets local tests supply trusted CAs
+// without disabling verification or changing the production trust store.
+func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain, serverName, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error), roots *x509.CertPool) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -792,6 +799,9 @@ func wsConnectWithCurvesContextDialSNI(ctx context.Context, ip, domain, serverNa
 		serverName = domain
 	}
 	tlsCfg := webSocketTLSConfig(serverName, curves)
+	if roots != nil {
+		tlsCfg.RootCAs = roots
+	}
 
 	if dialContext == nil {
 		dialContext = dialer.DialContext

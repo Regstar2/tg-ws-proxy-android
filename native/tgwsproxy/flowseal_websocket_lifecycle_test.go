@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -215,7 +216,11 @@ func TestFlowsealTLSBulkRoundTrip(t *testing.T) {
 		serverDone <- writeFlowsealFull(conn, buildFlowsealSingleFrame(opBinary, reply, false, true))
 	}))
 	defer server.Close()
-	conn, err := tls.Dial("tcp", strings.TrimPrefix(server.URL, "https://"), flowsealWorkerTLSConfig("localhost"))
+	testRoots := x509.NewCertPool()
+	testRoots.AddCert(server.Certificate())
+	testTLS := flowsealWorkerTLSConfig("example.com")
+	testTLS.RootCAs = testRoots
+	conn, err := tls.Dial("tcp", strings.TrimPrefix(server.URL, "https://"), testTLS)
 	if err != nil {
 		t.Fatal(err)
 	}

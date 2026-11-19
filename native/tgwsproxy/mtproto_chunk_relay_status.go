@@ -70,9 +70,12 @@ func chunkRelayErrorRetryable(err error) bool {
 	if _, circuitOpen := workerCircuitError(err); circuitOpen {
 		return false
 	}
+	if isCertificateVerificationFailure(err) {
+		return false
+	}
 	status, _, ok := chunkRelayHTTPErrorDetails(err)
 	if !ok {
-		// Network/TLS/timeouts remain bounded-retryable.
+		// Transient network/TLS/timeouts remain bounded-retryable.
 		return true
 	}
 	return status >= 500

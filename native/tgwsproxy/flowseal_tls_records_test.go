@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -36,7 +37,10 @@ func TestFlowsealFixedTLSRecordsPreserveWebSocketMessage(t *testing.T) {
 			_ = raw.SetDeadline(time.Now().Add(3 * time.Second))
 			_ = peer.SetDeadline(time.Now().Add(3 * time.Second))
 			capture := &flowsealRecordCaptureConn{Conn: raw}
-			config := flowsealWorkerTLSConfig("localhost")
+			config := flowsealWorkerTLSConfig("example.com")
+			roots := x509.NewCertPool()
+			roots.AddCert(certServer.Certificate())
+			config.RootCAs = roots
 			config.MinVersion = tls.VersionTLS13
 			config.MaxVersion = tls.VersionTLS13
 			if adaptive {

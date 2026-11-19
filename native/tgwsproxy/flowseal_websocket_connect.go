@@ -187,15 +187,13 @@ func flowsealValidUpgradeResponse(lines []string, keyBytes []byte) bool {
 }
 
 func flowsealWorkerVerifiedTLSConfig(domain string) *tls.Config {
-	config := flowsealWorkerTLSConfig(domain)
-	config.InsecureSkipVerify = false
-	return config
+	return flowsealWorkerTLSConfig(domain)
 }
 
 func flowsealWorkerTLSConfig(domain string) *tls.Config {
 	return &tls.Config{
-		InsecureSkipVerify: true, // Preserve the existing Flowseal verification policy.
-		ServerName:         domain,
+		ServerName: domain,
+		RootCAs:   nativeTLSRootCAs(),
 		// Flowseal uses OpenSSL's full-size records. Keep WS messages intact and
 		// isolate Go's adaptive TLS record sizing in the #29 device experiment.
 		// This is not evidence that record sizing caused the observed TCP loss.

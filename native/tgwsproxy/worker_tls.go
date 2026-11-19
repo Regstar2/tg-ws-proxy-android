@@ -3,11 +3,21 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"sync/atomic"
 	"time"
 )
+
+func isCertificateVerificationFailure(err error) bool {
+	var tlsVerification *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	return errors.As(err, &tlsVerification) || errors.As(err, &unknownAuthority) ||
+		errors.As(err, &hostname) || errors.As(err, &invalid)
+}
 
 // workerTLSConnect retries only a failed handshake, before any HTTP bytes are sent.
 // A successful default profile is reused by later requests in the same relay session.
@@ -21,8 +31,7 @@ func workerTLSConnect(ctx context.Context, config *tls.Config, profileState *ato
 	primary.CurvePreferences = classicalTLSCurves()
 	conn, err := attempt(primary)
 	var stage *wsStageError
-	var verification *tls.CertificateVerificationError
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.As(err, &verification) ||
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || isCertificateVerificationFailure(err) ||
 		!errors.As(err, &stage) || stage.Stage != "tls_handshake" || !profileState.CompareAndSwap(0, 1) {
 		return conn, err
 	}

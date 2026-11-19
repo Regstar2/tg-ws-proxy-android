@@ -16,6 +16,15 @@ import (
 
 const workerProbeUTLSFingerprint = "chrome_auto_http1"
 
+func workerUTLSConfig(domain string) *utls.Config {
+	return &utls.Config{
+		ServerName:                  domain,
+		RootCAs:                    nativeTLSRootCAs(),
+		NextProtos:                  []string{"http/1.1"},
+		DynamicRecordSizingDisabled: true,
+	}
+}
+
 func connectFlowsealRawWebSocketUTLSContext(ctx context.Context, host, domain, path string, timeout float64) (*flowsealRawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
@@ -37,12 +46,7 @@ func connectFlowsealRawWebSocketUTLSContext(ctx context.Context, host, domain, p
 	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopCancel()
 
-	config := &utls.Config{
-		InsecureSkipVerify:          true, // Preserve the existing Flowseal verification policy.
-		ServerName:                  domain,
-		NextProtos:                  []string{"http/1.1"},
-		DynamicRecordSizingDisabled: true,
-	}
+	config := workerUTLSConfig(domain)
 	utlsConn := utls.UClient(rawConn, config, utls.HelloChrome_Auto)
 	if err := prepareWorkerUTLSForHTTP1(utlsConn); err != nil {
 		_ = rawConn.Close()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -71,6 +72,8 @@ type mtProtoChunkRelayConn struct {
 	closeMu         sync.Mutex
 	closed          bool
 	tlsProfileState atomic.Int32
+	// nil uses trusted system roots; test fixtures may provide their own CA pool.
+	tlsRootCAs *x509.CertPool
 }
 
 func chunkRelayQuotaResetFromHeaders(headers http.Header, now time.Time) time.Time {
@@ -222,9 +225,13 @@ func (c *mtProtoChunkRelayConn) freshHTTPRequest(
 		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 
+	roots := nativeTLSRootCAs()
+	if c.tlsRootCAs != nil {
+		roots = c.tlsRootCAs
+	}
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // Match the existing Flowseal Worker TLS policy in this experiment.
-		ServerName:         c.domain,
+		ServerName:         endpoint.Hostname(),
+		RootCAs:           roots,
 		NextProtos:         []string{"http/1.1"},
 		ClientSessionCache: mtProtoChunkRelayTLSCache,
 	}

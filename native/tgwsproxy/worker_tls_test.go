@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"net/http"
@@ -116,7 +117,9 @@ func TestChunkRelayTLSFallbackBeforeHTTPIsSent(t *testing.T) {
 	}}
 	server.StartTLS()
 	defer server.Close()
-	c := &mtProtoChunkRelayConn{domain: strings.TrimPrefix(server.URL, "https://")}
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	c := &mtProtoChunkRelayConn{domain: strings.TrimPrefix(server.URL, "https://"), tlsRootCAs: roots}
 	status, _, _, err := c.freshHTTPRequest(context.Background(), "open", url.Values{}, nil)
 	if err != nil || status != http.StatusNoContent || handshakes.Load() != 2 || requests.Load() != 1 {
 		t.Fatalf("status=%d err=%v handshakes=%d HTTP requests=%d", status, err, handshakes.Load(), requests.Load())
