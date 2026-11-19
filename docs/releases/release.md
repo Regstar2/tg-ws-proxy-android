@@ -1,31 +1,32 @@
-# Release workflow — v1.11.9
+# Release workflow — v1.11.10
 
-**Состояние: PREPARATION, тег не создан.** Последний подтверждённый опубликованный релиз — [v1.11.8](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.8).
+**PREPARATION: tag не создан.** Последний опубликованный релиз — [v1.11.9](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.9).
 
 ## Метаданные
 
-- Версия `1.11.9`, `versionCode 65`, тег `v1.11.9`.
-- Пакет `io.github.regstar2.tgwsproxy`, Android 8.0+, `arm64-v8a`.
-- Ожидаемые assets: `TgWsProxy-Android-v1.11.9-arm64-v8a.apk` и `TgWsProxy-Android-v1.11.9-arm64-v8a.apk.sha256`.
-- [RU notes](v1.11.9.md) · [EN notes](v1.11.9_EN.md) · [GitHub notes](RELEASE_NOTES_v1.11.9.md) · [GO/NO-GO](RELEASE_CHECKLIST.md).
+- versionName 1.11.10, versionCode 66, tag v1.11.10, package io.github.regstar2.tgwsproxy.
+- Android 8.0+, minSdk 26 / targetSdk 35, ABI armeabi-v7a, arm64-v8a, Universal.
+- Ожидаются три APK и три .sha256: всего шесть файлов. [RU notes](v1.11.10.md) · [EN](v1.11.10_EN.md) · [GitHub text](RELEASE_NOTES_v1.11.10.md) · [GO/NO-GO](RELEASE_CHECKLIST.md).
 
 ## До создания тега
 
-1. Проверить CI подготовки релиза на финальном PR HEAD и на слитом commit основного `main`.
-2. Выполнить `scripts/audit-release.ps1 -ExpectedVersion 1.11.9 -ExpectedVersionCode 65` и `scripts/release.ps1 -Version v1.11.9 -PreflightOnly`. Их успешное выполнение подтверждает только метаданные, не работоспособность приложения.
-3. Собрать подписанный ARM64 release candidate с исходным сертификатом и проверить установку поверх v1.11.8 без удаления пользовательских данных, CF-only MTProto, сообщения/медиа и отсутствие деградации других маршрутов.
-4. Решить, допускается ли stable-публикация с pre-existing отключённой проверкой TLS сертификатов [#158](https://github.com/Regstar2/tg-ws-proxy-android/issues/158). Отдельно оценить [#155](https://github.com/Regstar2/tg-ws-proxy-android/issues/155) про переподключение из уведомления.
-5. После решения GO создать новый **аннотированный tag** на exact verified main SHA, предварительно убедившись, что удалённый тег отсутствует. Не изменять опубликованные теги и не использовать force push.
+1. Пройти Windows CI, Go race, Kotlin unit/lint, ABI audit и ревью diff на финальном commit.
+2. Выполнить release metadata preflight (см. команды ниже).
+3. С исходным signing certificate собрать и проверить три подписанных APK, SHA-256, package, version и ELF/JNA.
+4. Проверить Android CA roots, WSS/443 для CF DC2/DC4, Direct WS и оба Worker-транспорта; проверить отказ на некорректном сертификате controlled fixture.
+5. Проверить новый default WS/80 и сохраняющийся false/WSS/443 после обновления и перезапуска, а также переключение только при остановленном прокси. Документировать отсутствие TLS-аутентификации WS/80.
+6. Проверить обновление поверх v1.11.9 без удаления данных, MTProto notification reconnect, копирование Telegram-ссылок и сообщения/медиа на Wi-Fi/mobile.
+7. После GO создать один аннотированный тег v1.11.10 на проверенном main SHA. Не перезаписывать существующие теги и не использовать force push.
 
-## После отправки тега
+## После создания тега
 
-[.github/workflows/release.yml](../../.github/workflows/release.yml) реагирует на `v*`: повторно запускает source CI на GitHub-hosted Windows, затем trusted Windows runner собирает и подписывает APK, генерирует SHA-256 и публикует GitHub Release. Отсутствие секретов или runner должно приводить к отказу, а не к выдаче неподписанного APK.
+`.github/workflows/release.yml` запускает exact-tag source CI на GitHub-hosted Windows, затем trusted release build на Windows runner. Скачайте опубликованные три APK и три checksum, проверьте SHA-256, сертификаты и версии. До этого релиз не объявляется опубликованным.
 
-Затем нужно скачать оба опубликованных assets, сверить SHA-256 и сертификат, проверить `versionCode 65` и установить именно опубликованный APK. До этой проверки статус заметок остаётся «подготовка».
+## Команды
 
-## Проверочные команды
-
-~~~powershell
-.\scripts\audit-release.ps1 -ExpectedVersion 1.11.9 -ExpectedVersionCode 65
-.\scripts\release.ps1 -Version v1.11.9 -PreflightOnly
-~~~
+```powershell
+.\scripts\audit-release.ps1 -ExpectedVersion 1.11.10 -ExpectedVersionCode 66
+.\scripts\release.ps1 -Version v1.11.10 -PreflightOnly
+# Только при наличии исходного release-signing.env:
+.\scripts\release.ps1 -Version v1.11.10
+```
