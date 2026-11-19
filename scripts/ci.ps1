@@ -248,7 +248,7 @@ Invoke-CheckedCommand -Label 'Issue #156 CF report regression (Windows PowerShel
 & $issue156Smoke -SelfTest
 
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
-& $releaseAudit -ExpectedVersion '1.11.9' -ExpectedVersionCode 65
+& $releaseAudit -ExpectedVersion '1.11.10' -ExpectedVersionCode 66
 if ($LASTEXITCODE -ne 0) {
     throw "Release audit failed with exit code $LASTEXITCODE."
 }
@@ -260,12 +260,12 @@ Invoke-CheckedCommand `
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', $releaseAudit,
-        '-ExpectedVersion', '1.11.9',
-        '-ExpectedVersionCode', '65'
+        '-ExpectedVersion', '1.11.10',
+        '-ExpectedVersionCode', '66'
     )
 
 Write-Host "`n==> Validate release-script metadata preflight"
-& $releaseScript -Version 'v1.11.9' -PreflightOnly
+& $releaseScript -Version 'v1.11.10' -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
     throw "Release-script preflight failed with exit code $LASTEXITCODE."
 }
