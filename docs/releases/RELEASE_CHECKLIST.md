@@ -1,43 +1,37 @@
-# Release checklist — v1.11.9
+# Release checklist — v1.11.10
 
-**Состояние: PREPARATION / NO-GO до проверки финального кандидата.** PR #157 объединён с main. Владелец 16.11.2026 подтвердил работоспособность Cloudflare Proxy на Android с тестовым исправлением; это не доказательство успешной установки и работы финального подписанного APK 1.11.9. Исторический чек-лист v1.11.8: [RELEASE_CHECKLIST_v1.11.8.md](RELEASE_CHECKLIST_v1.11.8.md).
+**PREPARATION / NO-GO.** Последний опубликованный релиз — [v1.11.9](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.9); подписанный v1.11.10/66 и точный tag CI не подтверждены.
 
-## Scope и документация
+## Содержимое и документация
 
-- [x] Issue [#156](https://github.com/Regstar2/tg-ws-proxy-android/issues/156) закрыт, [PR #157](https://github.com/Regstar2/tg-ws-proxy-android/pull/157) слит; итоговый SHA `96b4c8a`.
-- [x] Источник адаптации: [malordin, commit a98fd27](https://github.com/malordin/tg-ws-proxy-android/commit/a98fd27c384452b8b0e78a4273abf005077aad6b).
-- [x] Автоматические проверки исправления: [PR CI #43934207261](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43934207261) и [интеграционный main CI #43935254597](https://github.com/Regstar2/tg-ws-proxy-android/actions/runs/43935254597) — PASS.
-- [ ] В финальном release commit версия `1.11.9 / versionCode 65` совпадает с README RU/EN, CHANGELOG и заметками релиза.
-- [ ] Проверено отсутствие приватных данных, ключей, логов и несвязанных изменений в PR.
+- [x] Изменения PR #165, #166, #167, #169 и #170 объединены в main до подготовки 1.11.10.
+- [x] Подготовлены метаданные 1.11.10 / 66, RU/EN docs, версия, changelog и новая инструкция подписанного Debug.
+- [ ] Проверен итоговый diff, секреты, локализация, ссылки и историческая документация.
 
-## Проверки и подпись
+## Автоматические проверки и артефакты
 
-- [ ] Windows CI и Go race/Worker regression — PASS на **финальном commit, который получит тег**.
-- [ ] `scripts/audit-release.ps1 -ExpectedVersion 1.11.9 -ExpectedVersionCode 65` — PASS.
-- [ ] `scripts/release.ps1 -Version v1.11.9 -PreflightOnly` — PASS.
-- [ ] Signed ARM64 release APK: верные package/versionCode/minSdk, сертификат предыдущей версии, подпись и SHA-256.
-- [ ] Exact-tag release-source CI и trusted runner release build — PASS.
-- [ ] Опубликованы ровно два asset: APK и его `.apk.sha256`; SHA-256 и подпись сверены **после** публикации.
+- [ ] Финальный PR HEAD и merge commit: Windows CI, Go race/Worker, Kotlin unit/lint, ABI audit — PASS.
+- [ ] scripts/audit-release.ps1 -ExpectedVersion 1.11.10 -ExpectedVersionCode 66 — PASS.
+- [ ] scripts/release.ps1 -Version v1.11.10 -PreflightOnly — PASS.
+- [ ] Подписаны исходным ключом три Release APK: armeabi-v7a, arm64-v8a, universal; для каждого создан SHA-256.
+- [ ] Подтверждены packageName, versionName/versionCode, minSdk, ELF/JNA payload и сертификат каждого APK.
+- [ ] Проверено обновление официального 1.11.9/65 на 1.11.10/66 без удаления настроек.
 
-## Проверка на Android
+## Реальные устройства и маршруты
 
-- [x] Пользователь сообщил, что тестовое исправление CF Proxy работает на Android (16.11.2026; без детального DC/media отчёта).
-- [ ] Именно signed v1.11.9 Release APK устанавливается поверх v1.11.8 **без удаления приложения** и сохраняет настройки, Worker и AWG/WARP.
-- [ ] Telegram отправляет/получает сообщения и медиа через `cf_proxy_ws` без альтернативного fallback.
-- [ ] Start/Stop/Reconnect, смена сети и не затронутые маршруты не деградировали на итоговом APK.
-- [ ] Для МТС/МегаФон/T2/Билайн, если не проверялись, оставлен статус NOT_TESTED.
+- [ ] Проверены Android CA trust roots, валидный WSS/443 CF DC2/DC4, IP fallback, Direct WS и оба Worker-транспорта.
+- [ ] Некорректные CA и hostname отклонены в контролируемой TLS fixture; нет trust-all.
+- [ ] Явный WS/80 default-off и безопасность plaintext описаны и проверены; нет скрытой смены route policy.
+- [ ] MTProto reconnect из уведомления, SOCKS5 regression и копирование Telegram ссылок проверены.
+- [ ] Сообщения и медиа Telegram, переключение Wi-Fi/mobile, контроль фактического backend проверены.
+- [ ] ARMv7, ARM64, Universal и native/JNA проверены на подходящих физических устройствах; эмуляторные SIGSEGV/SIGABRT не помечены PASS.
 
-## Известные проблемы / решение о публикации
+## Публикация
 
-- [ ] Принято документированное решение по pre-existing [#158](https://github.com/Regstar2/tg-ws-proxy-android/issues/158): native WebSocket использует `InsecureSkipVerify=true` и не проверяет сертификат upstream; без решения по риску не заявлять security acceptance.
-- [ ] Известный [#155](https://github.com/Regstar2/tg-ws-proxy-android/issues/155) о переподключении из уведомления на Realme/Android 16 оценён как допустимый остаточный дефект или исправлен до stable.
-- [x] Сетевая жалоба [#154](https://github.com/Regstar2/tg-ws-proxy-android/issues/154) не закрыта без проверки операторов.
+- [ ] Принято явное решение GO по оставшимся рискам #158 и WS/80.
+- [ ] Аннотированный v1.11.10 tag указывает на проверенный main SHA; тег не перезаписан.
+- [ ] Exact-tag CI PASS, затем trusted signing и публикация ровно 3 APK + 3 checksum.
+- [ ] После публикации скачаны assets, независимо проверены SHA-256 и сертификаты.
+- [ ] README/index переведены из статуса кандидат в опубликован после фактической проверки.
 
-## Тег и публикация
-
-- [ ] После GO создан **один аннотированный tag** `v1.11.9` на проверенном main SHA; существующий тег не перезаписан.
-- [ ] Push тега инициировал стандартный `.github/workflows/release.yml`; CI и защита подписи не обходились.
-- [ ] В GitHub Release проверены tag, SHA-256, подпись, `versionCode 65` и пригодность APK для обновления v1.11.8.
-- [ ] Только после успешной публикации README и релизный индекс переименованы из «подготовка» в «опубликовано».
-
-**Push нового тега автоматически запускает выпуск stable APK. Не отправлять тег до завершения обязательных проверок.**
+**Не создавать тег v1.11.10 до успешной подписанной приёмки и решения GO.**

@@ -2,7 +2,14 @@
 
 Manual checklist for validating builds and routing. Automated project checks are available through `.\scripts\ci.ps1`.
 
-The latest published stable release is `v1.11.6`. The planned `v1.11.7` update adds strict user-ordered MTProto routing and truthful notification metrics. Verify the exact release candidate and signed APK before publication; see [the release checklist](../releases/RELEASE_CHECKLIST.md). Earlier debug/CI results do not establish final-APK acceptance.
+The latest published stable release is v1.11.9. The current source candidate is **v1.11.10/66**, including TLS validation, opt-in WS/80, notification reconnect, Telegram link copying and ARMv7/ARM64/Universal. Verify final signed APKs separately; see [release checklist](../releases/RELEASE_CHECKLIST.md).
+
+## v1.11.10 device acceptance
+
+- [ ] Verify Android CA trust roots, CF WSS/443, Direct WS, Worker Legacy and Chunk Relay with valid upstream certificates; controlled invalid certificates must fail.
+- [ ] Test explicit WS/80 without TLS on Wi-Fi and cellular; keep WSS/443 as default.
+- [ ] Test MTProto notification reconnect, MTProto/Fake TLS/SOCKS5 copied links, real message/media transfer and route fallback.
+- [ ] Test ARMv7, ARM64 and Universal native/JNA on supported devices, and in-place signed upgrade from v1.11.9; emulator translation failures are not PASS.
 
 ## Automated checks
 

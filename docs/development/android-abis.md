@@ -15,8 +15,10 @@ version under `ANDROID_SDK_ROOT/ndk` is used. API 26 is the native build default
 Set-Location C:\Base\projects\TGWSProxyAndroid
 .\scripts\build-apk.ps1 -Configuration Debug
 # Existing configured signing key required; creates no new production key:
-.\scripts\release.ps1 -Version v1.11.9
+.\scripts\release.ps1 -Version v1.11.10
 ```
+
+Signed in-place debug smoke: scripts/build-signed-worker-smoke.ps1 -Install. This requires the original release keystore in local release-signing.env; signed Debug uses versionCode 66, ordinary debug uses 67 and a different signer. Do not uninstall existing data to work around a signing conflict.
 
 Gradle preBuild compiles both Go/CGO shared libraries. The native script verifies
 ELF32/ARM and ELF64/AArch64 with NDK llvm-readelf, then copies them into jniLibs

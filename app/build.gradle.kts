@@ -3,8 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val releaseVersionCode = 65
-val releaseVersionName = "1.11.9"
+val releaseVersionCode = 66
+val releaseVersionName = "1.11.10"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
 val isolatedAbiSmoke = providers.gradleProperty("isolatedAbiSmoke").orNull == "true"

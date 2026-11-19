@@ -8,7 +8,7 @@
 | UI | Jetpack Compose + Material / Material 3 |
 | Android Gradle Plugin | `8.2.2` |
 | Gradle Wrapper | `8.2.1` |
-| Compose BOM | `2024.01.00` |
+| Compose BOM | `2024.02.00` |
 | Compose compiler extension | `1.5.8` |
 | AndroidX Core | `1.12.0` |
 | Lifecycle | `2.7.0` |
@@ -22,9 +22,9 @@ Android configuration:
 - `targetSdk 35`;
 - `minSdk 26` (Android 8.0+);
 - supported ABIs: `armeabi-v7a`, `arm64-v8a` (plus Universal APK);
-- application id: `com.amurcanov.tgwsproxy`.
+- application id: `io.github.regstar2.tgwsproxy` (Kotlin namespace: `com.amurcanov.tgwsproxy`).
 
-The currently published application version in the build metadata is `1.10.12` (`versionCode 50`). `v1.10.13` is the active development target and must not be presented as released until its release gate is complete.
+Latest published release: v1.11.9 / versionCode 65. Current source metadata: v1.11.10 / versionCode 66 (unpublished candidate; signed Release acceptance pending).
 
 ## Native proxy runtime
 
@@ -54,9 +54,10 @@ Outbound route kinds:
 - `cf_proxy_ws`;
 - `direct_ws`;
 - `cf_worker_ws`;
+- `awg_warp` (userspace AWG/WARP, no VpnService);
 - `tcp_fallback`.
 
-WebSocket is a transport and must not be used as a substitute name for the actual route kind in diagnostics or documentation.
+WebSocket is a transport, not a route kind. CF Proxy defaults to verified WSS/443; opt-in WS/80 is plaintext and unauthenticated. These choices share the cf_proxy_ws route.
 
 ## Build toolchain
 
@@ -88,7 +89,7 @@ The repository does not currently claim a verified Linux/macOS native build work
 
 ## Release signing
 
-Release signing is configured from local environment variables and a local keystore. Signing keys and credentials are not repository content.
+Release signing uses a local keystore and environment variables. The original certificate can also sign a Debug device smoke via scripts/build-signed-worker-smoke.ps1 -Install. Official release artifacts contain three ABI variants plus SHA-256 files. Keys and credentials are never repository content.
 
 Expected variables:
 
