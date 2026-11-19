@@ -172,31 +172,43 @@ internal class RouteProbeNetworkSteps(
         }
     }
 
-    fun probeWebSocket(sniHost: String, dialHost: String, path: String, httpHost: String = sniHost): RouteProbeStepResult {
+    fun probeWebSocket(
+        sniHost: String,
+        dialHost: String,
+        path: String,
+        httpHost: String = sniHost,
+        noTls: Boolean = false,
+    ): RouteProbeStepResult {
         val started = System.nanoTime()
         return try {
             Socket().use { raw ->
-                raw.connect(InetSocketAddress(dialHost, 443), config.connectTimeoutMs.toInt())
+                val port = if (noTls) 80 else 443
+                raw.connect(InetSocketAddress(dialHost, port), config.connectTimeoutMs.toInt())
                 raw.soTimeout = config.readTimeoutMs.toInt()
-                val ssl = UpstreamDiagnosticsSsl.sslContext.socketFactory
-                    .createSocket(raw, sniHost, 443, true) as SSLSocket
-                ssl.use { tls ->
-                    tls.soTimeout = config.readTimeoutMs.toInt()
-                    val params = tls.sslParameters
-                    params.serverNames = listOf(SNIHostName(sniHost))
-                    tls.sslParameters = params
-                    tls.startHandshake()
-                    val upgraded = performWsUpgrade(tls, httpHost, path)
-                    if (upgraded.success) {
-                        stepOk(RouteProbeStep.WEBSOCKET_HANDSHAKE, started, upgraded.detail)
-                    } else {
-                        stepFail(
-                            RouteProbeStep.WEBSOCKET_HANDSHAKE,
-                            RouteProbeErrorCode.WEBSOCKET_HANDSHAKE_FAILED,
-                            upgraded.detail,
-                            started,
-                        )
+                val upgraded = if (noTls) {
+                    performWsUpgrade(raw, httpHost, path)
+                } else {
+                    val ssl = UpstreamDiagnosticsSsl.sslContext.socketFactory
+                        .createSocket(raw, sniHost, port, true) as SSLSocket
+                    ssl.use { tls ->
+                        tls.soTimeout = config.readTimeoutMs.toInt()
+                        val params = tls.sslParameters
+                        params.serverNames = listOf(SNIHostName(sniHost))
+                        tls.sslParameters = params
+                        tls.startHandshake()
+                        performWsUpgrade(tls, httpHost, path)
                     }
+                }
+                val detail = if (noTls) "ws:80 ${upgraded.detail}" else upgraded.detail
+                if (upgraded.success) {
+                    stepOk(RouteProbeStep.WEBSOCKET_HANDSHAKE, started, detail)
+                } else {
+                    stepFail(
+                        RouteProbeStep.WEBSOCKET_HANDSHAKE,
+                        RouteProbeErrorCode.WEBSOCKET_HANDSHAKE_FAILED,
+                        detail,
+                        started,
+                    )
                 }
             }
         } catch (e: java.net.SocketTimeoutException) {

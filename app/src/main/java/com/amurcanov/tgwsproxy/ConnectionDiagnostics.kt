@@ -89,6 +89,7 @@ object ConnectionDiagnostics {
     suspend fun probeCfProxy(
         manualDomainsRaw: List<String>,
         cachedUpstreamDomains: List<String> = emptyList(),
+        cfProxyNoTls: Boolean = false,
     ): ConnectionProbeReport = withContext(Dispatchers.IO) {
         val domains = cfProxyProbeDomains(manualDomainsRaw, cachedUpstreamDomains)
         if (domains.isEmpty()) {
@@ -99,7 +100,7 @@ object ConnectionDiagnostics {
             val results = testDcs.map { dc ->
                 val wsDc = ConnectionRuntimeConfig.effectiveWsHostDc(dc)
                 val host = "kws$wsDc.$domain"
-                probeWss(host, host, "/apiws", "cf_proxy", dc)
+                probeCfWebSocket(domain, host, "cf_proxy", dc, cfProxyNoTls)
             }
             val report = ConnectionProbeReport(results)
             lastReport = report
@@ -140,6 +141,7 @@ object ConnectionDiagnostics {
     suspend fun probeCfPool(
         manualDomainsRaw: List<String>,
         cachedUpstreamDomains: List<String> = emptyList(),
+        cfProxyNoTls: Boolean = false,
     ): CfDomainProbeReport = withContext(Dispatchers.IO) {
         val checkedAt = System.currentTimeMillis()
         val manual = CfManualDomainList.normalize(manualDomainsRaw)
@@ -159,7 +161,7 @@ object ConnectionDiagnostics {
         }
         val results = domainsToCheck.map { (domain, source) ->
             val host = "kws2.$domain"
-            probeWss(host, host, "/apiws", "cf_pool", 2).also {
+            probeCfWebSocket(domain, host, "cf_pool", 2, cfProxyNoTls).also {
                 CfDomainDiagnosticsState.markProbe(domain, source, it, checkedAt)
             }
         }
@@ -202,15 +204,19 @@ object ConnectionDiagnostics {
         workerDomain: String,
         manualDomainsRaw: List<String>,
         cachedUpstreamDomains: List<String> = emptyList(),
+        cfProxyNoTls: Boolean = false,
     ): ConnectionProbeReport = withContext(Dispatchers.IO) {
         val merged = buildList {
             addAll(probeDirectWs().results)
             addAll(probeWorker(workerDomain).results)
-            addAll(probeCfProxy(manualDomainsRaw, cachedUpstreamDomains).results)
+            addAll(probeCfProxy(manualDomainsRaw, cachedUpstreamDomains, cfProxyNoTls).results)
             addAll(probeTcpFallback().results)
         }
         ConnectionProbeReport(merged)
     }
+
+    private fun probeCfWebSocket(domain: String, host: String, route: String, dc: Int, noTls: Boolean) =
+        probeWss(domain, host, "/apiws", route, dc, httpHost = host, noTls = noTls)
 
     private fun probeWss(
         sniHost: String,
@@ -218,19 +224,21 @@ object ConnectionDiagnostics {
         path: String,
         route: String,
         dc: Int,
+        httpHost: String = sniHost,
+        noTls: Boolean = false,
     ): RouteProbeResult {
-        val hostnameResult = probeWssOnce(sniHost, dialHost, path, route, dc, via = "hostname")
+        val hostnameResult = probeWssOnce(sniHost, dialHost, path, route, dc, via = "hostname", httpHost, noTls)
         if (hostnameResult.success) {
             return hostnameResult
         }
-        val resolvedIpv4 = resolveIpv4Addresses(sniHost)
+        val resolvedIpv4 = resolveIpv4Addresses(httpHost)
         var lastResult = hostnameResult
         for (address in resolvedIpv4) {
             val ip = address.hostAddress ?: continue
             if (ip.equals(dialHost, ignoreCase = true)) {
                 continue
             }
-            val ipResult = probeWssOnce(sniHost, ip, path, route, dc, via = "resolved_ip")
+            val ipResult = probeWssOnce(sniHost, ip, path, route, dc, via = "resolved_ip", httpHost, noTls)
             if (ipResult.success) {
                 return ipResult
             }
@@ -249,30 +257,30 @@ object ConnectionDiagnostics {
         route: String,
         dc: Int,
         via: String,
+        httpHost: String,
+        noTls: Boolean,
     ): RouteProbeResult {
         val start = System.nanoTime()
         return try {
             Socket().use { raw ->
-                raw.connect(InetSocketAddress(dialHost, 443), CONNECT_MS)
+                val port = if (noTls) 80 else 443
+                raw.connect(InetSocketAddress(dialHost, port), CONNECT_MS)
                 raw.soTimeout = HANDSHAKE_MS
-                val ssl = UpstreamDiagnosticsSsl.sslContext.socketFactory
-                    .createSocket(raw, sniHost, 443, true) as SSLSocket
-                ssl.use { tls ->
-                    tls.soTimeout = HANDSHAKE_MS
-                    val params = tls.sslParameters
-                    params.serverNames = listOf(SNIHostName(sniHost))
-                    tls.sslParameters = params
-                    tls.startHandshake()
-                    val upgraded = performWsUpgrade(tls, sniHost, path)
-                    RouteProbeResult(
-                        route = route,
-                        dc = dc,
-                        success = upgraded.success,
-                        stage = upgraded.stage,
-                        elapsedMs = elapsedMs(start),
-                        detail = "$via:${upgraded.detail}",
-                    )
+                val upgraded = if (noTls) {
+                    performWsUpgrade(raw, httpHost, path)
+                } else {
+                    val tls = UpstreamDiagnosticsSsl.sslContext.socketFactory
+                        .createSocket(raw, sniHost, port, true) as SSLSocket
+                    tls.use {
+                        tls.soTimeout = HANDSHAKE_MS
+                        val params = tls.sslParameters
+                        params.serverNames = listOf(SNIHostName(sniHost))
+                        tls.sslParameters = params
+                        tls.startHandshake()
+                        performWsUpgrade(tls, httpHost, path)
+                    }
                 }
+                RouteProbeResult(route, dc, upgraded.success, upgraded.stage, elapsedMs(start), "$via:$port:${upgraded.detail}")
             }
         } catch (e: Exception) {
             RouteProbeResult(

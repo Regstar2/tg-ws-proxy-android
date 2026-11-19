@@ -72,6 +72,9 @@
     <string name="cf_worker_pool_legacy_badge">Legacy</string>
     <string name="cf_worker_pool_enabled_badge">Enabled</string>
     <string name="cf_proxy_domains_title">CF Proxy domains</string>
+    <string name="cf_proxy_no_tls">CF Proxy without TLS</string>
+    <string name="cf_proxy_no_tls_hint">WebSocket over port 80. The upstream connection has no TLS or server authentication. MTProto encryption remains active.</string>
+    <string name="cf_proxy_no_tls_stop_to_change">Stop the proxy to change this setting.</string>
     <string name="cf_proxy_domains_manage">Manage domains</string>
     <string name="cf_proxy_domains_active_count">Active domains</string>
     <string name="cf_proxy_domains_cooldown_count">In cooldown</string>

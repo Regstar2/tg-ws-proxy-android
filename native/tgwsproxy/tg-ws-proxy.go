@@ -311,6 +311,7 @@ type resolvedIPs struct {
 }
 
 type cfProxyConfig struct {
+	NoTLS    bool
 	Enabled  bool
 	Priority bool
 	Only     bool
@@ -779,6 +780,23 @@ func wsConnectWithCurvesContextDialSNI(ctx context.Context, ip, domain, serverNa
 // wsConnectWithCurvesContextDialSNIWithRoots lets local tests supply trusted CAs
 // without disabling verification or changing the production trust store.
 func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain, serverName, path string, timeout float64, curves []tls.CurveID, dialContext func(context.Context, string, string) (net.Conn, error), roots *x509.CertPool) (*RawWebSocket, error) {
+	if serverName == "" {
+		serverName = domain
+	}
+	tlsCfg := webSocketTLSConfig(serverName, curves)
+	if roots != nil {
+		tlsCfg.RootCAs = roots
+	}
+	return wsConnectTransport(ctx, ip, domain, path, 443, timeout, tlsCfg, dialContext)
+}
+
+const cfPlainWebSocketPort = 80
+
+func wsConnectPlainContextDial(ctx context.Context, ip, domain, path string, timeout float64, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
+	return wsConnectTransport(ctx, ip, domain, path, cfPlainWebSocketPort, timeout, nil, dialContext)
+}
+
+func wsConnectTransport(ctx context.Context, ip, domain, path string, port int, timeout float64, tlsCfg *tls.Config, dialContext func(context.Context, string, string) (net.Conn, error)) (*RawWebSocket, error) {
 	if path == "" {
 		path = "/apiws"
 	}
@@ -795,18 +813,10 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 		Timeout: time.Duration(dialTimeout * float64(time.Second)),
 	}
 
-	if serverName == "" {
-		serverName = domain
-	}
-	tlsCfg := webSocketTLSConfig(serverName, curves)
-	if roots != nil {
-		tlsCfg.RootCAs = roots
-	}
-
 	if dialContext == nil {
 		dialContext = dialer.DialContext
 	}
-	rawConn, err := dialContext(ctx, "tcp", joinAddr(ip, 443))
+	rawConn, err := dialContext(ctx, "tcp", joinAddr(ip, port))
 	if err != nil {
 		return nil, &wsStageError{Stage: "tcp_dial", Err: err}
 	}
@@ -814,13 +824,17 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 	stopCancel := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	defer stopCancel()
 
-	tlsConn := tls.Client(rawConn, tlsCfg)
-	_ = tlsConn.SetDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = tlsConn.Close()
-		return nil, &wsStageError{Stage: "tls_handshake", Err: err}
+	var conn net.Conn = rawConn
+	if tlsCfg != nil {
+		tlsConn := tls.Client(rawConn, tlsCfg)
+		_ = tlsConn.SetDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = tlsConn.Close()
+			return nil, &wsStageError{Stage: "tls_handshake", Err: err}
+		}
+		_ = tlsConn.SetDeadline(time.Time{})
+		conn = tlsConn
 	}
-	_ = tlsConn.SetDeadline(time.Time{})
 
 	wsKeyBytes := make([]byte, 16)
 	_, _ = rand.Read(wsKeyBytes)
@@ -841,24 +855,32 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 		path, domain, wsKey,
 	)
 
-	_ = tlsConn.SetWriteDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
-	_, err = tlsConn.Write([]byte(req))
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+	_, err = conn.Write([]byte(req))
 	if err != nil {
-		_ = tlsConn.Close()
+		_ = conn.Close()
 		return nil, &wsStageError{Stage: "ws_upgrade_write", Err: err}
 	}
-	_ = tlsConn.SetWriteDeadline(time.Time{})
+	_ = conn.SetWriteDeadline(time.Time{})
 
 	// Use buffered reader for efficient header parsing
-	bufReader := bufio.NewReaderSize(tlsConn, 4096)
+	bufReader := bufio.NewReaderSize(conn, 4096)
 
-	_ = tlsConn.SetReadDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
+	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(timeout * float64(time.Second))))
 
 	var responseLines []string
 	for {
-		line, err := bufReader.ReadString('\n')
+		var line string
+		var err error
+		if tlsCfg == nil {
+			var lineBytes []byte
+			lineBytes, err = bufReader.ReadSlice('\n')
+			line = string(lineBytes)
+		} else {
+			line, err = bufReader.ReadString('\n')
+		}
 		if err != nil {
-			_ = tlsConn.Close()
+			_ = conn.Close()
 			return nil, &wsStageError{Stage: "ws_upgrade_read", Err: err}
 		}
 		line = strings.TrimRight(line, "\r\n")
@@ -867,14 +889,14 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 		}
 		responseLines = append(responseLines, line)
 		if len(responseLines) > 100 {
-			_ = tlsConn.Close()
+			_ = conn.Close()
 			return nil, &wsStageError{Stage: "ws_upgrade_read", Err: fmt.Errorf("too many HTTP headers")}
 		}
 	}
-	_ = tlsConn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
 
 	if len(responseLines) == 0 {
-		_ = tlsConn.Close()
+		_ = conn.Close()
 		return nil, &WsHandshakeError{StatusCode: 0, StatusLine: "empty response"}
 	}
 
@@ -886,12 +908,16 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 	}
 
 	if statusCode == 101 {
+		if tlsCfg == nil && !flowsealValidUpgradeResponse(responseLines[1:], wsKeyBytes) {
+			_ = conn.Close()
+			return nil, &WsHandshakeError{StatusCode: 101, StatusLine: "invalid WebSocket upgrade response"}
+		}
 		if err := ctx.Err(); err != nil {
-			_ = tlsConn.Close()
+			_ = conn.Close()
 			return nil, err
 		}
 		ws := &RawWebSocket{
-			conn:      tlsConn,
+			conn:      conn,
 			bufReader: bufReader,
 		}
 		return ws, nil
@@ -906,7 +932,7 @@ func wsConnectWithCurvesContextDialSNIWithRoots(ctx context.Context, ip, domain,
 			headers[k] = v
 		}
 	}
-	_ = tlsConn.Close()
+	_ = conn.Close()
 	return nil, &WsHandshakeError{
 		StatusCode: statusCode,
 		StatusLine: firstLine,
@@ -3150,6 +3176,8 @@ func parseRuntimeConfig(raw string) (map[int]string, runtimeSettings, error) {
 				cfg.Priority = parseBoolValue(val)
 			case "cfproxy_only":
 				cfg.Only = parseBoolValue(val)
+			case "cfproxy_no_tls":
+				cfg.NoTLS = parseBoolValue(val)
 			case "cfproxy_domain":
 				if val != "" {
 					if normalized, ok := tgwsroute.NormalizeCFDomain(val); ok {
