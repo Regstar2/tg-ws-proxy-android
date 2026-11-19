@@ -48,6 +48,8 @@ Telegram app
 
 ### Runtime config (Android → Go)
 
+In v1.11.10, the CF Proxy preference `cfproxy_no_tls` defaults to true **only if no value is saved**. Compose UI, `ProxyRuntimeConfigFactory` (including Quick Settings) and `ConnectionRuntimeConfig` use the same default. Explicitly saved false remains WSS/443 with certificate verification; true uses WebSocket port 80 without TLS or upstream authentication. Changing this setting does not modify the route order. See [WS/80 acceptance](../testing/issue-158-cf-ws80-device-smoke.md).
+
 - `ConnectionRuntimeConfig.buildRuntimeTokens()` emits `@key=value` tokens: connection mode, CF flags, worker domain, `@route_*`, `@preferred_route`, adaptive stats, network profile.
 - Go `parseRuntimeConfig()` applies tokens and enforces `NetworkRoutePolicy` when `@route_*` are present.
 

@@ -420,7 +420,7 @@ private fun ProxyScreen(
     var manualCfDomains by remember { mutableStateOf(manualCfDomainRepository.load()) }
     var manualCfDomainsText by remember { mutableStateOf(manualCfDomains.joinToString("\n")) }
     var cfProxyNoTls by remember {
-        mutableStateOf(prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_CFPROXY_NO_TLS, false))
+        mutableStateOf(prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_CFPROXY_NO_TLS, ConnectionRuntimeConfig.DEFAULT_CF_PROXY_NO_TLS))
     }
     var invalidManualCfDomains by remember { mutableStateOf(emptyList<String>()) }
     var connectionMode by remember {

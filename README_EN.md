@@ -35,8 +35,8 @@ The primary use case remains **MTProto Proxy → Cloudflare Proxy** on `127.0.0.
 ## Project status
 
 **Latest published release:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Source version:** 1.11.9 (versionCode 65) — [release notes and verification](docs/releases/v1.11.9_EN.md).
-**Stage:** stable patch; original Flowseal Worker is available only as an experimental route
+**Source version:** 1.11.10 (versionCode 66) — [candidate notes](docs/releases/v1.11.10_EN.md).
+**Source status:** v1.11.10 is not published; v1.11.9 is the latest published stable release. Flowseal Legacy Worker remains experimental.
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. The app installs alongside the original `com.amurcanov.tgwsproxy` package; settings and data are not migrated automatically. Both local proxies cannot listen on the same port simultaneously.
 
@@ -233,6 +233,8 @@ Detailed design: [docs/architecture/architecture.md](docs/architecture/architect
 
 ## Security
 
+Native TLS now validates the upstream CA chain and hostname (PR #167). In v1.11.10, CF Proxy defaults to WS/80 **without TLS encryption or server authentication** when no preference is saved. Turn off “CF Proxy without TLS” to use verified WSS/443. Explicitly saved choices are preserved. Android CA acceptance remains pending (#158).
+
 - MTProto secrets, query parameters, and sensitive addresses are masked in the interface, diagnostic reports, and logs where the implementation supports it.
 - The WARP/AWG private key is generated/stored locally in app-private storage and is not sent to the Consumer WARP API; only the public key and required registration metadata are sent externally.
 - Cloudflare Worker URLs, proxy secrets, keystores, and signing variables must not be published in issues, logs, or commits.
@@ -304,10 +306,18 @@ Build and copy the APK to the local `artifacts/` directory:
 .\scripts\build-apk.ps1 -Configuration Debug
 ```
 
+For in-place device testing over an official installation, use the **original release certificate** in the local gitignored release-signing.env:
+
+```powershell
+.\scripts\build-signed-worker-smoke.ps1 -Install
+```
+
+This is a release-signed **Debug** build (versionCode 66), not a public Release APK. Never uninstall to bypass a signature mismatch.
+
 Build the final signed release only when the local keystore is configured:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.9
+.\scripts\release.ps1 -Version v1.11.10
 ```
 
 The script verifies that the tag matches `versionName`, verifies the APK signature, and produces three APKs (ARMv7, ARM64, Universal) with separate SHA-256 files in `dist/`. All variants retain the same `versionCode`.
@@ -330,7 +340,7 @@ Single project CI entry point:
 
 It covers Go module verification, native Go tests, Android unit tests, debug APK assembly, and packaged-resource auditing. The release-candidate source also runs the final release audit from CI.
 
-Before tagging v1.11.9, verify an in-place update from v1.11.8 without data removal, actual Cloudflare Proxy without silent fallback, and two-way Telegram message and media transfers. Known TLS verification and notification reconnect limitations are documented in the [v1.11.9 notes](docs/releases/v1.11.9_EN.md). Validate the signed Release APK independently from Debug builds: [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Before publishing v1.11.10, verify signed APKs for all three variants, Android TLS CA roots and real WSS/Worker transport, in-place update from v1.11.9, notification reconnect and Telegram media. WS/80 is enabled by default for unset preferences and is plaintext and unauthenticated. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
 
 Current checklist: [docs/testing/README.md](docs/testing/README.md).
 
@@ -344,7 +354,7 @@ Current checklist: [docs/testing/README.md](docs/testing/README.md).
 | Repository structure | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Manual testing | [docs/testing/README.md](docs/testing/README.md) |
 | Release preparation | [docs/releases/release.md](docs/releases/release.md) |
-| `1.11.9` release notes | [docs/releases/v1.11.9_EN.md](docs/releases/v1.11.9_EN.md) · [Russian](docs/releases/v1.11.9.md) |
+| `1.11.10` candidate notes | [docs/releases/v1.11.10_EN.md](docs/releases/v1.11.10_EN.md) · [Russian](docs/releases/v1.11.10.md) |
 | `1.10.13` final audit | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | Change history | [CHANGELOG.md](CHANGELOG.md) |
 

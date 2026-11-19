@@ -6,6 +6,34 @@ import org.junit.Test
 
 class ProxyRuntimeConfigFactoryTest {
     @Test
+    fun defaultCfNoTlsTokenAndExplicitTlsOptOut() {
+        // Call without the new parameter to test the actual builder default.
+        val defaultTokens = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = emptyList(),
+            mode = ConnectionMode.CFOnly,
+            cfProxyEnabled = true,
+            cfProxyPriority = false,
+            cfProxyOnly = true,
+            cfDomain = "",
+            workerEnabled = false,
+            workerDomain = "",
+        ).split(',')
+        val wssTokens = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = emptyList(),
+            mode = ConnectionMode.CFOnly,
+            cfProxyEnabled = true,
+            cfProxyPriority = false,
+            cfProxyOnly = true,
+            cfDomain = "",
+            workerEnabled = false,
+            workerDomain = "",
+            cfProxyNoTls = false,
+        ).split(',')
+        assertTrue("@cfproxy_no_tls=1" in defaultTokens)
+        assertFalse("@cfproxy_no_tls=1" in wssTokens)
+    }
+
+    @Test
     fun plainCfUsesDedicatedOptInWithoutChangingRouteOrder() {
         val policy = NetworkRoutePolicy(
             networkType = NetworkProfileType.WIFI,

@@ -2,9 +2,9 @@
 
 ## Текущая база
 
-Исходники версии: `v1.11.8` (versionCode 64); фактический [последний опубликованный релиз](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest) указан на GitHub.
+Кандидат исходников: v1.11.10 (versionCode 66). Последний опубликованный релиз: [v1.11.9](https://github.com/Regstar2/tg-ws-proxy-android/releases/tag/v1.11.9).
 
-Версия объединяет #139, #138, #146 и #148 в Android patch-релизе без дополнительных transport-функций. План и границы проверки: [v1.11.8](../versions/v1.11.8.md); [release checklist](../releases/RELEASE_CHECKLIST.md).
+В 1.11.10 собраны PR #165–167, #169 и #170: переподключение, копирование ссылок, проверка native TLS, WS/80 (включён по умолчанию для ещё не выбранного transport; WSS/443 при выключенной настройке) и ABI. [План 1.11.10](../versions/v1.11.10.md) · [проверки выпуска](../releases/RELEASE_CHECKLIST.md).
 
 Ниже сохранён исторический план v1.10.13. Он не описывает текущую версию.
 

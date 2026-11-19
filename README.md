@@ -33,8 +33,8 @@ TgWsProxy запускает локальный прокси на Android-уст
 ## Статус проекта
 
 **Последний опубликованный релиз:** [GitHub Releases](https://github.com/Regstar2/tg-ws-proxy-android/releases/latest)  
-**Версия исходников:** 1.11.9 (versionCode 65) — [изменения и проверки](docs/releases/v1.11.9.md).
-**Стадия:** stable patch; оригинальный Flowseal Worker доступен только как экспериментальный маршрут
+**Версия исходников:** 1.11.10 (versionCode 66) — [заметки кандидата](docs/releases/v1.11.10.md).
+**Статус исходников:** v1.11.10 ещё не опубликована; последний стабильный релиз — v1.11.9. Flowseal Legacy Worker остаётся экспериментальным.
 
 **Android application ID:** `io.github.regstar2.tgwsproxy`. Сборка устанавливается отдельно от приложения с `com.amurcanov.tgwsproxy`; настройки и данные не переносятся автоматически. Одновременно запускать оба локальных прокси на одном порту нельзя.
 
@@ -234,6 +234,8 @@ Android-часть написана на Kotlin и Jetpack Compose. Нативн
 
 ## Безопасность
 
+Native TLS теперь проверяет CA chain и hostname upstream (PR #167). В 1.11.10 при отсутствии сохранённого выбора CF Proxy использует WS/80 **без TLS и аутентификации сервера**. Для защищённого WSS/443 выключите «CF Proxy без TLS». Явно сохранённый выбор пользователя сохраняется. Проверка Android CA на финальном APK ещё требуется (#158).
+
 - MTProto secret, query-параметры и чувствительные адреса маскируются в интерфейсе, диагностических отчётах и логах там, где это предусмотрено реализацией.
 - WARP/AWG private key генерируется/хранится локально в app-private storage и не отправляется Consumer WARP API; наружу передаётся только public key и необходимые registration metadata.
 - URL Cloudflare Worker, proxy secrets, keystore и переменные подписи нельзя публиковать в issue, логах или коммитах.
@@ -305,10 +307,18 @@ app\build\outputs\apk\debug\app-universal-debug.apk
 .\scripts\build-apk.ps1 -Configuration Debug
 ```
 
+Для установки тестовой сборки поверх официальной используйте **исходный релизный сертификат** в локальном release-signing.env:
+
+```powershell
+.\scripts\build-signed-worker-smoke.ps1 -Install
+```
+
+Это подписанный релизным ключом **Debug** APK (versionCode 66), а не публичный Release APK. При ошибке подписи не удаляйте приложение ради обхода проверки.
+
 Финальная signed release-сборка выполняется только при локально настроенном keystore:
 
 ```powershell
-.\scripts\release.ps1 -Version v1.11.9
+.\scripts\release.ps1 -Version v1.11.10
 ```
 
 Скрипт проверяет соответствие тега `versionName`, подпись APK и формирует три APK (ARMv7, ARM64, Universal) с отдельными SHA-256 в `dist/`. Все варианты сохраняют один `versionCode`.
@@ -331,7 +341,7 @@ app\build\outputs\apk\debug\app-universal-debug.apk
 
 Она включает Go module verification, native Go tests, Android unit tests, debug APK build и packaged-resource audit. Финальный release audit дополнительно запускается из CI для release-candidate source.
 
-Для v1.11.9 перед выпуском проверьте обновление поверх v1.11.8 без удаления данных, реальный Cloudflare Proxy без скрытого fallback, отправку и получение сообщений и медиа. Известные ограничения TLS-проверки и переподключения из уведомления перечислены в [заметках версии](docs/releases/v1.11.9.md). Подписанный Release APK необходимо проверять отдельно от Debug APK по [release checklist](docs/releases/RELEASE_CHECKLIST.md).
+Перед публикацией v1.11.10 необходимы проверка всех трёх подписанных APK, системных Android CA и реального WSS/Worker, обновления поверх v1.11.9, переподключения из уведомления и передачи Telegram-медиа. WS/80 включён по умолчанию при отсутствии сохранённого значения и работает без TLS и аутентификации сервера. [GO/NO-GO](docs/releases/RELEASE_CHECKLIST.md).
 
 Актуальный чек-лист: [docs/testing/README.md](docs/testing/README.md).
 
@@ -345,7 +355,7 @@ app\build\outputs\apk\debug\app-universal-debug.apk
 | Структура репозитория | [docs/development/repository-structure.md](docs/development/repository-structure.md) |
 | Ручное тестирование | [docs/testing/README.md](docs/testing/README.md) |
 | Подготовка релиза | [docs/releases/release.md](docs/releases/release.md) |
-| Release notes `1.11.9` | [docs/releases/v1.11.9.md](docs/releases/v1.11.9.md) · [English](docs/releases/v1.11.9_EN.md) |
+| Заметки кандидата `1.11.10` | [docs/releases/v1.11.10.md](docs/releases/v1.11.10.md) · [English](docs/releases/v1.11.10_EN.md) |
 | Финальный аудит `1.10.13` | [docs/releases/v1.10.13-final-audit.md](docs/releases/v1.10.13-final-audit.md) |
 | История изменений | [CHANGELOG.md](CHANGELOG.md) |
 

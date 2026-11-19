@@ -50,7 +50,7 @@ class ProxyRuntimeConfigFactory(
             cfProxyEnabled = prefs.getBoolean(KEY_CFPROXY_ENABLED, true),
             cfProxyPriority = prefs.getBoolean(KEY_CFPROXY_PRIORITY, true),
             cfProxyOnly = prefs.getBoolean(KEY_CFPROXY_ONLY, false),
-            cfProxyNoTls = prefs.getBoolean(KEY_CFPROXY_NO_TLS, false),
+            cfProxyNoTls = prefs.getBoolean(KEY_CFPROXY_NO_TLS, ConnectionRuntimeConfig.DEFAULT_CF_PROXY_NO_TLS),
             cfDomain = "",
             manualCfDomains = manualCfDomainsProvider(),
             workerEnabled = prefs.getBoolean(KEY_WORKER_ENABLED, false),
