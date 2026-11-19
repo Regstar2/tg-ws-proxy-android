@@ -7,7 +7,8 @@ import org.junit.Test
 class ProxyRuntimeConfigFactoryTest {
     @Test
     fun defaultCfNoTlsTokenAndExplicitTlsOptOut() {
-        fun tokens(noTls: Boolean) = ConnectionRuntimeConfig.buildRuntimeTokens(
+        // Call without the new parameter to test the actual builder default.
+        val defaultTokens = ConnectionRuntimeConfig.buildRuntimeTokens(
             dcEntries = emptyList(),
             mode = ConnectionMode.CFOnly,
             cfProxyEnabled = true,
@@ -16,11 +17,20 @@ class ProxyRuntimeConfigFactoryTest {
             cfDomain = "",
             workerEnabled = false,
             workerDomain = "",
-            cfProxyNoTls = noTls,
-        )
-        assertTrue(ConnectionRuntimeConfig.DEFAULT_CF_PROXY_NO_TLS)
-        assertTrue("@cfproxy_no_tls=1" in tokens(ConnectionRuntimeConfig.DEFAULT_CF_PROXY_NO_TLS))
-        assertFalse("@cfproxy_no_tls=1" in tokens(false))
+        ).split(',')
+        val wssTokens = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = emptyList(),
+            mode = ConnectionMode.CFOnly,
+            cfProxyEnabled = true,
+            cfProxyPriority = false,
+            cfProxyOnly = true,
+            cfDomain = "",
+            workerEnabled = false,
+            workerDomain = "",
+            cfProxyNoTls = false,
+        ).split(',')
+        assertTrue("@cfproxy_no_tls=1" in defaultTokens)
+        assertFalse("@cfproxy_no_tls=1" in wssTokens)
     }
 
     @Test
