@@ -36,6 +36,7 @@ object ConnectionRuntimeConfig {
         flowsealMediaFixEnabled: Boolean = false,
         flowsealMediaFixDc: Int = WorkerDestinationMode.DEFAULT_MEDIA_FIX_DC,
         flowsealMediaFixIp: String = WorkerDestinationMode.DEFAULT_MEDIA_FIX_IP,
+        cfProxyNoTls: Boolean = false,
     ): String {
         val orderedPolicy = routePolicy?.let(NetworkRoutePolicyEditor::normalize)
         val effectiveMode = if (orderedPolicy != null) {
@@ -72,6 +73,7 @@ object ConnectionRuntimeConfig {
             add("@cfproxy=${if (cfEnabled) 1 else 0}")
             add("@cfproxy_priority=${if (cfPriority) 1 else 0}")
             add("@cfproxy_only=${if (cfOnly) 1 else 0}")
+            if (cfProxyNoTls) add("@cfproxy_no_tls=1")
             orderedPolicy?.let { policy ->
                 // The native MTProto planner uses this list as authoritative, ignoring legacy scoring.
                 add("@route_order=${policy.activeRoutes.joinToString("|") { it.prefValue }}")

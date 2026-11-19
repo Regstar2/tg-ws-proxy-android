@@ -50,6 +50,7 @@ class ProxyRuntimeConfigFactory(
             cfProxyEnabled = prefs.getBoolean(KEY_CFPROXY_ENABLED, true),
             cfProxyPriority = prefs.getBoolean(KEY_CFPROXY_PRIORITY, true),
             cfProxyOnly = prefs.getBoolean(KEY_CFPROXY_ONLY, false),
+            cfProxyNoTls = prefs.getBoolean(KEY_CFPROXY_NO_TLS, false),
             cfDomain = "",
             manualCfDomains = manualCfDomainsProvider(),
             workerEnabled = prefs.getBoolean(KEY_WORKER_ENABLED, false),
@@ -134,6 +135,7 @@ class ProxyRuntimeConfigFactory(
         const val KEY_CFPROXY_ENABLED = "cfproxy_enabled"
         const val KEY_CFPROXY_PRIORITY = "cfproxy_priority"
         const val KEY_CFPROXY_ONLY = "cfproxy_only"
+        const val KEY_CFPROXY_NO_TLS = "cfproxy_no_tls"
         const val KEY_WORKER_ENABLED = "worker_enabled"
         const val KEY_WORKER_TRANSPORT = "worker_transport"
         const val KEY_WORKER_DESTINATION_MODE = "worker_destination_mode"

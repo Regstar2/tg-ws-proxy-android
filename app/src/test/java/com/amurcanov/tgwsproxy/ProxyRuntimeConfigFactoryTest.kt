@@ -6,6 +6,36 @@ import org.junit.Test
 
 class ProxyRuntimeConfigFactoryTest {
     @Test
+    fun plainCfUsesDedicatedOptInWithoutChangingRouteOrder() {
+        val policy = NetworkRoutePolicy(
+            networkType = NetworkProfileType.WIFI,
+            enabledRoutes = setOf(RouteKind.CF_PROXY_WS, RouteKind.TCP_FALLBACK),
+            preferredRoute = RouteKind.CF_PROXY_WS,
+            autoStrategy = AutoStrategy.BALANCED,
+            allowFallback = true,
+        )
+        fun tokens(noTls: Boolean) = ConnectionRuntimeConfig.buildRuntimeTokens(
+            dcEntries = emptyList(),
+            mode = ConnectionMode.CFFirst,
+            cfProxyEnabled = true,
+            cfProxyPriority = true,
+            cfProxyOnly = false,
+            cfDomain = "",
+            workerEnabled = false,
+            workerDomain = "",
+            cfProxyNoTls = noTls,
+            routePolicy = policy,
+        ).split(',')
+
+        val secure = tokens(false)
+        val plain = tokens(true)
+        assertFalse("@cfproxy_no_tls=1" in secure)
+        assertTrue("@cfproxy_no_tls=1" in plain)
+        assertTrue("@route_order=cf_proxy_ws|tcp_fallback" in plain)
+        assertTrue(secure == plain.filterNot { it == "@cfproxy_no_tls=1" })
+    }
+
+    @Test
     fun runtimePolicy_singleEnabledRouteDisablesFallbackWithoutAddingRoutes() {
         val policy = NetworkRoutePolicy(
             networkType = NetworkProfileType.WIFI,

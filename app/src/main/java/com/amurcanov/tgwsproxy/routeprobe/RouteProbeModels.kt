@@ -71,6 +71,7 @@ data class RouteProbeRequest(
     val manualCfDomains: List<String> = emptyList(),
     val cachedUpstreamDomains: List<String> = emptyList(),
     val networkProfile: NetworkProfile? = null,
+    val cfProxyNoTls: Boolean = false,
 )
 
 data class RouteProbeResult(

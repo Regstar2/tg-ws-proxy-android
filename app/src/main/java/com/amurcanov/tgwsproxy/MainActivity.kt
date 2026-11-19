@@ -419,6 +419,9 @@ private fun ProxyScreen(
     var cfProxyOnly by remember { mutableStateOf(prefs.getBoolean("cfproxy_only", false)) }
     var manualCfDomains by remember { mutableStateOf(manualCfDomainRepository.load()) }
     var manualCfDomainsText by remember { mutableStateOf(manualCfDomains.joinToString("\n")) }
+    var cfProxyNoTls by remember {
+        mutableStateOf(prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_CFPROXY_NO_TLS, false))
+    }
     var invalidManualCfDomains by remember { mutableStateOf(emptyList<String>()) }
     var connectionMode by remember {
         mutableStateOf(
@@ -1280,6 +1283,7 @@ private fun ProxyScreen(
             manualCfDomains = manualCfDomains,
             cachedUpstreamDomains = cfUpstreamState.domains,
             networkProfile = currentNetworkProfile,
+            cfProxyNoTls = cfProxyNoTls,
         )
     }
 
@@ -2388,6 +2392,11 @@ private fun ProxyScreen(
                             manualCfDomainsText = manualCfDomainsText,
                             invalidManualCfDomains = invalidManualCfDomains,
                             onManualCfDomainsChange = ::applyManualCfDomains,
+                            cfProxyNoTls = cfProxyNoTls,
+                            onCfProxyNoTlsChange = { enabled ->
+                                cfProxyNoTls = enabled
+                                prefs.edit().putBoolean(ProxyRuntimeConfigFactory.KEY_CFPROXY_NO_TLS, enabled).apply()
+                            },
                             cfDomainRows = cfDomainRows,
                             cfDomainLastCheckAtMs = cfDomainLastCheckAtMs,
                             upstreamState = cfUpstreamState,
@@ -2415,6 +2424,7 @@ private fun ProxyScreen(
                                         val report = ConnectionDiagnostics.probeCfPool(
                                             manualCfDomains,
                                             cfUpstreamState.domains,
+                                            cfProxyNoTls,
                                         )
                                         ConnectionDiagnostics.logReport(report.routeReport)
                                         cfDomainRows = report.domains
@@ -2594,6 +2604,7 @@ private fun ProxyScreen(
                                 workerDomainText,
                                 manualCfDomains,
                                 cfUpstreamState.domains,
+                                cfProxyNoTls,
                             )
                         }
                     },
@@ -2601,7 +2612,7 @@ private fun ProxyScreen(
                     onProbeWorker = { runDiag(diagLabelWorker) { ConnectionDiagnostics.probeWorker(workerDomainText) } },
                     onProbeCf = {
                         runDiag(diagLabelCf) {
-                            ConnectionDiagnostics.probeCfProxy(manualCfDomains, cfUpstreamState.domains)
+                            ConnectionDiagnostics.probeCfProxy(manualCfDomains, cfUpstreamState.domains, cfProxyNoTls)
                         }
                     },
                     onProbeTcp = { runDiag(diagLabelTcp) { ConnectionDiagnostics.probeTcpFallback() } },

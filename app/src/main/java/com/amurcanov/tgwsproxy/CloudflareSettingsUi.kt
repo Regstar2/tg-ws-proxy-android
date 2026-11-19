@@ -133,6 +133,8 @@ fun CloudflareSettingsScreen(
     manualCfDomainsText: String,
     invalidManualCfDomains: List<String>,
     onManualCfDomainsChange: (String) -> Unit,
+    cfProxyNoTls: Boolean,
+    onCfProxyNoTlsChange: (Boolean) -> Unit,
     cfDomainRows: List<CfDomainHealth>,
     cfDomainLastCheckAtMs: Long?,
     upstreamState: CfDomainUpstreamState,
@@ -248,6 +250,8 @@ fun CloudflareSettingsScreen(
                     isProxyRunning = isProxyRunning,
                     isDiagRunning = isDiagRunning,
                     onManualCfDomainsChange = onManualCfDomainsChange,
+                    cfProxyNoTls = cfProxyNoTls,
+                    onCfProxyNoTlsChange = onCfProxyNoTlsChange,
                     onAutoUpdateChange = onAutoUpdateChange,
                     onMirrorEnabledChange = onMirrorEnabledChange,
                     onMirrorUrlChange = onMirrorUrlChange,
@@ -506,6 +510,8 @@ private fun CfProxyDomainsSettingsScreen(
     isProxyRunning: Boolean,
     isDiagRunning: Boolean,
     onManualCfDomainsChange: (String) -> Unit,
+    cfProxyNoTls: Boolean,
+    onCfProxyNoTlsChange: (Boolean) -> Unit,
     onAutoUpdateChange: (Boolean) -> Unit,
     onMirrorEnabledChange: (Boolean) -> Unit,
     onMirrorUrlChange: (String) -> Unit,
@@ -523,6 +529,27 @@ private fun CfProxyDomainsSettingsScreen(
             lastCheckAtMs = lastCheckAtMs,
             upstreamState = upstreamState,
         )
+        Spacer(modifier = Modifier.height(10.dp))
+        CfSectionCard(titleRes = R.string.cf_proxy_no_tls) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.cf_proxy_no_tls_hint),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Switch(
+                    checked = cfProxyNoTls,
+                    onCheckedChange = onCfProxyNoTlsChange,
+                    enabled = !isProxyRunning,
+                )
+            }
+            if (isProxyRunning) {
+                Text(stringResource(R.string.cf_proxy_no_tls_stop_to_change), style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Spacer(modifier = Modifier.height(10.dp))
         CfDomainActionsCard(
             isProxyRunning = isProxyRunning,

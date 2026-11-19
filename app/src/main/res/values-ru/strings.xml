@@ -72,6 +72,9 @@
     <string name="cf_worker_pool_legacy_badge">Legacy</string>
     <string name="cf_worker_pool_enabled_badge">Включён</string>
     <string name="cf_proxy_domains_title">CF Proxy-домены</string>
+    <string name="cf_proxy_no_tls">CF Proxy без TLS</string>
+    <string name="cf_proxy_no_tls_hint">WebSocket через порт 80. Внешнее соединение без TLS и проверки сервера. Шифрование MTProto сохраняется.</string>
+    <string name="cf_proxy_no_tls_stop_to_change">Остановите прокси, чтобы изменить режим.</string>
     <string name="cf_proxy_domains_manage">Управление доменами</string>
     <string name="cf_proxy_domains_active_count">Активных доменов</string>
     <string name="cf_proxy_domains_cooldown_count">В cooldown</string>

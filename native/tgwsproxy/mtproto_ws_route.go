@@ -180,9 +180,7 @@ func countCFPoolMiss(dc int, now time.Time) int64 {
 }
 
 func newMtProtoCFProxyConnector() *mtProtoCFProxyConnector {
-	return &mtProtoCFProxyConnector{
-		dialContext: defaultMtProtoCFProxyDial,
-	}
+	return &mtProtoCFProxyConnector{}
 }
 
 func (c *mtProtoCFProxyConnector) Capability() mtproxyfrontend.OutboundCapability {
@@ -276,8 +274,10 @@ func (c *mtProtoCFProxyConnector) Connect(
 		var err error
 		if c.dialContext != nil {
 			ws, err = c.dialContext(ctx, host, "/apiws", prefix)
-		} else {
+		} else if c.dial != nil {
 			ws, err = c.dial(host, "/apiws", prefix)
+		} else {
+			ws, err = defaultMtProtoCFProxyDial(ctx, host, "/apiws", prefix, settings.CF.NoTLS)
 		}
 		if cancelled := ctx.Err(); cancelled != nil {
 			if ws != nil {
@@ -355,7 +355,20 @@ func cfPoolUnavailableError(dc int, selection tgwsroute.CFDomainSelection) error
 		dc, len(selection.Candidates), len(selection.SkippedCooldown), len(selection.SkippedInFlight), selection.RetryAfterSeconds)
 }
 
-func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix string) (mtProtoFrameSocket, error) {
+func newCFProxyWebSocketDialer(ctx context.Context, serverName, logPrefix string, noTLS bool) func(string, string, string, float64) (*RawWebSocket, error) {
+	if !noTLS {
+		return (&compatibleWebSocketTLSDialer{ctx: ctx, serverName: serverName}).connect
+	}
+	return func(target, host, path string, timeout float64) (*RawWebSocket, error) {
+		ws, err := wsConnectPlainContextDial(ctx, target, host, path, timeout, nil)
+		if err == nil && logInfo != nil {
+			logInfo.Printf("%s transport=ws port=%d host=%s path=%s", logPrefix, cfPlainWebSocketPort, host, path)
+		}
+		return ws, err
+	}
+}
+
+func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix string, noTLS bool) (mtProtoFrameSocket, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -363,8 +376,8 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 	if !found || serverName == "" {
 		serverName = domain
 	}
-	dialer := compatibleWebSocketTLSDialer{ctx: ctx, serverName: serverName}
-	ws, err := dialer.connect(domain, domain, path, 10)
+	connect := newCFProxyWebSocketDialer(ctx, serverName, logPrefix, noTLS)
+	ws, err := connect(domain, domain, path, 10)
 	if err == nil {
 		return ws, nil
 	}
@@ -383,7 +396,7 @@ func defaultMtProtoCFProxyDial(ctx context.Context, domain, path, logPrefix stri
 		if cancelled := ctx.Err(); cancelled != nil {
 			return nil, cancelled
 		}
-		ws, lastErr = dialer.connect(ip, domain, path, 10)
+		ws, lastErr = connect(ip, domain, path, 10)
 		if lastErr == nil {
 			return ws, nil
 		}

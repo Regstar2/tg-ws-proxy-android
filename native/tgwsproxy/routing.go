@@ -119,6 +119,9 @@ func setRuntimeSettings(cfg runtimeSettings) {
 	resetProxyRouteDisplayState()
 	cfPool.SetManualDomains(cfg.CFManualDomains)
 	cfPool.SetCachedUpstreamDomains(cfg.CFCachedUpstream)
+	if prev.CF.NoTLS != cfg.CF.NoTLS {
+		cfPool.ResetCooldowns()
+	}
 	applyAdaptiveProfile(cfg)
 	logPolicyChange(prev, cfg)
 }
@@ -778,7 +781,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 		func() {
 			defer releaseReservation()
 			ok, reason, failureKind, latencyMs = cfProxyDialHost(
-				ctx, client, init, label, dc, isMedia, splitter, host, baseDomain, releaseReservation,
+				ctx, client, init, label, dc, isMedia, splitter, host, baseDomain, settings.CF.NoTLS, releaseReservation,
 			)
 			if !ok {
 				health = cfPool.MarkFailure(wsDC, baseDomain, failureKind, latencyMs)
@@ -815,7 +818,7 @@ func cfProxyFallbackWithPool(ctx context.Context, client net.Conn, init []byte, 
 	return false, "cfproxy_all_domains_failed"
 }
 
-func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter, host, baseDomain string, onConnected func()) (bool, string, tgwsroute.CFFailureKind, int64) {
+func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label string, dc int, isMedia bool, splitter *MsgSplitter, host, baseDomain string, noTLS bool, onConnected func()) (bool, string, tgwsroute.CFFailureKind, int64) {
 	mTag := mediaTag(isMedia)
 	started := time.Now()
 
@@ -829,9 +832,9 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 	var ws *RawWebSocket
 	var lastErr error
 	usedTarget := "hostname"
-	dialer := compatibleWebSocketTLSDialer{ctx: ctx, serverName: baseDomain}
+	connect := newCFProxyWebSocketDialer(ctx, baseDomain, prefix, noTLS)
 
-	ws, lastErr = dialer.connect(host, host, "/apiws", 10)
+	ws, lastErr = connect(host, host, "/apiws", 10)
 	if lastErr != nil {
 		logDomainConnectFailure(prefix, host, host, lastErr)
 	}
@@ -840,7 +843,7 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 		if ws != nil {
 			break
 		}
-		ws, lastErr = dialer.connect(ip, host, "/apiws", 10)
+		ws, lastErr = connect(ip, host, "/apiws", 10)
 		if lastErr == nil {
 			usedTarget = ip
 			break
@@ -871,7 +874,11 @@ func cfProxyDialHost(ctx context.Context, client net.Conn, init []byte, label st
 		onConnected()
 	}
 
-	summary := bridgeWS(ctx, client, ws, label, dc, host, 443, isMedia, splitter, bridgeWSMeta{route: routeCFProxyWS})
+	port := 443
+	if noTLS {
+		port = cfPlainWebSocketPort
+	}
+	summary := bridgeWS(ctx, client, ws, label, dc, host, port, isMedia, splitter, bridgeWSMeta{route: routeCFProxyWS})
 	return true, summary.String(), "", elapsedMillis(started)
 }
 

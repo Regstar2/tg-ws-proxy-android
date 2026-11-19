@@ -65,7 +65,7 @@ class RouteProbeRunner(
             RouteProbeTarget.IPV6_CONNECTIVITY -> listOf(steps.probeIpv6Connectivity())
         }
         logSteps(target, stepResults)
-        val required = requiredSteps(target)
+        val required = requiredSteps(target, request.cfProxyNoTls)
         val chunkRelay = stepResults.firstOrNull { it.step == RouteProbeStep.CHUNK_RELAY }
         val status = if (target == RouteProbeTarget.WORKER_WEBSOCKET && chunkRelay != null &&
             chunkRelay.status != RouteProbeStatus.OK
@@ -182,8 +182,15 @@ class RouteProbeRunner(
         if (out.last().status != RouteProbeStatus.OK) {
             return out
         }
-        out += steps.probeTcp(endpoint.upstreamHost, 443)
+        out += steps.probeTcp(endpoint.upstreamHost, if (request.cfProxyNoTls) 80 else 443)
         if (out.last().status != RouteProbeStatus.OK) {
+            return out
+        }
+        if (request.cfProxyNoTls) {
+            if (config.runWebSocketHandshake) {
+                out += steps.probeWebSocket(endpoint.tlsServerName, endpoint.upstreamHost, endpoint.path,
+                    httpHost = endpoint.upstreamHost, noTls = true)
+            }
             return out
         }
         out += steps.probeTls(endpoint.tlsServerName, endpoint.upstreamHost)
@@ -205,7 +212,7 @@ class RouteProbeRunner(
         return CfDomain.builtInDomains.firstOrNull().orEmpty()
     }
 
-    private fun requiredSteps(target: RouteProbeTarget): Set<RouteProbeStep> = when (target) {
+    private fun requiredSteps(target: RouteProbeTarget, cfProxyNoTls: Boolean): Set<RouteProbeStep> = when (target) {
         RouteProbeTarget.CURRENT_NETWORK -> setOf(RouteProbeStep.ROUTE_BINDING)
         RouteProbeTarget.WORKER_WEBSOCKET -> setOf(
             RouteProbeStep.DNS_RESOLVE,
@@ -213,14 +220,12 @@ class RouteProbeRunner(
             RouteProbeStep.TLS_HANDSHAKE,
             RouteProbeStep.CHUNK_RELAY,
         )
-        RouteProbeTarget.DIRECT_WEBSOCKET,
-        RouteProbeTarget.CLOUDFLARE_PROXY,
-        -> setOf(
-            RouteProbeStep.DNS_RESOLVE,
-            RouteProbeStep.TCP_CONNECT,
-            RouteProbeStep.TLS_HANDSHAKE,
-            RouteProbeStep.WEBSOCKET_HANDSHAKE,
-        )
+        RouteProbeTarget.DIRECT_WEBSOCKET, RouteProbeTarget.CLOUDFLARE_PROXY -> buildSet {
+            add(RouteProbeStep.DNS_RESOLVE)
+            add(RouteProbeStep.TCP_CONNECT)
+            if (target == RouteProbeTarget.DIRECT_WEBSOCKET || !cfProxyNoTls) add(RouteProbeStep.TLS_HANDSHAKE)
+            add(RouteProbeStep.WEBSOCKET_HANDSHAKE)
+        }
         RouteProbeTarget.IPV4_CONNECTIVITY -> setOf(RouteProbeStep.TCP_CONNECT)
         RouteProbeTarget.IPV6_CONNECTIVITY,
         RouteProbeTarget.TELEGRAM_REACHABILITY,

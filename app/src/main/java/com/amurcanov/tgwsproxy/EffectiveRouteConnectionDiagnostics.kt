@@ -19,7 +19,8 @@ object EffectiveRouteConnectionDiagnostics {
             if (route !in policy.enabledRoutes) {
                 RouteProbeResultMapper.disabled(route)
             } else {
-                probeRoute(route, workerDomain, manualCfDomains, cachedUpstreamDomains)
+                probeRoute(route, workerDomain, manualCfDomains, cachedUpstreamDomains,
+                    prefs.getBoolean(ProxyRuntimeConfigFactory.KEY_CFPROXY_NO_TLS, false))
             }
         }
         return EffectiveRouteProbeReport(
@@ -37,6 +38,7 @@ object EffectiveRouteConnectionDiagnostics {
         workerDomain: String,
         manualCfDomains: List<String>,
         cachedUpstreamDomains: List<String>,
+        cfProxyNoTls: Boolean,
     ): RouteLevelProbeResult {
         return runCatching {
             when (route) {
@@ -61,7 +63,7 @@ object EffectiveRouteConnectionDiagnostics {
                     } else {
                         RouteProbeResultMapper.fromConnectionReport(
                             route,
-                            ConnectionDiagnostics.probeCfProxy(manualCfDomains, cachedUpstreamDomains),
+                            ConnectionDiagnostics.probeCfProxy(manualCfDomains, cachedUpstreamDomains, cfProxyNoTls),
                         )
                     }
                 }
