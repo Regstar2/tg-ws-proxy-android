@@ -39,6 +39,56 @@ Publish only the current version's six files from a clean release workspace.
 class/machine. Release workflow changes are source changes only; running a local
 release build does not publish anything.
 
+## Build on Android with Termux (ARM64)
+
+The repository provides a separate on-device **Debug** build path for AArch64
+Android devices. It does not replace or change the Windows PowerShell workflow.
+The Termux path uses the NDK linux-aarch64 host tools to cross-compile both
+Android ARM ABIs; it does not package Termux executables into the APK.
+
+### Requirements
+
+- Termux on an AArch64 Android device (no root required).
+- JDK 17; the checked-in Gradle Wrapper is 8.2.1.
+- Go 1.25.0 or newer, as required by native/tgwsproxy/go.mod.
+- Python 3 and Pillow (python-pillow in Termux), used by icon generation.
+- Android SDK Platform 35 and ARM64/Bionic build-tools containing runnable
+  aapt2 and zipalign.
+- Android NDK with toolchains/llvm/prebuilt/linux-aarch64 (Termux NDK r29
+  distribution is supported).
+
+Install the Termux packages:
+
+    pkg update
+    pkg install openjdk-17 golang python python-pillow
+
+Set SDK and NDK locations (adjust the SDK path if extracted elsewhere):
+
+    export ANDROID_SDK_ROOT="$HOME/opt/tgwsproxy-toolchain/android-sdk"
+    export ANDROID_NDK_ROOT="$HOME/opt/tgwsproxy-toolchain/android-ndk-r29"
+    export JAVA_HOME="$PREFIX/lib/jvm/java-17-openjdk"
+
+Check that the SDK contains platforms/android-35/android.jar and that
+build-tools/35.0.0/aapt2 version runs on the device. Explicit environment
+variables take precedence over the documented auto-detection paths.
+
+### Build
+
+From the repository root:
+
+    bash scripts/build-termux.sh
+
+The script builds native Go libraries, runs Gradle with the ARM64 aapt2
+override, assembles ARMv7, ARM64 and Universal Debug APKs, then audits their
+native ELF payloads. APKs and SHA-256 sidecars are copied to artifacts/termux/.
+The build uses the Android Debug signing key; it does not create or use the
+project release keystore and does not publish a release.
+
+Gradle selects build-native-android.sh only when it detects Termux.
+Windows continues to invoke build-native-android.ps1, and the existing
+scripts/build-apk.ps1 workflow is unchanged. Desktop Linux and macOS builds
+are not newly claimed by this Termux-specific path.
+
 ## Installation and updates
 
 Use an ABI-specific APK when its ABI appears in `adb -s SERIAL shell getprop

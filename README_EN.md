@@ -100,14 +100,11 @@ When Telegram cannot connect, open the built-in diagnostics and test the selecte
 
 ### For building
 
-- Windows and PowerShell;
-- JDK 17;
-- Android SDK and Android NDK;
-- Go;
-- Python 3;
-- the Gradle Wrapper included in the repository.
+**Windows:** PowerShell, JDK 17, Android SDK/NDK, Go, Python 3, and the repository Gradle Wrapper.
 
-The current native build script uses a Windows NDK toolchain path. The repository does not claim Linux or macOS build support.
+**Android/Termux:** an ARM64 device, JDK 17, Go 1.25.0+, Python 3 + Pillow, Android SDK Platform 35 with ARM64/Bionic build-tools, and an NDK containing linux-aarch64 host tools. See the Termux build guide in docs/development/android-abis.md.
+
+Desktop Linux and macOS builds are not claimed; Termux has a separate ARM64 build path.
 
 ## Installation
 
@@ -299,6 +296,12 @@ Gradle builds both native ABIs and generates icons through `preBuild`. Outputs i
 ```text
 app\build\outputs\apk\debug\app-universal-debug.apk
 ```
+
+Build directly on Android/Termux (ARM64):
+
+    bash scripts/build-termux.sh
+
+The script builds ARMv7, ARM64 and Universal Debug APKs, audits their ELF payloads, and copies the APKs plus SHA-256 sidecars to artifacts/termux/. It does not use the release keystore and does not change the Windows workflow.
 
 Build and copy the APK to the local `artifacts/` directory:
 
