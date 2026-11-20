@@ -138,4 +138,73 @@ class AwgWarpProfileModelsTest {
         assertTrue(failure != null)
         assertFalse(failure?.message.orEmpty().contains(secret))
     }
+
+    @Test
+    fun parserAcceptsAwg31ConfigurationOptionsAndHeaderProtectionKey() {
+        val headerKey = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
+        val parsed = AwgWarpConfigParser.parse(awg31Config(headerKey)).getOrThrow()
+
+        assertEquals(headerKey, parsed.deviceOptions["HeaderProtectionKey"])
+        assertEquals("27-97", parsed.deviceOptions["ContentPaddingAddition"])
+        assertEquals("116-131", parsed.deviceOptions["RekeyAfterTime"])
+        assertEquals("6-9", parsed.deviceOptions["RekeyTimeout"])
+        assertEquals("171-196", parsed.deviceOptions["RejectAfterTime"])
+        assertEquals("9-16", parsed.deviceOptions["KeepaliveTimeout"])
+        assertEquals("18-26", parsed.deviceOptions["MaxHandshakeAttempts"])
+        assertEquals("on", parsed.deviceOptions["RandomTrailers"])
+        assertEquals("0", parsed.deviceOptions["DisableCookies"])
+    }
+
+    @Test
+    fun parserRejectsHeaderProtectionKeyUnlessEveryPaddingIsAtLeastTwelve() {
+        for (key in listOf("S1", "S2", "S3", "S4")) {
+            val config = awg31Config().replace("$key = 12", "$key = 11")
+            assertTrue("$key below 12 must fail", AwgWarpConfigParser.parse(config).isFailure)
+        }
+    }
+
+    @Test
+    fun parserRejectsMalformedAwg31RangesBooleansAndHeaderKey() {
+        val invalidConfigs = listOf(
+            awg31Config().replace("ContentPaddingAddition = 27-97", "ContentPaddingAddition = 97-27"),
+            awg31Config().replace("RekeyTimeout = 6-9", "RekeyTimeout = 1-2-3"),
+            awg31Config().replace("RejectAfterTime = 171-196", "RejectAfterTime = 4294967296"),
+            awg31Config().replace("RandomTrailers = on", "RandomTrailers = maybe"),
+            awg31Config(headerKey = "not-a-key"),
+        )
+        invalidConfigs.forEachIndexed { index, config ->
+            assertTrue("invalid AWG 3.1 configuration $index must fail", AwgWarpConfigParser.parse(config).isFailure)
+        }
+    }
+
+    private fun awg31Config(
+        headerKey: String = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+    ): String = """
+        [Interface]
+        PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        Address = 172.16.0.2/32
+        S1 = 12
+        S2 = 12
+        S3 = 12
+        S4 = 12
+        H1 = 1-10
+        H2 = 11-20
+        H3 = 21-30
+        H4 = 31-40
+        HeaderProtectionKey = $headerKey
+        ContentPaddingAddition = 27-97
+        RekeyAfterTime = 116-131
+        RekeyTimeout = 6-9
+        RejectAfterTime = 171-196
+        KeepaliveTimeout = 9-16
+        MaxHandshakeAttempts = 18-26
+        RandomTrailers = on
+        DisableCookies = 0
+
+        [Peer]
+        PublicKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+        Endpoint = engage.cloudflareclient.com:2408
+        AllowedIPs = 0.0.0.0/0
+    """.trimIndent()
+
 }
