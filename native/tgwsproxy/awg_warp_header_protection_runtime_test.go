@@ -32,14 +32,14 @@ func TestAwgWarpHeaderProtectionRuntimeFullDuplex(t *testing.T) {
 
 	serverIP := netip.MustParseAddr("10.77.0.1")
 	clientIP := netip.MustParseAddr("10.77.0.2")
-	serverTun, serverStack, err := netstack.CreateNetTUN([]netip.Addr{serverIP}, nil, 1420)
+	serverTun, serverStack, err := netstack.CreateNetTUN([]netip.Addr{serverIP}, nil, defaultAwgWarpMTU)
 	if err != nil {
 		t.Fatalf("create server netstack: %v", err)
 	}
 	serverDevice := device.NewDevice(serverTun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
 	defer serverDevice.Close()
 
-	clientTun, clientStack, err := netstack.CreateNetTUN([]netip.Addr{clientIP}, nil, 1420)
+	clientTun, clientStack, err := netstack.CreateNetTUN([]netip.Addr{clientIP}, nil, defaultAwgWarpMTU)
 	if err != nil {
 		t.Fatalf("create client netstack: %v", err)
 	}
