@@ -85,6 +85,7 @@ android {
 
     buildTypes {
         debug {
+            buildConfigField("boolean", "PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED", (!signedWorkerSmoke).toString())
             if (!signedWorkerSmoke) {
                 applicationIdSuffix = if (isolatedAbiSmoke) ".abismoke" else ".debug"
             }
@@ -95,6 +96,7 @@ android {
             }
         }
         release {
+            buildConfigField("boolean", "PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED", "false")
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true

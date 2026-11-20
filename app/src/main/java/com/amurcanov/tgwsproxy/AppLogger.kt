@@ -9,7 +9,7 @@ import android.util.Log
  * Sinks:
  * - Android Logcat (always) for the existing runtime log UI (LogManager reads tag "TgWsProxy")
  * - In-memory runtime log UI remains unchanged (it still reads Logcat and keeps last ~400 lines)
- * - Persistent file sink is enabled by default in debug builds and remains opt-in in release builds.
+ * - Persistent file sink defaults to on in ordinary debug builds; signed Worker smoke and release builds remain opt-in.
  */
 object AppLogger {
     private const val TAG = "TgWsProxy"
@@ -60,7 +60,7 @@ object AppLogger {
         val persistentEvent = AppLogPersistencePolicy.withStackTrace(
             event = safe,
             throwable = tr,
-            debugBuild = BuildConfig.DEBUG,
+            debugBuild = BuildConfig.PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED,
         )
         PersistentLogStore.log(context, prefs, persistentEvent)
     }

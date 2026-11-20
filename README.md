@@ -198,7 +198,7 @@ WebSocket — транспорт. Фактический путь в интер�
 | Wi-Fi | только `cf_proxy_ws`, без fallback |
 | Неизвестная сеть | только `cf_proxy_ws`, без fallback |
 | Runtime-сбор логов | выключен |
-| Persistent file logs | выключены |
+| Persistent file logs | Release и signed Worker smoke: выключены; обычная Debug-сборка: включены (DEBUG) |
 
 `awg_warp` не включается в default route policy автоматически; пользователь явно настраивает и выбирает WARP/AWG-профиль.
 

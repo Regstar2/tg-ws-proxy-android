@@ -24,7 +24,7 @@ object PersistentLoggingPrefsStore {
 
     fun load(
         prefs: SharedPreferences,
-        isDebugBuild: Boolean = BuildConfig.DEBUG,
+        isDebugBuild: Boolean = BuildConfig.PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED,
     ): PersistentLoggingPrefs {
         val defaultVerbosity =
             if (isDebugBuild) PersistentLogVerbosity.DEBUG else PersistentLogVerbosity.IMPORTANT

@@ -1003,7 +1003,7 @@ private fun ProxyScreen(
             DiagnosticsViewModel.onScreenOpened()
             diagnosticsViewModel.syncRuntimeRoute(enrichedRuntimeRoute())
             diagnosticsViewModel.loadFromRepository()
-            val persistentEnabled = prefs.getBoolean("persistent_logs_enabled", false)
+            val persistentEnabled = PersistentLoggingPrefsStore.load(prefs).enabled
             val bytes = PersistentLogStore.totalSizeBytes(context)
             diagnosticsViewModel.updatePersistentLogsState(
                 enabled = persistentEnabled,

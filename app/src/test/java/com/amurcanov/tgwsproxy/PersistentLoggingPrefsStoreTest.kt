@@ -29,6 +29,17 @@ class PersistentLoggingPrefsStoreTest {
     }
 
     @Test
+    fun signedSmokeOrReleaseCanExplicitlyEnablePersistentLogs() {
+        val storage = InMemorySharedPreferences()
+        storage.edit().putBoolean("persistent_logs_enabled", true).apply()
+
+        val prefs = PersistentLoggingPrefsStore.load(storage, isDebugBuild = false)
+
+        assertTrue(prefs.enabled)
+        assertEquals(PersistentLogVerbosity.IMPORTANT, prefs.verbosity)
+    }
+
+    @Test
     fun savedPreferencesOverrideBuildDefaults() {
         val storage = InMemorySharedPreferences()
         storage.edit()
