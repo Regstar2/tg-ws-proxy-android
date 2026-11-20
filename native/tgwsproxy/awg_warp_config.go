@@ -160,11 +160,30 @@ func (cfg *awgWarpConfig) parseInterfaceField(key, value string, seenOptions map
 		if _, exists := seenOptions[uapiKey]; exists {
 			return fmt.Errorf("duplicate %s", key)
 		}
-		if err := validateAwgWarpDeviceOption(uapiKey, value); err != nil {
+
+		normalizedValue := value
+		switch uapiKey {
+		case "header_protection_key":
+			var err error
+			normalizedValue, err = decodeAwgWarpHeaderProtectionKey(value)
+			if err != nil {
+				return err
+			}
+		case "random_trailers", "disable_cookies":
+			switch strings.ToLower(value) {
+			case "on", "true", "1":
+				normalizedValue = "true"
+			case "off", "false", "0":
+				normalizedValue = "false"
+			default:
+				return fmt.Errorf("%s must be on/off, true/false or 1/0", key)
+			}
+		}
+		if err := validateAwgWarpDeviceOption(uapiKey, normalizedValue); err != nil {
 			return err
 		}
 		seenOptions[uapiKey] = struct{}{}
-		cfg.deviceOptions = append(cfg.deviceOptions, awgWarpOption{key: uapiKey, value: value})
+		cfg.deviceOptions = append(cfg.deviceOptions, awgWarpOption{key: uapiKey, value: normalizedValue})
 		return nil
 	}
 }
@@ -234,6 +253,8 @@ func (cfg awgWarpConfig) validate() error {
 
 	var jmin, jmax uint64
 	var hasJmin, hasJmax bool
+	var hasHeaderProtectionKey bool
+	paddingValues := make(map[string]uint64, 4)
 	for _, option := range cfg.deviceOptions {
 		switch option.key {
 		case "jmin":
@@ -242,10 +263,23 @@ func (cfg awgWarpConfig) validate() error {
 		case "jmax":
 			jmax, _ = strconv.ParseUint(option.value, 10, 32)
 			hasJmax = true
+		case "header_protection_key":
+			hasHeaderProtectionKey = true
+		case "s1", "s2", "s3", "s4":
+			padding, _ := strconv.ParseUint(option.value, 10, 16)
+			paddingValues[option.key] = padding
 		}
 	}
 	if hasJmin && hasJmax && jmin > jmax {
 		return errors.New("AWG/WARP Jmin must not exceed Jmax")
+	}
+	if hasHeaderProtectionKey {
+		for _, key := range []string{"s1", "s2", "s3", "s4"} {
+			padding, ok := paddingValues[key]
+			if !ok || padding < 12 {
+				return errors.New("AWG/WARP HeaderProtectionKey requires S1, S2, S3 and S4 to be at least 12")
+			}
+		}
 	}
 	return nil
 }
@@ -277,6 +311,31 @@ func (cfg awgWarpConfig) allowsTarget(addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+func decodeAwgWarpHeaderProtectionKey(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	decoded, err := hex.DecodeString(trimmed)
+	if err != nil || len(decoded) != wireGuardKeySize {
+		decoded, err = base64.StdEncoding.DecodeString(trimmed)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(trimmed)
+		}
+	}
+	if err != nil || len(decoded) != wireGuardKeySize {
+		return "", errors.New("HEADER_PROTECTION_KEY must be a 32-byte Base64 key or a 64-character hex key")
+	}
+	allZero := true
+	for _, value := range decoded {
+		if value != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return "", errors.New("HEADER_PROTECTION_KEY must not be all zero")
+	}
+	return hex.EncodeToString(decoded), nil
 }
 
 func decodeWireGuardKey(value string) (string, error) {
@@ -343,9 +402,49 @@ func awgWarpDeviceOptionKey(normalized string) (string, bool) {
 	switch normalized {
 	case "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5":
 		return normalized, true
+	case "headerprotectionkey":
+		return "header_protection_key", true
+	case "contentpaddingaddition":
+		return "content_padding_addition", true
+	case "rekeyaftertime":
+		return "rekey_after_time", true
+	case "rekeytimeout":
+		return "rekey_timeout", true
+	case "rejectaftertime":
+		return "reject_after_time", true
+	case "keepalivetimeout":
+		return "keepalive_timeout", true
+	case "maxhandshakeattempts":
+		return "max_handshake_attempts", true
+	case "randomtrailers":
+		return "random_trailers", true
+	case "disablecookies":
+		return "disable_cookies", true
 	default:
 		return "", false
 	}
+}
+
+func parseAwgUint32Range(value string) (uint64, uint64, error) {
+	parts := strings.Split(value, "-")
+	if len(parts) < 1 || len(parts) > 2 {
+		return 0, 0, errors.New("expected an unsigned 32-bit integer or range")
+	}
+	low, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return 0, 0, errors.New("invalid lower bound in unsigned 32-bit range")
+	}
+	high := low
+	if len(parts) == 2 {
+		high, err = strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			return 0, 0, errors.New("invalid upper bound in unsigned 32-bit range")
+		}
+	}
+	if high < low {
+		return 0, 0, errors.New("upper bound is below lower bound")
+	}
+	return low, high, nil
 }
 
 func validateAwgWarpDeviceOption(key, value string) error {
@@ -358,7 +457,22 @@ func validateAwgWarpDeviceOption(key, value string) error {
 		if _, err := strconv.ParseUint(value, 10, 16); err != nil {
 			return fmt.Errorf("%s must be an unsigned 16-bit integer", strings.ToUpper(key))
 		}
-	case "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4", "i5":
+	case "h1", "h2", "h3", "h4",
+		"content_padding_addition", "rekey_after_time", "rekey_timeout",
+		"reject_after_time", "keepalive_timeout", "max_handshake_attempts":
+		if _, _, err := parseAwgUint32Range(value); err != nil {
+			return fmt.Errorf("%s must be an unsigned 32-bit integer or range: %w", strings.ToUpper(key), err)
+		}
+	case "header_protection_key":
+		decoded, err := hex.DecodeString(value)
+		if err != nil || len(decoded) != wireGuardKeySize {
+			return errors.New("HEADER_PROTECTION_KEY must encode exactly 32 bytes")
+		}
+	case "random_trailers", "disable_cookies":
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%s must be a boolean", strings.ToUpper(key))
+		}
+	case "i1", "i2", "i3", "i4", "i5":
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s must not be empty", strings.ToUpper(key))
 		}
