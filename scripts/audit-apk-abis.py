@@ -6,7 +6,12 @@ import struct
 import zipfile
 from pathlib import Path
 
-ARCHITECTURES = {"armeabi-v7a": (1, 40), "arm64-v8a": (2, 183)}
+ARCHITECTURES = {
+    "armeabi-v7a": (1, 40),
+    "arm64-v8a": (2, 183),
+    "x86": (1, 3),
+    "x86_64": (2, 62),
+}
 LIBRARIES = {"libtgwsproxy.so", "libjnidispatch.so"}
 
 

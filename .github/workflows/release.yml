@@ -162,16 +162,16 @@ jobs:
                   throw "Existing release '$tag' is not the expected published stable release."
               }
 
-              $abis = @('armeabi-v7a', 'arm64-v8a', 'universal')
+              $abis = @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')
               $expectedNames = @($abis | ForEach-Object {
                   "TgWsProxy-Android-$tag-$_.apk"
                   "TgWsProxy-Android-$tag-$_.apk.sha256"
               }) | Sort-Object
               $actualNames = @($release.assets | ForEach-Object { $_.name } | Sort-Object)
 
-              if ($actualNames.Count -ne 6 -or
+              if ($actualNames.Count -ne 10 -or
                   ($actualNames -join "`n") -cne ($expectedNames -join "`n")) {
-                  throw "Existing release '$tag' must contain exactly three APKs and three SHA-256 assets."
+                  throw "Existing release '$tag' must contain exactly five APKs and five SHA-256 assets."
               }
 
               $downloadDir = Join-Path $env:RUNNER_TEMP ("tgwsproxy-release-verify-" + [guid]::NewGuid().ToString('N'))
@@ -223,7 +223,7 @@ jobs:
               }
 
               "skip_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-              Write-Host "Existing release '$tag' and all six published assets passed SHA-256 verification. Build and upload will be skipped."
+              Write-Host "Existing release '$tag' and all ten published assets passed SHA-256 verification. Build and upload will be skipped."
           }
           elseif ($responseText -match '(?i)(HTTP 404|Not Found|release not found)') {
               "skip_build=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -317,11 +317,11 @@ jobs:
 
           $apk = @($files | Where-Object Extension -eq '.apk')
           $checksums = @($files | Where-Object Name -like '*.sha256')
-          if ($files.Count -ne 6 -or $apk.Count -ne 3 -or $checksums.Count -ne 3) {
-              throw "Expected three APKs and three SHA-256 files in dist/."
+          if ($files.Count -ne 10 -or $apk.Count -ne 5 -or $checksums.Count -ne 5) {
+              throw "Expected five APKs and five SHA-256 files in dist/."
           }
 
-          foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+          foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')) {
           $apkName = "TgWsProxy-Android-$env:RELEASE_TAG-$abi.apk"
           $checksumName = "$apkName.sha256"
           $apkPath = Join-Path './dist' $apkName

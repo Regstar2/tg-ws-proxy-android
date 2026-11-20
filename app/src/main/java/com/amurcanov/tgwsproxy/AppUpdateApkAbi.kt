@@ -4,7 +4,12 @@ import java.io.File
 import java.util.zip.ZipFile
 
 internal object AppUpdateApkAbi {
-    private val architectures = mapOf("armeabi-v7a" to (1 to 40), "arm64-v8a" to (2 to 183))
+    private val architectures = mapOf(
+        "armeabi-v7a" to (1 to 40),
+        "arm64-v8a" to (2 to 183),
+        "x86" to (1 to 3),
+        "x86_64" to (2 to 62),
+    )
     private val libraries = setOf("libtgwsproxy.so", "libjnidispatch.so")
 
     fun isCompatible(file: File, supportedAbis: List<String>): Boolean = runCatching {

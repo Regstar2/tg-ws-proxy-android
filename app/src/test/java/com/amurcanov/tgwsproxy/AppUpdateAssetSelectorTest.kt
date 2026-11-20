@@ -19,13 +19,37 @@ class AppUpdateAssetSelectorTest {
     }
 
     @Test
+    fun selectsX86AndX86_64ReleaseAssets() {
+        val x86 = filename.replace("arm64-v8a", "x86")
+        val x86_64 = filename.replace("arm64-v8a", "x86_64")
+        val release = release(
+            asset(x86, digest = digest),
+            asset(x86_64, digest = digest),
+        )
+
+        assertEquals(x86, select(release, listOf("x86"))?.apk?.name)
+        assertEquals(x86_64, select(release, listOf("x86_64"))?.apk?.name)
+        assertEquals(x86_64, select(release, listOf("x86_64", "x86"))?.apk?.name)
+        assertEquals(x86, select(release, listOf("x86", "x86_64"))?.apk?.name)
+    }
+
+    @Test
+    fun fallsBackToUniversalForNewArchitectures() {
+        val universal = filename.replace("arm64-v8a", "universal")
+        val release = release(asset(universal, digest = digest))
+
+        assertEquals(universal, select(release, listOf("x86"))?.apk?.name)
+        assertEquals(universal, select(release, listOf("x86_64"))?.apk?.name)
+    }
+
+    @Test
     fun prefersDeviceAbiOrderThenUniversal() {
         val arm = filename.replace("arm64-v8a", "armeabi-v7a")
         val universal = filename.replace("arm64-v8a", "universal")
         val all = release(asset(arm, digest = digest), asset(universal, digest = digest), asset(filename, digest = digest))
         assertEquals(filename, select(all, listOf("arm64-v8a", "armeabi-v7a"))?.apk?.name)
         assertEquals(universal, select(release(asset(universal, digest = digest)), listOf("armeabi-v7a"))?.apk?.name)
-        assertNull(select(all, listOf("x86_64", "x86")))
+        assertEquals(universal, select(all, listOf("x86_64", "x86"))?.apk?.name)
         assertNull(select(all, emptyList()))
         assertNull(select(release(asset(filename, digest = digest)), listOf("armeabi-v7a")))
     }

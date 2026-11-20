@@ -107,11 +107,11 @@ foreach ($readme in @('README.md', 'README_EN.md')) {
 }
 
 Write-Host '==> RU/EN Android resource parity'
-foreach ($abi in @('armeabi-v7a', 'arm64-v8a')) {
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64')) {
     Assert-NormalizedContains -Path $gradlePath -ExpectedText $abi -Description "Gradle supports $abi"
 }
 Assert-Match -Path $gradlePath -Pattern 'isUniversalApk\s*=\s*true' -Description 'Universal APK enabled'
-Assert-Match -Path (Join-Path $PSScriptRoot 'release.ps1') -Pattern "'armeabi-v7a', 'arm64-v8a', 'universal'" -Description 'Release builds all three APKs'
+Assert-Match -Path (Join-Path $PSScriptRoot 'release.ps1') -Pattern "'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal'" -Description 'Release builds four ABI APKs and one universal APK'
 function Get-ResourceNames([string]$Directory) {
     $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     if (-not (Test-Path -LiteralPath $Directory)) {

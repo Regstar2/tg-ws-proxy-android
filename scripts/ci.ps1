@@ -297,7 +297,7 @@ if (-not (Test-Path $debugApk)) {
 
 Write-Host "`n==> Verify packaged Android application identity"
 Invoke-CheckedCommand -Label 'APK ABI audit regression tests' -FilePath $pythonLauncher.Source -Arguments @('-3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_apk_abis.py')
-foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')) {
     $apk = Join-Path $root "app\build\outputs\apk\debug\app-$abi-debug.apk"
     Invoke-CheckedCommand -Label "Audit APK native payload $abi" -FilePath $pythonLauncher.Source -Arguments @('-3', (Join-Path $PSScriptRoot 'audit-apk-abis.py'), $apk, $abi)
 }

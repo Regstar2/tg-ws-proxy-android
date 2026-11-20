@@ -15,7 +15,7 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val goSources = files(
         rootProject.fileTree(nativeDir) { include("**/*.go", "go.mod", "go.sum") },
     )
-    val nativeOutputs = listOf("armeabi-v7a", "arm64-v8a").map {
+    val nativeOutputs = listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64").map {
         project.file("src/main/jniLibs/$it/libtgwsproxy.so")
     }
     val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
@@ -63,7 +63,7 @@ android {
         }
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
     }
 
@@ -108,7 +108,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a")
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = true
         }
     }

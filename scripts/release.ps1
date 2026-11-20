@@ -38,7 +38,7 @@ if (-not (Test-Path $releaseNotes)) {
     throw "Release notes were not found for ${Version}: $releaseNotes"
 }
 
-$abis = @('armeabi-v7a', 'arm64-v8a', 'universal')
+$abis = @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')
 Write-Host "Release metadata preflight: tag=$Version versionName=$versionName versionCode=$expectedVersionCode ABIs=$($abis -join ',')"
 
 if ($PreflightOnly) {
@@ -153,8 +153,8 @@ Set-Content -Path $checksumPath -Value "$hash  $artifactName" -Encoding ascii
 }
 
 $files = @(Get-ChildItem $dist -File)
-if (@($files | Where-Object { $_.Name -like "TgWsProxy-Android-$Version-*.apk*" }).Count -ne 6) {
-    throw "Expected three APKs and three SHA-256 checksums for $Version in dist/."
+if (@($files | Where-Object { $_.Name -like "TgWsProxy-Android-$Version-*.apk*" }).Count -ne 10) {
+    throw "Expected five APKs and five SHA-256 checksums for $Version in dist/."
 }
 
 Write-Host "Release artifacts prepared:"
