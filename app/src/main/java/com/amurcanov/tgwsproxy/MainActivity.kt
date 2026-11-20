@@ -2729,12 +2729,11 @@ private fun ProxyScreen(
 
                 // Persistent file logging (optional)
                 var persistentEnabled by rememberSaveable {
-                    mutableStateOf(prefs.getBoolean("persistent_logs_enabled", false))
+                    mutableStateOf(PersistentLoggingPrefsStore.load(prefs).enabled)
                 }
                 var persistentLevelName by rememberSaveable {
                     mutableStateOf(
-                        prefs.getString("persistent_logs_level", PersistentLogVerbosity.IMPORTANT.name)
-                            ?: PersistentLogVerbosity.IMPORTANT.name
+                        PersistentLoggingPrefsStore.load(prefs).verbosity.name
                     )
                 }
                 var retentionDays by rememberSaveable {

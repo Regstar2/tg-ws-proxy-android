@@ -85,8 +85,8 @@ android {
 
     buildTypes {
         debug {
-            if (isolatedAbiSmoke) {
-                applicationIdSuffix = ".abismoke"
+            if (!signedWorkerSmoke) {
+                applicationIdSuffix = if (isolatedAbiSmoke) ".abismoke" else ".debug"
             }
             versionNameSuffix = "-debug"
             if (signedWorkerSmoke) {
@@ -124,6 +124,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
