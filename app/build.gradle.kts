@@ -85,8 +85,9 @@ android {
 
     buildTypes {
         debug {
-            if (isolatedAbiSmoke) {
-                applicationIdSuffix = ".abismoke"
+            buildConfigField("boolean", "PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED", (!signedWorkerSmoke).toString())
+            if (!signedWorkerSmoke) {
+                applicationIdSuffix = if (isolatedAbiSmoke) ".abismoke" else ".debug"
             }
             versionNameSuffix = "-debug"
             if (signedWorkerSmoke) {
@@ -95,6 +96,7 @@ android {
             }
         }
         release {
+            buildConfigField("boolean", "PERSISTENT_DIAGNOSTICS_DEFAULT_ENABLED", "false")
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -124,6 +126,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"

@@ -5,6 +5,7 @@ package com.amurcanov.tgwsproxy
  * This is intentionally conservative (simple pattern-based redaction).
  */
 object AppLogSanitizer {
+    private val sensitiveDetailKeyPattern = Regex("""(?:^|_)(?:token|authorization|auth|bearer|api_key|key|password|cookie|secret|payload|raw)(?:_|$)""")
     // key=value (or key:"value") redaction. Keep key, redact value.
     private val patterns = listOf(
         Regex("""(?i)\b(mtproto_secret|mtprotoSecret|secret_key|secretKey)\s*=\s*("[^"]*"|[^\s&]+)"""),
@@ -34,7 +35,15 @@ object AppLogSanitizer {
 
     fun sanitizeEvent(event: AppLogEvent): AppLogEvent {
         val safeMessage = sanitizeText(event.message)
-        val safeDetails = event.details.mapValues { (_, v) -> sanitizeText(v) }
+        val safeDetails = event.details.mapValues { (key, value) ->
+            val acronymNormalizedKey = Regex("([A-Z]+)([A-Z][a-z])").replace(key) { match ->
+                "${match.groupValues[1]}_${match.groupValues[2]}"
+            }
+            val normalizedKey = Regex("([a-z0-9])([A-Z])").replace(acronymNormalizedKey) { match ->
+                "${match.groupValues[1]}_${match.groupValues[2]}"
+            }.lowercase().replace(Regex("[^a-z0-9]+"), "_")
+            if (sensitiveDetailKeyPattern.containsMatchIn(normalizedKey)) "***" else sanitizeText(value)
+        }
         return event.copy(message = safeMessage, details = safeDetails)
     }
 }
