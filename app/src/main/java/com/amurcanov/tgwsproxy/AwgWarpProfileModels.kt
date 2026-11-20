@@ -472,7 +472,7 @@ object AwgWarpConfigParser {
         } else {
             runCatching { Base64.getDecoder().decode(trimmed) }.getOrNull()
         }
-        require(decoded?.size == 32 && decoded.any { it.toInt() != 0 }) {
+        require(decoded != null && decoded.size == 32 && decoded.any { it.toInt() != 0 }) {
             "Invalid HeaderProtectionKey: expected a non-zero 32-byte Base64 or hex key"
         }
     }

@@ -142,6 +142,7 @@ func TestAwgWarpUAPIConfigOrdersDeviceOptionsBeforePeer(t *testing.T) {
 	if !strings.Contains(uapi, "allowed_ip=0.0.0.0/0\n") || !strings.Contains(uapi, "allowed_ip=::/0\n") {
 		t.Fatal("UAPI config is missing AllowedIPs")
 	}
+}
 
 func TestParseAwgWarpConfigSupportsAWG31OptionsAndNormalizesHeaderProtectionKey(t *testing.T) {
 	configText := strings.NewReplacer(
@@ -275,6 +276,4 @@ func TestDecodeAwgWarpHeaderProtectionKeyAcceptsBase64AndHex(t *testing.T) {
 			}
 		})
 	}
-}
-
 }
