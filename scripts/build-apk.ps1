@@ -73,7 +73,7 @@ Remove-SyncConflictBuildArtifacts
 
 # A failed build must not leave an older APK looking like a fresh result.
 $staleApks = @($sourceApk, $destApk)
-foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')) {
     $staleApks += Join-Path (Split-Path $sourceApk) "app-$abi-$configLower.apk"
     $destination = Join-Path $apkOutDir "tgwsproxy-$configLower-$abi.apk"
     $staleApks += $destination
@@ -119,13 +119,13 @@ if (-not (Test-Path $sourceApk)) {
 }
 
 New-Item -ItemType Directory -Force -Path $apkOutDir | Out-Null
-foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')) {
     $source = Join-Path (Split-Path $sourceApk) "app-$abi-$configLower.apk"
     if (-not (Test-Path -LiteralPath $source)) { throw "Missing APK: $source" }
     & py -3 (Join-Path $PSScriptRoot 'audit-apk-abis.py') $source $abi
     if ($LASTEXITCODE -ne 0) { throw "APK ABI audit failed: $abi" }
 }
-foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'universal')) {
+foreach ($abi in @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64', 'universal')) {
     $source = Join-Path (Split-Path $sourceApk) "app-$abi-$configLower.apk"
     $destination = Join-Path $apkOutDir "tgwsproxy-$configLower-$abi.apk"
     Copy-Item -LiteralPath $source -Destination $destination -Force

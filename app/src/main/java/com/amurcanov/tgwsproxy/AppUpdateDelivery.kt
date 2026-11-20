@@ -115,7 +115,7 @@ object AppUpdateAssetSelector {
 
     fun select(release: GitHubReleaseInfo, supportedAbis: List<String>): AppUpdateAssetSelection? {
         if (release.draft || SemanticVersion.parse(release.tagName) == null) return null
-        val candidates = supportedAbis.distinct().filter { it in setOf("arm64-v8a", "armeabi-v7a") }
+        val candidates = supportedAbis.distinct().filter { it in setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
         if (candidates.isEmpty()) return null
         for (abi in candidates + "universal") {
             selectNamed(release, "TgWsProxy-Android-${release.tagName}-$abi.apk")?.let { return it }
