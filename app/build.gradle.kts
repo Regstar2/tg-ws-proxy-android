@@ -8,9 +8,13 @@ val releaseVersionName = "1.11.10"
 // Explicit opt-in: sign the debug-only Worker smoke APK with the existing release key.
 val signedWorkerSmoke = System.getenv("TGWS_SIGNED_WORKER_SMOKE") == "1"
 val isolatedAbiSmoke = providers.gradleProperty("isolatedAbiSmoke").orNull == "true"
+val isTermuxHost = System.getenv("TERMUX_VERSION") != null ||
+    System.getenv("PREFIX")?.contains("/com.termux/files/usr") == true
 
 val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
-    val script = rootProject.file("scripts/build-native-android.ps1")
+    val script = rootProject.file(
+        if (isTermuxHost) "scripts/build-native-android.sh" else "scripts/build-native-android.ps1",
+    )
     val nativeDir = rootProject.file("native/tgwsproxy")
     val goSources = files(
         rootProject.fileTree(nativeDir) { include("**/*.go", "go.mod", "go.sum") },
@@ -18,14 +22,24 @@ val buildNativeAndroid by tasks.registering(org.gradle.api.tasks.Exec::class) {
     val nativeOutputs = listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64").map {
         project.file("src/main/jniLibs/$it/libtgwsproxy.so")
     }
-    val shell = if (System.getProperty("os.name").lowercase().contains("windows")) "powershell" else "pwsh"
+    val isWindowsHost = System.getProperty("os.name").lowercase().contains("windows")
+    val shell = when {
+        isWindowsHost -> "powershell"
+        isTermuxHost -> "bash"
+        else -> "pwsh"
+    }
 
     inputs.file(script)
     inputs.files(goSources)
     outputs.files(nativeOutputs)
     inputs.property("ndkRoot", System.getenv("ANDROID_NDK_ROOT") ?: "auto")
+    inputs.property("termuxHost", isTermuxHost)
     workingDir = rootProject.projectDir
-    commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+    if (isTermuxHost) {
+        commandLine(shell, script.absolutePath)
+    } else {
+        commandLine(shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+    }
 }
 
 val generateAppIcons by tasks.registering(org.gradle.api.tasks.Exec::class) {
@@ -49,6 +63,9 @@ tasks.named("preBuild") {
 android {
     namespace = "com.amurcanov.tgwsproxy"
     compileSdk = 35
+    if (isTermuxHost) {
+        buildToolsVersion = System.getenv("ANDROID_BUILD_TOOLS_VERSION") ?: "35.0.0"
+    }
 
     defaultConfig {
         applicationId = "io.github.regstar2.tgwsproxy"

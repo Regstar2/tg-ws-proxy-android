@@ -101,14 +101,11 @@ TgWsProxy запускает локальный прокси на Android-уст
 
 ### Для сборки
 
-- Windows и PowerShell;
-- JDK 17;
-- Android SDK и Android NDK;
-- Go;
-- Python 3;
-- Gradle Wrapper из репозитория.
+**Windows:** PowerShell, JDK 17, Android SDK/NDK, Go, Python 3 и Gradle Wrapper из репозитория.
 
-Текущий native build script использует Windows-путь к NDK toolchain. Сборка на Linux и macOS репозиторием не заявлена.
+**Android/Termux:** ARM64-устройство, JDK 17, Go 1.25.0+, Python 3 + Pillow, Android SDK Platform 35 с ARM64/Bionic build-tools и NDK с host tools linux-aarch64. См. сборку в Termux в docs/development/android-abis.md.
+
+Сборка на настольных Linux и macOS не заявлена; Termux поддерживается отдельным ARM64-путём.
 
 ## Установка
 
@@ -300,6 +297,12 @@ Gradle вызывает native build обеих ABI и генерацию ико
 ```text
 app\build\outputs\apk\debug\app-universal-debug.apk
 ```
+
+Сборка непосредственно на Android/Termux (ARM64):
+
+    bash scripts/build-termux.sh
+
+Скрипт собирает ARMv7, ARM64 и Universal Debug APK, проверяет ELF и сохраняет APK с SHA-256 в artifacts/termux/. Он не использует релизный keystore и не меняет Windows-сборку.
 
 Сборка с копированием APK в локальный каталог `artifacts/`:
 
