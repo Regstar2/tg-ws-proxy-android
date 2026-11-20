@@ -247,6 +247,10 @@ if ($issue156Errors) { throw "Issue #156 smoke syntax errors: $($issue156Errors 
 Invoke-CheckedCommand -Label 'Issue #156 CF report regression (Windows PowerShell 5.1)' -FilePath $windowsPowerShell.Source -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $issue156Smoke, '-SelfTest')
 & $issue156Smoke -SelfTest
 
+$releaseManifestTest = Join-Path $PSScriptRoot 'tests\release-asset-manifest-test.ps1'
+Invoke-CheckedCommand -Label 'Release asset manifest compatibility (Windows PowerShell 5.1)' -FilePath $windowsPowerShell.Source -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $releaseManifestTest)
+& $releaseManifestTest
+
 Write-Host "`n==> Audit release metadata, localization and tracked private files"
 & $releaseAudit -ExpectedVersion '1.11.10' -ExpectedVersionCode 66
 if ($LASTEXITCODE -ne 0) {
