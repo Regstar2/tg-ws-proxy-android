@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -58,15 +59,29 @@ func TestAwgWarpHeaderProtectionRuntimeFullDuplex(t *testing.T) {
 		t.Fatalf("start server device: %v", err)
 	}
 
-	clientConfig := fmt.Sprintf(
-		"private_key=%s\nheader_protection_key=%s\n"+
-			"s1=12\ns2=12\ns3=12\ns4=12\nh1=1\nh2=2\nh3=3\nh4=4\n"+
-			"replace_peers=true\npublic_key=%s\nendpoint=127.0.0.1:%d\n"+
-			"replace_allowed_ips=true\nallowed_ip=%s/32\n\n",
-		clientPrivate, headerKeyHex, serverPublic, serverPort, serverIP,
+	clientPrivateBytes, err := hex.DecodeString(clientPrivate)
+	if err != nil {
+		t.Fatalf("decode client private key: %v", err)
+	}
+	serverPublicBytes, err := hex.DecodeString(serverPublic)
+	if err != nil {
+		t.Fatalf("decode server public key: %v", err)
+	}
+	clientConfigText := fmt.Sprintf(
+		"[Interface]\nPrivateKey = %s\nAddress = %s/32\n"+
+			"HeaderProtectionKey = %s\nS1 = 12\nS2 = 12\nS3 = 12\nS4 = 12\n"+
+			"H1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\n\n"+
+			"[Peer]\nPublicKey = %s\nEndpoint = 127.0.0.1:%d\nAllowedIPs = %s/32\n",
+		base64.StdEncoding.EncodeToString(clientPrivateBytes), clientIP,
+		base64.StdEncoding.EncodeToString(headerProtectionKey),
+		base64.StdEncoding.EncodeToString(serverPublicBytes), serverPort, serverIP,
 	)
-	if err := clientDevice.IpcSet(clientConfig); err != nil {
-		t.Fatalf("configure client with HeaderProtectionKey: %v", err)
+	clientConfig, err := parseAwgWarpConfig(clientConfigText)
+	if err != nil {
+		t.Fatalf("parse client AWG config: %v", err)
+	}
+	if err := clientDevice.IpcSet(clientConfig.uapiConfig()); err != nil {
+		t.Fatalf("configure client from parsed AWG config: %v", err)
 	}
 	if err := clientDevice.Up(); err != nil {
 		t.Fatalf("start client device: %v", err)
