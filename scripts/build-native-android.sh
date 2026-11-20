@@ -6,6 +6,8 @@ GO_BIN="$(command -v go || true)"
 die(){ printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ -n "${TERMUX_VERSION:-}" || "${PREFIX:-}" == *"/com.termux/files/usr" ]] || die "Run from Termux."
 [[ "$(uname -m)" == aarch64 ]] || die "Termux native build requires ARM64."
+BASH_BIN="$(command -v bash || true)"
+[[ -n "$BASH_BIN" && -x "$BASH_BIN" ]] || die "Termux Bash is required to invoke NDK compiler wrappers."
 [[ "$API_LEVEL" =~ ^[0-9]+$ ]] && (( API_LEVEL >= 26 && API_LEVEL <= 35 )) || die "ANDROID_API_LEVEL must be 26..35."
 [[ -n "$GO_BIN" ]] || die "Go 1.25.0+ is required."
 GO_VERSION="$("$GO_BIN" env GOVERSION)"; GO_VERSION="${GO_VERSION#go}"
@@ -32,7 +34,10 @@ for abi in armeabi-v7a arm64-v8a; do
   printf '\n==> Go Android build: %s\n' "$abi"
   (
     cd "$ROOT/native/tgwsproxy"
-    export GOOS=android GOARCH="$arch" CGO_ENABLED=1 CC="$compiler"
+    export GOOS=android GOARCH="$arch" CGO_ENABLED=1
+    # Go/cgo starts CC with execve; run NDK shell wrappers through Termux Bash
+    # so Linux-host shebangs such as /usr/bin/env are not required.
+    export CC="$BASH_BIN $compiler"
     if [[ "$abi" == armeabi-v7a ]]; then export GOARM=7; else unset GOARM || true; fi
     "$GO_BIN" build -buildmode=c-shared -trimpath -o "$out" .
   )
