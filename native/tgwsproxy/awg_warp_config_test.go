@@ -143,3 +143,137 @@ func TestAwgWarpUAPIConfigOrdersDeviceOptionsBeforePeer(t *testing.T) {
 		t.Fatal("UAPI config is missing AllowedIPs")
 	}
 }
+
+func TestParseAwgWarpConfigSupportsAWG31OptionsAndNormalizesHeaderProtectionKey(t *testing.T) {
+	configText := strings.NewReplacer(
+		"S1 = 10", "S1 = 12",
+		"S2 = 20", "S2 = 12",
+		"S3 = 30", "S3 = 12",
+		"S4 = 40", "S4 = 12",
+	).Replace(awgWarpTestConfig)
+	options := "HeaderProtectionKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\n" +
+		"ContentPaddingAddition = 27-97\n" +
+		"RekeyAfterTime = 116-131\n" +
+		"RekeyTimeout = 6-9\n" +
+		"RejectAfterTime = 171-196\n" +
+		"KeepaliveTimeout = 9-16\n" +
+		"MaxHandshakeAttempts = 18-26\n" +
+		"RandomTrailers = on\n" +
+		"DisableCookies = 0\n"
+	configText = strings.Replace(configText, "I1 = <r 10>\n", "I1 = <r 10>\n"+options, 1)
+
+	cfg, err := parseAwgWarpConfig(configText)
+	if err != nil {
+		t.Fatalf("parse AWG 3.1 config: %v", err)
+	}
+	uapi := cfg.uapiConfig()
+	for _, expected := range []string{
+		"header_protection_key=" + strings.Repeat("02", 32) + "\n",
+		"content_padding_addition=27-97\n",
+		"rekey_after_time=116-131\n",
+		"rekey_timeout=6-9\n",
+		"reject_after_time=171-196\n",
+		"keepalive_timeout=9-16\n",
+		"max_handshake_attempts=18-26\n",
+		"random_trailers=true\n",
+		"disable_cookies=false\n",
+	} {
+		if !strings.Contains(uapi, expected) {
+			t.Errorf("UAPI config missing %q", expected)
+		}
+	}
+	if strings.Contains(uapi, "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=") {
+		t.Fatal("UAPI config retained the Base64 HeaderProtectionKey instead of converting it to hex")
+	}
+}
+
+func TestParseAwgWarpConfigRejectsHeaderProtectionKeyWithoutValidPadding(t *testing.T) {
+	validConfig := strings.NewReplacer(
+		"S1 = 10", "S1 = 12",
+		"S2 = 20", "S2 = 12",
+		"S3 = 30", "S3 = 12",
+		"S4 = 40", "S4 = 12",
+	).Replace(awgWarpTestConfig)
+	validConfig = strings.Replace(
+		validConfig,
+		"I1 = <r 10>\n",
+		"I1 = <r 10>\nHeaderProtectionKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\n",
+		1,
+	)
+
+	for _, key := range []string{"S1", "S2", "S3", "S4"} {
+		t.Run(key+" below nonce size", func(t *testing.T) {
+			configText := strings.Replace(validConfig, key+" = 12", key+" = 11", 1)
+			if _, err := parseAwgWarpConfig(configText); err == nil ||
+				!strings.Contains(err.Error(), "requires S1, S2, S3 and S4") {
+				t.Fatalf("expected %s minimum padding error, got %v", key, err)
+			}
+		})
+	}
+
+	t.Run("missing padding option", func(t *testing.T) {
+		configText := strings.Replace(validConfig, "S4 = 12\n", "", 1)
+		if _, err := parseAwgWarpConfig(configText); err == nil {
+			t.Fatal("expected missing S4 padding to be rejected")
+		}
+	})
+}
+
+func TestParseAwgWarpConfigRejectsInvalidAWG31Options(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "reversed range", key: "contentpaddingaddition", value: "9-3"},
+		{name: "extra range separator", key: "rekeytimeout", value: "1-2-3"},
+		{name: "negative range", key: "rejectaftertime", value: "-1"},
+		{name: "overflow range", key: "keepalivetimeout", value: "4294967296"},
+		{name: "invalid boolean", key: "randomtrailers", value: "maybe"},
+		{name: "invalid header key", key: "headerprotectionkey", value: "not-a-key"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			uapiKey, ok := awgWarpDeviceOptionKey(test.key)
+			if !ok {
+				t.Fatalf("missing option mapping for %s", test.key)
+			}
+			value := test.value
+			if test.key == "headerprotectionkey" {
+				_, err := decodeAwgWarpHeaderProtectionKey(value)
+				if err == nil {
+					t.Fatal("expected invalid HeaderProtectionKey to be rejected")
+				}
+				return
+			}
+			if test.key == "randomtrailers" {
+				if err := validateAwgWarpDeviceOption(uapiKey, value); err == nil {
+					t.Fatal("expected invalid boolean to be rejected")
+				}
+				return
+			}
+			if err := validateAwgWarpDeviceOption(uapiKey, value); err == nil {
+				t.Fatalf("expected invalid value to be rejected: %s=%s", test.key, value)
+			}
+		})
+	}
+}
+
+func TestDecodeAwgWarpHeaderProtectionKeyAcceptsBase64AndHex(t *testing.T) {
+	base64Key := "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
+	want := strings.Repeat("02", 32)
+	for name, value := range map[string]string{
+		"Base64 config key": base64Key,
+		"hex UAPI key":      want,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := decodeAwgWarpHeaderProtectionKey(value)
+			if err != nil {
+				t.Fatalf("decode HeaderProtectionKey: %v", err)
+			}
+			if got != want {
+				t.Fatalf("decoded key = %q, want %q", got, want)
+			}
+		})
+	}
+}

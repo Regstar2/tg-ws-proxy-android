@@ -301,6 +301,11 @@ object AwgWarpConfigParser {
         "s1", "s2", "s3", "s4",
         "h1", "h2", "h3", "h4",
         "i1", "i2", "i3", "i4", "i5",
+        "headerprotectionkey",
+        "contentpaddingaddition",
+        "rekeyaftertime", "rekeytimeout", "rejectaftertime",
+        "keepalivetimeout", "maxhandshakeattempts",
+        "randomtrailers", "disablecookies",
     )
 
     fun parse(text: String): Result<AwgWarpConfigDetails> = runCatching {
@@ -350,7 +355,10 @@ object AwgWarpConfigParser {
                         require(mtu in 576..65535) { "Invalid MTU" }
                     }
                     "dns", "table" -> Unit
-                    in interfaceOptions -> options[keyCanonical(normalized)] = value
+                    in interfaceOptions -> {
+                        val canonical = keyCanonical(normalized)
+                        require(options.put(canonical, value) == null) { "Duplicate $canonical" }
+                    }
                     else -> error("Unsupported Interface field")
                 }
                 "peer" -> when (normalized) {
@@ -377,9 +385,7 @@ object AwgWarpConfigParser {
         val peerEndpoint = requireNotNull(endpoint) { "Missing Peer.Endpoint" }
         require(peerEndpoint.isNotBlank()) { "Missing Peer.Endpoint" }
         require(allowedIps.isNotEmpty()) { "Missing Peer.AllowedIPs" }
-        val jmin = options["Jmin"]?.toLongOrNull()
-        val jmax = options["Jmax"]?.toLongOrNull()
-        if (jmin != null && jmax != null) require(jmin <= jmax) { "Jmin exceeds Jmax" }
+        validateDeviceOptions(options)
 
         AwgWarpConfigDetails(
             privateKey = private,
@@ -400,8 +406,90 @@ object AwgWarpConfigParser {
         require(decoded?.size == 32) { "Invalid WireGuard key" }
     }
 
-    private fun keyCanonical(normalized: String): String = when {
-        normalized.startsWith("jc") -> if (normalized == "jc") "Jc" else normalized.replaceFirstChar(Char::uppercase)
+    private fun validateDeviceOptions(options: Map<String, String>) {
+        listOf("Jc", "Jmin", "Jmax").forEach { key ->
+            options[key]?.let { parseUnsigned32Range(key, it, allowRange = false) }
+        }
+        listOf(
+            "H1", "H2", "H3", "H4",
+            "ContentPaddingAddition",
+            "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime",
+            "KeepaliveTimeout", "MaxHandshakeAttempts",
+        ).forEach { key ->
+            options[key]?.let { parseUnsigned32Range(key, it, allowRange = true) }
+        }
+        listOf("S1", "S2", "S3", "S4").forEach { key ->
+            options[key]?.let { value ->
+                val parsed = value.toLongOrNull()
+                require(parsed != null && parsed in 0..65535) { "$key must be an unsigned 16-bit integer" }
+            }
+        }
+        listOf("RandomTrailers", "DisableCookies").forEach { key ->
+            options[key]?.let { value ->
+                require(value.lowercase() in setOf("on", "off", "true", "false", "1", "0")) {
+                    "$key must be on/off, true/false or 1/0"
+                }
+            }
+        }
+        options["HeaderProtectionKey"]?.let(::validateHeaderProtectionKey)
+
+        if ("HeaderProtectionKey" in options) {
+            listOf("S1", "S2", "S3", "S4").forEach { key ->
+                val padding = options[key]?.toLongOrNull()
+                require(padding != null && padding >= 12) {
+                    "HeaderProtectionKey requires S1, S2, S3 and S4 to be at least 12"
+                }
+            }
+        }
+
+        val jmin = options["Jmin"]?.toLongOrNull()
+        val jmax = options["Jmax"]?.toLongOrNull()
+        if (jmin != null && jmax != null) require(jmin <= jmax) { "Jmin exceeds Jmax" }
+    }
+
+    private fun parseUnsigned32Range(key: String, value: String, allowRange: Boolean): Pair<Long, Long> {
+        val parts = value.split('-')
+        require(parts.size == 1 || (allowRange && parts.size == 2)) {
+            "$key must be an unsigned 32-bit integer${if (allowRange) " or range" else ""}"
+        }
+        require(parts.all { it.matches(Regex("[0-9]+")) }) {
+            "$key must contain only unsigned decimal digits"
+        }
+        val low = parts[0].toLongOrNull()
+        require(low != null && low in 0..4_294_967_295L) { "$key has an invalid lower bound" }
+        val high = if (parts.size == 2) parts[1].toLongOrNull() else low
+        require(high != null && high in 0..4_294_967_295L) { "$key has an invalid upper bound" }
+        require(high >= low) { "$key range upper bound is below lower bound" }
+        return low to high
+    }
+
+    private fun validateHeaderProtectionKey(value: String) {
+        val trimmed = value.trim()
+        val decoded = if (trimmed.matches(Regex("(?i)[0-9a-f]{64}"))) {
+            ByteArray(32) { index ->
+                trimmed.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+            }
+        } else {
+            runCatching { Base64.getDecoder().decode(trimmed) }.getOrNull()
+        }
+        require(decoded != null && decoded.size == 32 && decoded.any { it.toInt() != 0 }) {
+            "Invalid HeaderProtectionKey: expected a non-zero 32-byte Base64 or hex key"
+        }
+    }
+
+    private fun keyCanonical(normalized: String): String = when (normalized) {
+        "jc" -> "Jc"
+        "jmin" -> "Jmin"
+        "jmax" -> "Jmax"
+        "headerprotectionkey" -> "HeaderProtectionKey"
+        "contentpaddingaddition" -> "ContentPaddingAddition"
+        "rekeyaftertime" -> "RekeyAfterTime"
+        "rekeytimeout" -> "RekeyTimeout"
+        "rejectaftertime" -> "RejectAfterTime"
+        "keepalivetimeout" -> "KeepaliveTimeout"
+        "maxhandshakeattempts" -> "MaxHandshakeAttempts"
+        "randomtrailers" -> "RandomTrailers"
+        "disablecookies" -> "DisableCookies"
         else -> normalized.replaceFirstChar(Char::uppercase)
     }
 
