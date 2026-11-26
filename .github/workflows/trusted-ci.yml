@@ -43,6 +43,10 @@ jobs:
         run: go test -race ./...
       - name: Deployed Worker handler tests
         run: node --test scripts/cloudflare-worker/*.test.mjs
+      - name: Verify generated Dashboard Worker
+        run: node scripts/cloudflare-worker/build-dashboard-worker.mjs --check
+      - name: Wrangler deployment and local Durable Object integration
+        run: bash scripts/cloudflare-worker/test-local-deployment.sh
 
   ci:
     name: Windows CI

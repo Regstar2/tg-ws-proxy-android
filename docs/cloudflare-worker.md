@@ -14,7 +14,7 @@ handshake допускается ограниченная резервная п�
 
 Этот Worker передаёт **Telegram MTProto traffic**. По умолчанию используется HTTPS Chunk Relay + Durable Objects (проверенный baseline v1.10.14+). Начиная с поддержки #101 доступен также оригинальный Flowseal Legacy WebSocket `/apiws`. Его домен добавляется в одиночный Worker или Worker Pool приложения и может участвовать в route policy.
 
-Для **Chunk Relay** используйте `scripts/cloudflare-worker/warp-bootstrap-worker.js` вместе с `scripts/cloudflare-worker/chunk-relay-status-worker.js` и `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc`.
+Для **Chunk Relay** используйте полный каталог [`scripts/cloudflare-worker/`](../scripts/cloudflare-worker/) и конфигурацию Wrangler. Для ручного обновления через Dashboard доступен [готовый единый файл `dashboard-worker.js`](../scripts/cloudflare-worker/dashboard-worker.js). В обоих случаях требуется Durable Object binding `CHUNK_RELAY`. См. [развёртывание Telegram Worker](#развёртывание-telegram-worker-chunk-relay).
 
 Для **Legacy WebSocket** используйте оригинальную инструкцию [Flowseal CF Worker](https://github.com/Flowseal/tg-ws-proxy/blob/main/docs/RU/CfWorker.md). Этот Worker принимает WebSocket на `/apiws?dst=<telegram-ip>`, устанавливает TCP-соединение на Telegram `:443` и пересылает бинарные WebSocket messages в обе стороны. Durable Objects ему не нужны.
 
@@ -124,8 +124,11 @@ Worker обращается только к фиксированному upstrea
 
 - `scripts/cloudflare-worker/warp-bootstrap-worker.js` — комбинированный Worker entry point для Wrangler: WARP provisioning bootstrap + передача остального трафика в chunk-relay Worker;
 - `scripts/cloudflare-worker/warp-bootstrap-standalone-worker.js` — standalone provisioning-only Worker без imports, Durable Objects и bindings; его можно целиком вставить через Cloudflare Dashboard;
-- `scripts/cloudflare-worker/chunk-relay-status-worker.js` — существующая реализация MTProto chunk relay;
-- `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурацию Worker/Durable Object для chunk relay.
+- `scripts/cloudflare-worker/chunk-relay-status-worker.js` — обёртка классификации ошибок Chunk Relay;
+- `scripts/cloudflare-worker/chunk-relay-worker.js` — реализация Chunk Relay и общего Durable Object hub;
+- `scripts/cloudflare-worker/worker.js` — Legacy WebSocket и его диагностика;
+- `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc` — конфигурация Worker и Durable Object;
+- `scripts/cloudflare-worker/dashboard-worker.js` — собранный вариант всех пяти JS-модулей для Dashboard.
 
 Оригинальный Flowseal Worker используйте только при явном выборе **Flowseal Legacy WebSocket**. Он не является заменой Chunk Relay с Durable Objects и не пройдёт проверку протокола Chunk Relay.
 
@@ -254,21 +257,36 @@ Android-клиент считает endpoint совместимым только
 
 ## Развёртывание Telegram Worker (chunk relay)
 
-Требуется Cloudflare Workers с поддержкой Durable Objects и установленный Wrangler.
+Нужен Cloudflare Worker с поддержкой Durable Objects. Для первого развёртывания рекомендуем Wrangler: он публикует код, регистрирует класс с SQLite-хранилищем и создаёт binding за один deploy. Установка только JavaScript-кода не создаёт namespace автоматически.
 
-Из корня репозитория:
+### Вариант 1. Wrangler
+
+Скачайте архив всего репозитория или клонируйте его. В каталоге `scripts/cloudflare-worker/` должны находиться:
+
+| Файл | Назначение |
+| --- | --- |
+| `warp-bootstrap-worker.js` | Точка входа комбинированного Worker |
+| `warp-bootstrap-standalone-worker.js` | WARP provisioning |
+| `chunk-relay-status-worker.js` | Классификация ошибок Chunk Relay |
+| `chunk-relay-worker.js` | HTTP relay и Durable Object hub |
+| `worker.js` | Legacy WebSocket |
+| `wrangler.chunk-relay.jsonc` | Конфигурация deploy, класс и binding |
+
+Wrangler сам собирает локальные импорты; отдельно публиковать пять Worker не нужно. Нужен Node.js с npm. Из корня репозитория:
 
 ```powershell
 npx wrangler@latest login
 npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc
 ```
 
-Перед публикацией проверьте `scripts/cloudflare-worker/wrangler.chunk-relay.jsonc`:
+Полная конфигурация [`wrangler.chunk-relay.jsonc`](../scripts/cloudflare-worker/wrangler.chunk-relay.jsonc):
 
 ```jsonc
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tgproxy",
   "main": "warp-bootstrap-worker.js",
+  "compatibility_date": "2026-09-12",
   "durable_objects": {
     "bindings": [
       {
@@ -276,9 +294,70 @@ npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-rel
         "class_name": "ChunkRelaySession"
       }
     ]
+  },
+  "exports": {
+    "ChunkRelaySession": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
   }
 }
 ```
+
+Имя `tgproxy` можно заменить на имя вашего Worker или передать `--name <имя>`. Для существующего Worker сохраняйте его имя, binding и класс `ChunkRelaySession`. Не добавляйте `migrations` одновременно с `exports`; для прежних конфигураций с migrations см. [официальную инструкцию Cloudflare](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/).
+
+### Вариант 2. Dashboard (единый файл)
+
+1. Откройте **Workers & Pages**, выберите существующий Worker или создайте новый с шаблоном Hello World. Запомните его имя.
+2. Скачайте [`dashboard-worker.js`](../scripts/cloudflare-worker/dashboard-worker.js) из той же версии репозитория. Это единый ES module: пять исходников уже собраны, остаются только встроенные импорты `cloudflare:sockets` и `cloudflare:workers`.
+3. Откройте **Edit code**. Замените содержимое главного JS-модуля целиком. Не копируйте отдельно `worker.js` или `warp-bootstrap-standalone-worker.js`: они не содержат весь Chunk Relay.
+4. В настройках Worker проверьте compatibility date: используйте `2026-09-12` (как в конфигурации Wrangler) или дату новее. Сохраните изменения.
+5. В **Bindings** (или **Settings → Bindings**, в зависимости от версии интерфейса) добавьте **Durable Object**. Имя переменной — `CHUNK_RELAY`, Worker — тот же Worker, класс — `ChunkRelaySession`, хранилище для нового namespace — SQLite. Если соответствующий класс уже зарегистрирован, выберите его; не привязывайте чужой namespace.
+6. Если Dashboard не предлагает зарегистрировать новый класс с SQLite либо не показывает `ChunkRelaySession`, выполните первичную публикацию из корня репозитория через Wrangler:
+
+   ```powershell
+   npx wrangler@latest login
+   npx wrangler@latest deploy --config scripts/cloudflare-worker/wrangler.chunk-relay.jsonc --name <имя-вашего-worker>
+   ```
+
+   Это создаст класс и binding для выбранного Worker. Не удаляйте существующий namespace ради повторного deploy. После этого последующие обновления кода можно делать через Dashboard, сохраняя binding.
+7. Нажмите **Deploy** и убедитесь, что в настройках активного deployment указан `CHUNK_RELAY → ChunkRelaySession`. Успешная публикация JS сама по себе не подтверждает наличие DO.
+
+См. [Durable Object class exports](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/) и [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/).
+
+### Проверка binding после deploy
+
+В PowerShell подставьте базовый HTTPS URL Worker:
+
+```powershell
+$Worker = "https://tgproxy.<account>.workers.dev"
+$Sid = "diag_" + [guid]::NewGuid().ToString("N")
+curl.exe -i "$Worker/chunk-relay/close?sid=$Sid"
+```
+
+Ожидается HTTP 204 и заголовки `X-Tgws-Chunk-Relay-Revision: chunk-relay-mtproto-v10`, `X-Tgws-Relay-Hub-Revision: relay-hub-v1`. Запрос с новым sid проходит через Durable Object, но не открывает TCP-соединение с Telegram.
+
+| Результат | Что проверить |
+| --- | --- |
+| HTTP 503, `X-Tgws-Relay-Error: missing_chunk_relay_binding` | Отсутствует или неверно настроен binding `CHUNK_RELAY`; проверьте класс и redeploy |
+| HTTP 503, `X-Tgws-Worker-State: do-quota-exhausted` | Квота Durable Objects исчерпана |
+| HTTP 404/426 или отсутствуют revision headers | Опубликован не тот Worker или устаревший код |
+| HTTP 502, `transient_worker_error` | Смотрите Worker Logs/Observability и проверяйте конфигурацию Durable Object |
+
+Для автоматической проверки опубликованного Worker без MTProto-трафика:
+
+```powershell
+node scripts/cloudflare-worker/smoke-deployment.mjs "$Worker"
+```
+
+Для разработки: после изменения любого исходного JS-модуля пересоберите единый файл:
+
+```powershell
+node scripts/cloudflare-worker/build-dashboard-worker.mjs
+node scripts/cloudflare-worker/build-dashboard-worker.mjs --check
+```
+
+CI также проверяет сборку Wrangler и маршрутизацию в локальном Workers runtime. На Linux тест можно запустить командой `bash scripts/cloudflare-worker/test-local-deployment.sh`. Он проверяет обычную и собранную версии, а также отсутствие binding, не обращаясь к Telegram или WARP API.
 
 После deploy добавьте выданный Cloudflare Worker-домен в обычный **Telegram Worker Pool** TgWsProxy и используйте его как маршрут `cf_worker_ws`.
 

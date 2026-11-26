@@ -79,8 +79,11 @@ internal class ChunkRelayWorkerProbe(
             response.revision == REVISION && response.hubRevision == HUB_REVISION
         val failure = when {
             incompatibleStatus -> "incompatible_protocol"
-            response.status >= 500 ->
-                if (response.workerState == "do-quota-exhausted") "do_quota_exhausted" else "worker_server_error"
+            response.status >= 500 -> when (response.workerState) {
+                "do-quota-exhausted" -> "do_quota_exhausted"
+                "missing-chunk-relay-binding" -> "missing_chunk_relay_binding"
+                else -> "worker_server_error"
+            }
             response.revision.isNullOrBlank() || response.hubRevision.isNullOrBlank() -> "incompatible_protocol"
             !compatible -> "revision_mismatch"
             response.status == 409 -> "sequence_conflict"

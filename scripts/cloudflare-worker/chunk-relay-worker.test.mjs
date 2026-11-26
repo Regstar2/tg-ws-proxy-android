@@ -318,3 +318,21 @@ test("top-level worker does not hide unrelated Durable Object exceptions", async
     /unexpected durable object failure/,
   );
 });
+
+test("missing or invalid Durable Object binding reports configuration error", async () => {
+  for (const env of [undefined, {}, { CHUNK_RELAY: {} }]) {
+    const response = await mod.default.fetch(relayRequest("close", "session_missing_binding"), env, {});
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("X-Tgws-Worker-State"), "missing-chunk-relay-binding");
+    assert.equal(response.headers.get("X-Tgws-Relay-Error"), "missing_chunk_relay_binding");
+    assert.equal(response.headers.get("X-Tgws-Chunk-Relay-Revision"), "chunk-relay-mtproto-v10");
+    assert.equal(response.headers.get("X-Tgws-Relay-Hub-Revision"), "relay-hub-v1");
+    assert.match(await response.text(), /CHUNK_RELAY.*ChunkRelaySession/);
+  }
+});
+
+test("missing relay binding does not disable legacy fallback", async () => {
+  const response = await mod.default.fetch(new Request("https://example.workers.dev/apiws"), {}, {});
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "base");
+});
