@@ -673,6 +673,19 @@ export default {
     if (url.pathname.startsWith("/chunk-relay/")) {
       const sid = (url.searchParams.get("sid") || "").trim();
       if (!validSessionId(sid)) return new Response("invalid sid", { status: 400, headers: headers() });
+      if (typeof env?.CHUNK_RELAY?.getByName !== "function") {
+        console.log("chunk relay Durable Object binding missing", {
+          revision: REVISION,
+          binding: "CHUNK_RELAY",
+        });
+        return new Response("Missing Durable Object binding CHUNK_RELAY (class ChunkRelaySession)", {
+          status: 503,
+          headers: headers({
+            [WORKER_STATE_HEADER]: "missing-chunk-relay-binding",
+            "X-Tgws-Relay-Error": "missing_chunk_relay_binding",
+          }),
+        });
+      }
       try {
         return await env.CHUNK_RELAY.getByName(RELAY_HUB_NAME).fetch(request);
       } catch (error) {
@@ -686,6 +699,6 @@ export default {
         throw error;
       }
     }
-    return baseWorker.fetch(request, env, ctx);
+    return baseWorker.fetch(request, env);
   },
 };

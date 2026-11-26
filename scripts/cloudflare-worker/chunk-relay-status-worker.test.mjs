@@ -51,3 +51,19 @@ test("patched relay session classifies target mismatch as 409", async () => {
   assert.equal(response.status, 409);
   assert.equal(response.headers.get("X-Tgws-Relay-Error"), "target_mismatch");
 });
+
+test("status wrapper preserves the missing-binding diagnostic", async (t) => {
+  const old = globalThis.__statusAwareFetch;
+  globalThis.__statusAwareFetch = async () => new Response("Missing CHUNK_RELAY", {
+    status: 503,
+    headers: {
+      "X-Tgws-Worker-State": "missing-chunk-relay-binding",
+      "X-Tgws-Relay-Error": "missing_chunk_relay_binding",
+    },
+  });
+  t.after(() => { globalThis.__statusAwareFetch = old; });
+  const response = await mod.default.fetch(new Request("https://example.workers.dev/chunk-relay/close?sid=session_123"), {}, {});
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("X-Tgws-Worker-State"), "missing-chunk-relay-binding");
+  assert.equal(response.headers.get("X-Tgws-Relay-Error"), "missing_chunk_relay_binding");
+});

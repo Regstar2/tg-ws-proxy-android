@@ -115,6 +115,18 @@ class ChunkRelayWorkerProbeTest {
     }
 
     @Test
+    fun missingDurableObjectBindingIsClassified() {
+        val probe = ChunkRelayWorkerProbe(
+            http = ChunkRelayProbeHttp { _, _, _, _ -> response(503, state = "missing-chunk-relay-binding") },
+        )
+        val result = probe.check("example.workers.dev", "149.154.167.51")
+        assertTrue(result.compatible)
+        assertFalse(result.available)
+        assertEquals(503, result.httpStatus)
+        assertEquals("missing_chunk_relay_binding", result.errorCode)
+    }
+
+    @Test
     fun uploadFailureStillClosesOpenedSession() {
         val calls = mutableListOf<String>()
         val probe = ChunkRelayWorkerProbe(
